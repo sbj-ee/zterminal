@@ -1,0 +1,13 @@
+# build trees
+/build*/
+/out/
+CMakeLists.txt.user
+compile_commands.json
+.cache/
+# local planning scratch (not part of the repo)
+/ref/
+/mockup.py
+/mockup.png
+/screenshot-*.png
+*.swp
+.DS_Store
