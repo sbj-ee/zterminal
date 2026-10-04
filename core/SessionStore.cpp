@@ -36,6 +36,9 @@ std::optional<SessionConfig> readFile(const QString &path)
     s.extraArgs = f.value(QStringLiteral("ssh/extraArgs")).toString();
     s.useStoredPassword = f.value(QStringLiteral("ssh/authFromVault"), false).toBool();
     const SessionConfig d;
+    s.keepaliveInterval = f.value(QStringLiteral("ssh/keepaliveInterval"), d.keepaliveInterval).toInt();
+    s.keepaliveCountMax = f.value(QStringLiteral("ssh/keepaliveCountMax"), d.keepaliveCountMax).toInt();
+    s.autoReconnect = f.value(QStringLiteral("session/autoReconnect"), d.autoReconnect).toBool();
     s.serialDevice = f.value(QStringLiteral("serial/device")).toString();
     s.baudRate = f.value(QStringLiteral("serial/baudRate"), d.baudRate).toInt();
     s.dataBits = f.value(QStringLiteral("serial/dataBits"), d.dataBits).toInt();
@@ -149,6 +152,11 @@ bool SessionStore::save(const SessionConfig &s, QString *error) const
             f.setValue(QStringLiteral("ssh/extraArgs"), s.extraArgs);
             // Only a flag: the password itself is in the encrypted vault.
             f.setValue(QStringLiteral("ssh/authFromVault"), s.useStoredPassword);
+            f.setValue(QStringLiteral("ssh/keepaliveInterval"), s.keepaliveInterval);
+            f.setValue(QStringLiteral("ssh/keepaliveCountMax"), s.keepaliveCountMax);
+        }
+        if (s.autoReconnect) {
+            f.setValue(QStringLiteral("session/autoReconnect"), true);
         }
         if (s.type == SessionConfig::Type::Serial) {
             f.setValue(QStringLiteral("serial/device"), s.serialDevice);

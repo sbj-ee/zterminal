@@ -40,8 +40,8 @@ jobs:
           # The serial tests need socat: they must run, not skip.
           ctest --test-dir build -R 'tst_serial' -V | tee serial.log | grep -E 'PASS|SKIP|FAIL|Totals'
           ! grep -q 'SKIP ' serial.log
-          # Vault, askpass, logging, tabs and Find/scrollback suites (Send Stored Login also needs socat): must run, not skip.
-          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui|tst_pasteguard|tst_safepaste|tst_tabs|tst_scrollback|tst_find|tst_scrollbench' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF|BENCH'
+          # Vault, askpass, logging, tabs, Find/scrollback and reconnect suites (Send Stored Login also needs socat): must run, not skip.
+          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui|tst_pasteguard|tst_safepaste|tst_tabs|tst_scrollback|tst_find|tst_scrollbench|tst_reconnect' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF|BENCH'
           ! grep -q 'SKIP ' vault.log
 
       - name: Package .deb

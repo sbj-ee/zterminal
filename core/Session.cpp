@@ -67,6 +67,8 @@ bool SessionConfig::operator==(const SessionConfig &o) const
         && localEcho == o.localEcho && enterSends == o.enterSends && charDelayMs == o.charDelayMs
         && lineDelayMs == o.lineDelayMs && breakMs == o.breakMs
         && useStoredPassword == o.useStoredPassword && loginUser == o.loginUser && autoLog == o.autoLog
+        && keepaliveInterval == o.keepaliveInterval && keepaliveCountMax == o.keepaliveCountMax
+        && autoReconnect == o.autoReconnect
         && fontFamily == o.fontFamily && fontSize == o.fontSize && colorScheme == o.colorScheme;
 }
 
@@ -216,6 +218,12 @@ SshCommand buildSshCommand(const SessionConfig &s)
     if (s.port < 1 || s.port > 65535) {
         return fail(QStringLiteral("Port must be between 1 and 65535."));
     }
+    if (s.keepaliveInterval < 0 || s.keepaliveInterval > 3600) {
+        return fail(QStringLiteral("Keepalive interval must be between 0 (off) and 3600 seconds."));
+    }
+    if (s.keepaliveInterval > 0 && (s.keepaliveCountMax < 1 || s.keepaliveCountMax > 100)) {
+        return fail(QStringLiteral("Keepalive count must be between 1 and 100."));
+    }
     if (hasControlChars(s.keyFile) || hasControlChars(s.extraArgs)) {
         return fail(QStringLiteral("Key file and extra arguments must not contain control characters."));
     }
@@ -253,6 +261,10 @@ SshCommand buildSshCommand(const SessionConfig &s)
         }
     }
     c.args << extra;
+    if (s.keepaliveInterval > 0) {
+        c.args << QStringLiteral("-o") << QStringLiteral("ServerAliveInterval=%1").arg(s.keepaliveInterval)
+               << QStringLiteral("-o") << QStringLiteral("ServerAliveCountMax=%1").arg(s.keepaliveCountMax);
+    }
     if (s.port != 22) {
         c.args << QStringLiteral("-p") << QString::number(s.port);
     }
@@ -305,6 +317,21 @@ std::optional<SessionConfig> sessionFromSshArgs(const QStringList &args, QString
                 case 'J':
                     s.jumpHost = v;
                     break;
+                case 'o': {
+                    // Keepalive options map to the session's fields.
+                    const QString opt = v.section(QLatin1Char('='), 0, 0).trimmed();
+                    const QString val = v.section(QLatin1Char('='), 1).trimmed();
+                    bool num = false;
+                    const int n = val.toInt(&num);
+                    if (num && opt.compare(QLatin1String("ServerAliveInterval"), Qt::CaseInsensitive) == 0) {
+                        s.keepaliveInterval = n;
+                    } else if (num && opt.compare(QLatin1String("ServerAliveCountMax"), Qt::CaseInsensitive) == 0) {
+                        s.keepaliveCountMax = n;
+                    } else {
+                        extra << a << v;
+                    }
+                    break;
+                }
                 default:
                     extra << a << v;
                 }

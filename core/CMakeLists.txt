@@ -17,6 +17,7 @@ add_library(zterminal_core STATIC
   LogTextFilter.cpp LogTextFilter.hpp
   SessionLog.cpp SessionLog.hpp
   TerminalSearch.cpp TerminalSearch.hpp
+  Reconnect.cpp Reconnect.hpp
   Scrollback.cpp Scrollback.hpp
   PasteGuard.cpp PasteGuard.hpp
 )

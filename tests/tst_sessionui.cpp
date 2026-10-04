@@ -123,7 +123,7 @@ private slots:
         QCOMPARE(child<QSpinBox>(&d, "port")->value(), 2222);
         QVERIFY(child<QWidget>(&d, "sshGroup")->isEnabled());
         QVERIFY(d.config() == *store.load(QStringLiteral("core-sw1")));
-        QCOMPARE(child<QLineEdit>(&d, "commandPreview")->text(), QStringLiteral("ssh -p 2222 -l admin -- 10.0.0.1"));
+        QCOMPARE(child<QLineEdit>(&d, "commandPreview")->text(), QStringLiteral("ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -p 2222 -l admin -- 10.0.0.1"));
 
         // Save under a new name with changes.
         child<QLineEdit>(&d, "name")->setText(QStringLiteral("edge-rtr"));
@@ -174,7 +174,8 @@ private slots:
         const MainWindow::Launch l = w.launchCommand();
         QVERIFY(l.error.isEmpty());
         QCOMPARE(l.program, QStringLiteral("ssh"));
-        QCOMPARE(l.args, (QStringList{QStringLiteral("-p"), QStringLiteral("2222"), QStringLiteral("-l"),
+        QCOMPARE(l.args, (QStringList{QStringLiteral("-o"), QStringLiteral("ServerAliveInterval=30"), QStringLiteral("-o"),
+                                      QStringLiteral("ServerAliveCountMax=3"), QStringLiteral("-p"), QStringLiteral("2222"), QStringLiteral("-l"),
                                       QStringLiteral("admin"), QStringLiteral("--"), QStringLiteral("10.0.0.1")}));
 
         // Duplicate re-opens the saved session by name, in a new tab.
@@ -221,7 +222,7 @@ private slots:
         MainWindow w(parseCommandLine({s.name}), {s.name});
         w.show();
         w.startSession();
-        const QString expected = QStringLiteral("FAKESSH[-o][SetEnv A=$(id)][-p][2222][-l][admin][--][lab.example.net]");
+        const QString expected = QStringLiteral("FAKESSH[-o][SetEnv A=$(id)][-o][ServerAliveInterval=30][-o][ServerAliveCountMax=3][-p][2222][-l][admin][--][lab.example.net]");
         auto screen = [&w]() {
             QString all;
             for (int r = 0; r < w.terminal()->totalLines(); ++r) {
@@ -262,8 +263,12 @@ private slots:
         w.action(QStringLiteral("newSession"))->trigger();
         QCOMPARE(w.tabCount(), 2);
         QCOMPARE(w.currentSession()->originalArgs(),
-                 (QStringList{QStringLiteral("ssh"), QStringLiteral("--"), QStringLiteral("sw9")}));
-        QCOMPARE(w.launchCommand().args, (QStringList{QStringLiteral("--"), QStringLiteral("sw9")}));
+                 (QStringList{QStringLiteral("ssh"), QStringLiteral("-o"), QStringLiteral("ServerAliveInterval=30"),
+                              QStringLiteral("-o"), QStringLiteral("ServerAliveCountMax=3"), QStringLiteral("--"),
+                              QStringLiteral("sw9")}));
+        QCOMPARE(w.launchCommand().args, (QStringList{QStringLiteral("-o"), QStringLiteral("ServerAliveInterval=30"),
+                                                      QStringLiteral("-o"), QStringLiteral("ServerAliveCountMax=3"),
+                                                      QStringLiteral("--"), QStringLiteral("sw9")}));
         QCOMPARE(w.tabs()->tabText(1), QStringLiteral("ssh sw9"));
 
         // Open Saved Session -> pick one -> opens by name in a third tab.

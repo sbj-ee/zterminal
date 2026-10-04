@@ -35,6 +35,11 @@ zterminal_add_test(tst_scrollback zterminal_core)
 zterminal_add_test(tst_find zterminal_ui)
 zterminal_add_test(tst_scrollbench zterminal_ui)
 set_tests_properties(tst_scrollbench PROPERTIES TIMEOUT 300)
+zterminal_add_test(tst_reconnect zterminal_ui)
+add_dependencies(tst_reconnect zterminal-askpass)
+set_tests_properties(tst_reconnect PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_reconnect;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
+  TIMEOUT 180)
 zterminal_add_test(tst_tabs zterminal_ui)
 add_dependencies(tst_tabs zterminal-askpass)
 set_tests_properties(tst_tabs PROPERTIES

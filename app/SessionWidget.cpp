@@ -5,6 +5,7 @@
 #include "AskpassServer.hpp"
 #include "PasteConfirmDialog.hpp"
 #include "PasteGuard.hpp"
+#include "Reconnect.hpp"
 #include "Pty.hpp"
 #include "SecureBuffer.hpp"
 #include "SerialBackend.hpp"
@@ -16,6 +17,7 @@
 #include "ColorScheme.hpp"
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -28,6 +30,10 @@
 #include <algorithm>
 
 namespace zterminal {
+
+namespace {
+int s_stableMsValue = 5000;
+} // namespace
 
 SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &originalArgs,
                              const AppSettings &settings, QWidget *parent)
@@ -59,12 +65,20 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
     m_bannerText->setObjectName(QStringLiteral("bannerText"));
     m_bannerText->setWordWrap(true);
     m_bannerText->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_bannerText->setTextFormat(Qt::RichText);
     auto *reconnect = new QPushButton(QStringLiteral("&Reconnect"));
     reconnect->setObjectName(QStringLiteral("reconnect"));
     reconnect->setFocusPolicy(Qt::NoFocus);
-    connect(reconnect, &QPushButton::clicked, this, [this]() { startSession(); });
+    connect(reconnect, &QPushButton::clicked, this, &SessionWidget::reconnectNow);
+    m_reconnectButton = reconnect;
+    m_cancelReconnectButton = new QPushButton(QStringLiteral("Cancel"));
+    m_cancelReconnectButton->setObjectName(QStringLiteral("cancelReconnect"));
+    m_cancelReconnectButton->setFocusPolicy(Qt::NoFocus);
+    m_cancelReconnectButton->hide();
+    connect(m_cancelReconnectButton, &QPushButton::clicked, this, &SessionWidget::cancelReconnect);
     bannerRow->addWidget(m_bannerText, 1);
     bannerRow->addWidget(reconnect, 0, Qt::AlignTop);
+    bannerRow->addWidget(m_cancelReconnectButton, 0, Qt::AlignTop);
     m_banner->hide();
     m_pasteBar = new QWidget;
     m_pasteBar->setObjectName(QStringLiteral("pasteBar"));
@@ -104,6 +118,25 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
     connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) { logOutput(d, true); });
     connect(m_pty, &Pty::finished, this, &SessionWidget::onSessionFinished);
+    connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) {
+        m_ptyTail += d;
+        if (m_ptyTail.size() > 4096) {
+            m_ptyTail.remove(0, m_ptyTail.size() - 4096);
+        }
+    });
+    m_reconnect = new ReconnectScheduler(this);
+    connect(m_reconnect, &ReconnectScheduler::countdown, this, [this]() { updateDisconnectBanner(); });
+    connect(m_reconnect, &ReconnectScheduler::attemptDue, this, &SessionWidget::onAttemptDue);
+    m_stable = new QTimer(this);
+    m_stable->setSingleShot(true);
+    connect(m_stable, &QTimer::timeout, this, [this]() {
+        if (m_pty->isRunning()) {
+            markReconnected();
+        }
+    });
+    m_deviceWatch = new QTimer(this);
+    m_deviceWatch->setInterval(500);
+    connect(m_deviceWatch, &QTimer::timeout, this, &SessionWidget::checkDeviceBack);
     connect(m_view, &TerminalView::gridSizeChanged, m_pty, &Pty::resize);
     connect(m_view, &TerminalView::gridSizeChanged, this, [this](int, int cols) { m_log->setColumns(cols); });
     m_view->setPasteGuard([this](const QString &t) { return confirmPaste(t); });
@@ -124,6 +157,9 @@ SessionWidget::~SessionWidget()
 
 void SessionWidget::shutdown()
 {
+    m_reconnect->cancel();
+    m_deviceWatch->stop();
+    m_stable->stop();
     m_log->stop();
     m_serial->close();
     m_pty->terminate();
@@ -325,6 +361,9 @@ void SessionWidget::startSession()
             return;
         }
         hideBanner();
+        // Watch the stable by-id name when there is one (ttyUSB0 may come back as ttyUSB1).
+        const QString alias = SerialBackend::byIdAlias(s.serialDevice);
+        m_serialWatchPath = alias.isEmpty() ? s.serialDevice : alias;
         const QString line = QStringLiteral("%1 at %2 %3%4%5%6")
                                  .arg(s.serialDevice)
                                  .arg(s.baudRate)
@@ -335,10 +374,15 @@ void SessionWidget::startSession()
         m_term->feed(QStringLiteral("\x1b[2m[connected to %1]\x1b[0m\r\n")
                          .arg(line)
                          .toUtf8());
+        if (m_disconnected) {
+            markReconnected();
+        }
         return;
     }
     const QSize grid(m_view->gridCols(), m_view->gridRows());
-    const QStringList env = prepareStoredPassword();
+    const QStringList env = prepareStoredPasswordFor(!m_autoAttempt);
+    m_ptyTail.clear();
+    m_userStop = false;
     if (!m_pty->start(l.program, l.args, grid.height(), grid.width(), env)) {
         m_term->feed(QStringLiteral("\x1b[31mzterminal: could not start %1: %2\x1b[0m\r\n")
                          .arg(l.program.isEmpty() ? Pty::defaultShell() : l.program, m_pty->errorString())
@@ -350,9 +394,17 @@ void SessionWidget::startSession()
     if (m_askpass) {
         m_askpass->setAllowedAncestor(m_pty->pid());
     }
+    if (m_disconnected) {
+        m_stable->start(s_stableMsValue);
+    }
 }
 
 QStringList SessionWidget::prepareStoredPassword()
+{
+    return prepareStoredPasswordFor(true);
+}
+
+QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
 {
     delete m_askpass; // a restart gets a fresh one-shot server
     m_askpass = nullptr;
@@ -370,6 +422,13 @@ QStringList SessionWidget::prepareStoredPassword()
     VaultManager &vm = VaultManager::instance();
     if (!vm.exists()) {
         note(QStringLiteral("no password vault yet; ssh will ask for the password"));
+        return {};
+    }
+    // The vault is shared by every tab and window: while it is unlocked this
+    // asks nothing (a reconnect reuses the stored password silently). An
+    // automatic retry never pops up the unlock dialog; ssh asks in the tab.
+    if (!vm.isUnlocked() && !mayPrompt) {
+        note(QStringLiteral("vault locked; ssh will ask for the password (Reconnect asks to unlock)"));
         return {};
     }
     if (!vm.ensureUnlocked(this, QStringLiteral("Session \"%1\" uses a stored password.").arg(m_saved->name.toHtmlEscaped()))) {
@@ -486,6 +545,42 @@ void SessionWidget::finishLogin(bool sendPassword)
 
 void SessionWidget::onSessionFinished(int exitCode, bool crashed)
 {
+    m_stable->stop();
+    const bool userStop = m_userStop;
+    m_userStop = false;
+    if (isSshSession() && !userStop) {
+        const SshExit x = SshExit::classify(exitCode, crashed, m_ptyTail);
+        if (x.isDrop()) {
+            if (!m_disconnected) {
+                markDisconnected(x.reason);
+            } else {
+                m_term->feed(QStringLiteral("\x1b[2m[reconnect attempt %1 failed: %2]\x1b[0m\r\n")
+                                 .arg(std::max(1, m_reconnect->attempt()))
+                                 .arg(x.reason)
+                                 .toUtf8());
+            }
+            if (autoReconnectEnabled()) {
+                m_reconnect->scheduleNext();
+            }
+            updateDisconnectBanner();
+            return;
+        }
+        if (m_disconnected && x.kind == SshExit::Kind::Refused) {
+            // Retrying can't fix this (password changed, host key, ...): stop.
+            m_reconnect->cancel();
+            m_term->feed(QStringLiteral("\x1b[2m[reconnect failed: %1]\x1b[0m\r\n").arg(x.reason).toUtf8());
+            updateDisconnectBanner(QStringLiteral("Reconnect failed: %1").arg(x.reason.toHtmlEscaped()));
+            return;
+        }
+        if (x.kind == SshExit::Kind::Clean) {
+            // exit/logout: never reconnect.
+            m_reconnect->cancel();
+            if (m_disconnected) {
+                m_disconnected = false;
+                hideBanner();
+            }
+        }
+    }
     const QString msg = crashed
         ? QStringLiteral("\r\n\x1b[7m[process terminated (%1). Session > Restart Session (Ctrl+Shift+R) restarts it.]\x1b[0m\r\n")
               .arg(exitCode)
@@ -529,9 +624,177 @@ bool SessionWidget::isSerialSession() const
 
 void SessionWidget::onSerialDisconnected(const QString &reason)
 {
-    m_term->feed(QStringLiteral("\r\n\x1b[41;97m[%1]\x1b[0m\r\n").arg(reason).toUtf8());
-    showBanner(QStringLiteral("Disconnected: %1 Plug it back in and press Reconnect.").arg(reason));
     updatePasteBar(0);
+    markDisconnected(reason);
+    // Reopen by itself as soon as the device node is back.
+    m_deviceWatch->start();
+    updateDisconnectBanner();
+}
+
+bool SessionWidget::isWaitingForDevice() const
+{
+    return m_deviceWatch->isActive();
+}
+
+void SessionWidget::checkDeviceBack()
+{
+    if (m_serial->isOpen()) {
+        m_deviceWatch->stop();
+        return;
+    }
+    if (m_serialWatchPath.isEmpty() || !QFileInfo::exists(m_serialWatchPath)) {
+        return;
+    }
+    const Launch l = launchCommand();
+    if (!l.serial) {
+        m_deviceWatch->stop();
+        return;
+    }
+    SessionConfig cfg = *l.serial;
+    cfg.serialDevice = m_serialWatchPath;
+    // The node can appear a moment before udev makes it accessible: keep trying.
+    if (!m_serial->open(cfg)) {
+        return;
+    }
+    m_deviceWatch->stop();
+    m_term->feed(QStringLiteral("\x1b[2m[connected to %1 again]\x1b[0m\r\n").arg(m_serialWatchPath).toUtf8());
+    markReconnected();
+}
+
+bool SessionWidget::isSshSession() const
+{
+    return m_request.kind == LaunchRequest::Kind::Ssh || (m_saved && m_saved->type == SessionConfig::Type::Ssh);
+}
+
+bool SessionWidget::autoReconnectEnabled() const
+{
+    return m_saved && m_saved->autoReconnect;
+}
+
+void SessionWidget::setReconnectStableMsForTests(int ms)
+{
+    s_stableMsValue = ms;
+}
+
+void SessionWidget::markDisconnected(const QString &reason)
+{
+    m_disconnected = true;
+    m_droppedAt = QDateTime::currentDateTime();
+    m_dropReason = reason;
+    m_log->marker(QStringLiteral("disconnected"), reason);
+    m_term->feed(QStringLiteral("\r\n\x1b[41;97m[disconnected %1: %2]\x1b[0m\r\n")
+                     .arg(m_droppedAt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")), reason)
+                     .toUtf8());
+}
+
+void SessionWidget::markReconnected()
+{
+    m_stable->stop();
+    m_deviceWatch->stop();
+    const int attempt = m_reconnect->attempt();
+    m_reconnect->reset();
+    m_autoAttempt = false;
+    if (!m_disconnected) {
+        return;
+    }
+    m_disconnected = false;
+    ++m_reconnects;
+    const QDateTime now = QDateTime::currentDateTime();
+    m_log->marker(QStringLiteral("reconnected"),
+                  attempt > 0 ? QStringLiteral("attempt %1").arg(attempt) : QString());
+    m_term->feed(QStringLiteral("\x1b[2m[reconnected %1]\x1b[0m\r\n")
+                     .arg(now.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")))
+                     .toUtf8());
+    hideBanner();
+}
+
+void SessionWidget::updateDisconnectBanner(const QString &note)
+{
+    if (!m_disconnected) {
+        return;
+    }
+    QString status;
+    bool cancellable = false;
+    if (!note.isEmpty()) {
+        status = note;
+    } else if (m_reconnect->isWaiting()) {
+        status = QStringLiteral("Reconnecting in %1 s (attempt %2)\u2026")
+                     .arg(m_reconnect->secondsLeft())
+                     .arg(m_reconnect->attempt());
+        cancellable = true;
+    } else if (m_pty->isRunning()) {
+        status = m_reconnect->attempt() > 0
+            ? QStringLiteral("Reconnecting (attempt %1)\u2026").arg(m_reconnect->attempt())
+            : QStringLiteral("Reconnecting\u2026");
+    } else if (isWaitingForDevice()) {
+        status = QStringLiteral("Waiting for %1 to come back; it reopens by itself.").arg(m_serialWatchPath.toHtmlEscaped());
+        cancellable = true;
+    } else {
+        status = QStringLiteral("Press Reconnect to connect again.");
+    }
+    const QString when = m_droppedAt.date() == QDate::currentDate()
+        ? m_droppedAt.toString(QStringLiteral("HH:mm:ss"))
+        : m_droppedAt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    showBanner(QStringLiteral("<b>Disconnected</b> at %1 \u2014 %2<br>%3")
+                   .arg(when, m_dropReason.toHtmlEscaped(), status));
+    m_reconnectButton->setText(cancellable ? QStringLiteral("&Reconnect Now") : QStringLiteral("&Reconnect"));
+    m_reconnectButton->setEnabled(!m_pty->isRunning());
+    m_cancelReconnectButton->setVisible(cancellable);
+}
+
+void SessionWidget::onAttemptDue(int attempt)
+{
+    if (!m_disconnected || m_pty->isRunning() || m_serial->isOpen()) {
+        return;
+    }
+    m_term->feed(QStringLiteral("\x1b[2m[reconnecting, attempt %1\u2026]\x1b[0m\r\n").arg(attempt).toUtf8());
+    // Leave whatever full-screen state the dropped session left behind
+    // (alternate screen, mouse modes, bracketed paste); the scrollback stays.
+    resetModesForReconnect();
+    m_autoAttempt = true;
+    startSession();
+    m_autoAttempt = false;
+    updateDisconnectBanner();
+}
+
+void SessionWidget::resetModesForReconnect()
+{
+    // Only leave the alternate screen if the dropped program was in it:
+    // ?1049l also restores the saved cursor, which would overwrite the screen.
+    if (m_term->altScreen()) {
+        m_term->feed(QByteArrayLiteral("\x1b[?1049l"));
+    }
+    m_term->feed(QByteArrayLiteral("\x1b[0m\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"));
+}
+
+void SessionWidget::reconnectNow()
+{
+    if (m_pty->isRunning()) {
+        return;
+    }
+    m_reconnect->cancel();
+    if (isSerialSession()) {
+        m_deviceWatch->stop();
+        m_serial->close();
+        startSession();
+        if (m_disconnected && !m_serial->isOpen() && !m_serialWatchPath.isEmpty()) {
+            m_deviceWatch->start(); // still gone: keep waiting
+            updateDisconnectBanner();
+        }
+        return;
+    }
+    if (m_disconnected) {
+        resetModesForReconnect();
+    }
+    startSession();
+    updateDisconnectBanner();
+}
+
+void SessionWidget::cancelReconnect()
+{
+    m_reconnect->cancel();
+    m_deviceWatch->stop();
+    updateDisconnectBanner(QStringLiteral("Automatic reconnect cancelled. Press Reconnect to try again."));
 }
 
 void SessionWidget::updatePasteBar(qint64 remaining)
@@ -549,7 +812,9 @@ void SessionWidget::updatePasteBar(qint64 remaining)
 
 void SessionWidget::restartSession()
 {
+    m_reconnect->cancel();
     if (isSerialSession()) {
+        m_deviceWatch->stop();
         // Reconnect: close and reopen the port.
         m_serial->close();
         m_term->feed(QByteArrayLiteral("\r\n"));
@@ -562,6 +827,7 @@ void SessionWidget::restartSession()
         if (ret != QMessageBox::Yes) {
             return;
         }
+        m_userStop = true;
         m_pty->terminate();
     }
     m_term->feed(QByteArrayLiteral("\r\n"));

@@ -98,6 +98,12 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_autoLog->setToolTip(QStringLiteral("Starts Session > Start Logging when the session opens "
                                          "(folder and timestamps: Preferences > Session logs)"));
     typeForm->addRow(m_autoLog);
+    m_autoReconnect = new QCheckBox(QStringLiteral("Reconnect automatically after a drop"));
+    m_autoReconnect->setObjectName(QStringLiteral("autoReconnect"));
+    m_autoReconnect->setToolTip(QStringLiteral(
+        "SSH: when the connection drops (network error), retry after 2, 4, 8 \u2026 up to 60 s, with Cancel. "
+        "Never after a clean exit. Serial ports always reopen when the device comes back."));
+    typeForm->addRow(m_autoReconnect);
     connLayout->addLayout(typeForm);
 
     m_sshBox = new QGroupBox(QStringLiteral("SSH (runs the system ssh)"));
@@ -127,10 +133,29 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     sshForm->addRow(QStringLiteral("Key file:"), keyRow);
     m_jump = lineEdit("jumpHost", QStringLiteral("[user@]host[:port] (ssh -J)"));
     sshForm->addRow(QStringLiteral("Jump host:"), m_jump);
-    m_extra = lineEdit("extraArgs", QStringLiteral("e.g. -o ServerAliveInterval=30 -4"));
+    m_extra = lineEdit("extraArgs", QStringLiteral("e.g. -4 -o Compression=yes"));
     m_extra->setToolTip(QStringLiteral("ssh options only. Split like a command line (use double quotes for spaces); "
                                        "never passed to a shell."));
     sshForm->addRow(QStringLiteral("Extra options:"), m_extra);
+    auto *keepRow = new QHBoxLayout;
+    m_keepInterval = new QSpinBox;
+    m_keepInterval->setObjectName(QStringLiteral("keepaliveInterval"));
+    m_keepInterval->setRange(0, 3600);
+    m_keepInterval->setSuffix(QStringLiteral(" s"));
+    m_keepInterval->setSpecialValueText(QStringLiteral("off"));
+    m_keepInterval->setValue(SessionConfig{}.keepaliveInterval);
+    m_keepInterval->setToolTip(QStringLiteral("ssh -o ServerAliveInterval: send a keepalive after this many idle seconds"));
+    m_keepCount = new QSpinBox;
+    m_keepCount->setObjectName(QStringLiteral("keepaliveCountMax"));
+    m_keepCount->setRange(1, 100);
+    m_keepCount->setPrefix(QStringLiteral("\u00d7 "));
+    m_keepCount->setValue(SessionConfig{}.keepaliveCountMax);
+    m_keepCount->setToolTip(QStringLiteral("ssh -o ServerAliveCountMax: give up (drop) after this many unanswered keepalives"));
+    keepRow->addWidget(m_keepInterval);
+    keepRow->addWidget(m_keepCount);
+    keepRow->addStretch(1);
+    sshForm->addRow(QStringLiteral("Keepalive:"), keepRow);
+    connect(m_keepInterval, &QSpinBox::valueChanged, this, [this](int v) { m_keepCount->setEnabled(v > 0); });
     m_useStored = new QCheckBox(QStringLiteral("Use stored password"));
     m_useStored->setObjectName(QStringLiteral("useStoredPassword"));
     m_useStored->setToolTip(QStringLiteral("Answer ssh's first password prompt from the encrypted vault (via SSH_ASKPASS). "
@@ -315,6 +340,8 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
         connect(e, &QLineEdit::textChanged, this, &SessionDialog::updatePreview);
     }
     connect(m_port, &QSpinBox::valueChanged, this, &SessionDialog::updatePreview);
+    connect(m_keepInterval, &QSpinBox::valueChanged, this, &SessionDialog::updatePreview);
+    connect(m_keepCount, &QSpinBox::valueChanged, this, &SessionDialog::updatePreview);
 
     setConfig(initial);
     refreshList(initial.name);
@@ -381,7 +408,10 @@ SessionConfig SessionDialog::config() const
     c.name = m_name->text().trimmed();
     c.type = SessionConfig::typeFromString(m_type->currentData().toString());
     c.autoLog = m_autoLog->isChecked();
+    c.autoReconnect = m_autoReconnect->isChecked();
     if (c.type == SessionConfig::Type::Ssh) {
+        c.keepaliveInterval = m_keepInterval->value();
+        c.keepaliveCountMax = m_keepCount->value();
         c.host = m_host->text().trimmed();
         c.user = m_user->text().trimmed();
         c.port = m_port->value();
@@ -417,6 +447,10 @@ void SessionDialog::setConfig(const SessionConfig &s)
     m_name->setText(s.name);
     m_type->setCurrentIndex(std::max(0, m_type->findData(SessionConfig::typeToString(s.type))));
     m_autoLog->setChecked(s.autoLog);
+    m_autoReconnect->setChecked(s.autoReconnect);
+    m_keepInterval->setValue(s.keepaliveInterval);
+    m_keepCount->setValue(s.keepaliveCountMax);
+    m_keepCount->setEnabled(s.keepaliveInterval > 0);
     m_host->setText(s.host);
     m_user->setText(s.user);
     m_port->setValue(s.port);

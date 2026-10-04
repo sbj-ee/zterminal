@@ -43,7 +43,8 @@ and milestones.
   data/parity/stop bits, flow control, local echo, CR / CR+LF / LF on Enter, paste pacing
   (ms per character and per line, queued, with Cancel), Session > Send Break (300 ms by
   default), a clear `dialout` explanation on permission errors, and a Reconnect banner
-  when the adapter is unplugged.
+  when the adapter is unplugged (since 0.9.0 the port reopens by itself when the adapter is
+  back, found by its /dev/serial/by-id name).
 - Password vault (0.4.0): optional, encrypted (Argon2id + XChaCha20-Poly1305, libsodium) in
   `~/.config/zterminal/vault.bin`. Per SSH session, "Use stored password" answers ssh's first
   password prompt through an `SSH_ASKPASS` helper; per serial session, Session > Send Stored
@@ -61,6 +62,14 @@ and milestones.
   previous (newer), Esc closes. Options: Match case, Regex, Wrap. All matches are highlighted
   (the current one in orange) with a count like "3 of 120"; 100,000 lines search in about 0.15 s.
   Matches that run across a wrapped line are found and highlighted on both lines.
+
+- Keepalive and reconnect (0.9.0): SSH sessions send keepalives (30 s x 3 by default, per
+  session in the session editor). When a connection drops (ssh network error or an unplugged
+  serial adapter) the tab shows "Disconnected at HH:mm:ss" with the reason and a Reconnect
+  button, keeps its scrollback, and the log continues in the same file with
+  `--- disconnected … ---` / `--- reconnected … ---` markers. Optionally (per session, off by
+  default) it reconnects by itself after 2, 4, 8 … 60 s, with Cancel; a stored password is
+  reused without asking while the vault is unlocked. A clean `exit` never reconnects.
 
 Planned next: update checks (see the plan).
 
