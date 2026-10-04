@@ -16,6 +16,8 @@
 #include <QSignalSpy>
 #include <QTest>
 
+// Settings go to $XDG_CONFIG_HOME (set per test by CMake), never the real ~/.config.
+
 using namespace zterminal;
 
 class TstView : public QObject
@@ -269,6 +271,51 @@ private slots:
         QVERIFY(w.contextMenu()->actions().contains(w.action(QStringLiteral("showMenuBar"))));
         w.action(QStringLiteral("showMenuBar"))->setChecked(true);
         QVERIFY(w.menuBar()->isVisible());
+    }
+
+    void menuBarIsInWindowAndAlwaysVisibleOnStartup()
+    {
+        // A stale 0.1.0 setting that hid the menu bar must not hide it again.
+        {
+            QSettings s;
+            s.setValue(QStringLiteral("view/menuBarVisible"), false);
+        }
+        LaunchRequest req;
+        MainWindow w(req, {});
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        QMenuBar *bar = w.menuBar();
+        QVERIFY(!bar->isNativeMenuBar()); // never exported to a global-menu service
+        QVERIFY(bar->isVisible());
+        QVERIFY(bar->height() > 0);
+        QVERIFY(w.action(QStringLiteral("showMenuBar"))->isChecked());
+
+        QStringList menus;
+        for (QAction *a : bar->actions()) {
+            QVERIFY(a->menu());
+            QVERIFY(a->isVisible());
+            menus << a->text().remove(QLatin1Char('&'));
+        }
+        QCOMPARE(menus, (QStringList{QStringLiteral("File"), QStringLiteral("Edit"), QStringLiteral("View"),
+                                     QStringLiteral("Session"), QStringLiteral("Settings"), QStringLiteral("Help")}));
+
+        // Full screen does not hide it.
+        w.action(QStringLiteral("fullScreen"))->setChecked(true);
+        QVERIFY(bar->isVisible());
+        w.action(QStringLiteral("fullScreen"))->setChecked(false);
+        QVERIFY(bar->isVisible());
+
+        // Hiding is per window and is not persisted: the next window shows it again.
+        w.action(QStringLiteral("showMenuBar"))->setChecked(false);
+        QVERIFY(!bar->isVisible());
+        MainWindow w2(req, {});
+        w2.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w2));
+        QVERIFY(w2.menuBar()->isVisible());
+        QVERIFY(!w2.menuBar()->isNativeMenuBar());
+        // Saving settings drops the obsolete 0.1.0 key.
+        AppSettings::load().save();
+        QVERIFY(!QSettings().contains(QStringLiteral("view/menuBarVisible")));
     }
 
     void mainWindowRunsLocalShell()

@@ -35,6 +35,12 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     m_view = new TerminalView(m_term, this);
     setCentralWidget(m_view);
 
+    // Always draw the menu bar inside the window. Without this, Qt hands the
+    // menus to a global-menu service whenever com.canonical.AppMenu.Registrar
+    // is on the session bus (e.g. the Fildem GNOME extension), hides the
+    // in-window bar, and on GNOME nothing may show the exported menus.
+    menuBar()->setNativeMenuBar(false);
+
     connect(m_term, &Terminal::output, m_pty, &Pty::write);
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
     connect(m_pty, &Pty::finished, this, &MainWindow::onSessionFinished);
@@ -154,11 +160,14 @@ void MainWindow::buildMenus()
     QAction *full = addAct(view, QStringLiteral("fullScreen"), QStringLiteral("&Full Screen"), QKS(Qt::Key_F11));
     full->setCheckable(true);
     connect(full, &QAction::toggled, this, [this](bool on) {
+        // Full screen changes only the window state; the menu bar keeps whatever
+        // visibility the user chose (shown by default).
         on ? showFullScreen() : showNormal();
     });
     QAction *showMenu = addAct(view, QStringLiteral("showMenuBar"), QStringLiteral("Show &Menu Bar"),
                                QKS(QStringLiteral("Ctrl+Shift+M")));
     showMenu->setCheckable(true);
+    showMenu->setChecked(true);
     connect(showMenu, &QAction::toggled, this, &MainWindow::setMenuBarShown);
 
     // Session
@@ -225,10 +234,6 @@ void MainWindow::applySettings()
     for (QAction *a : m_schemeGroup->actions()) {
         a->setChecked(a->data().toString() == m_term->colorScheme().id);
     }
-    if (QAction *a = action(QStringLiteral("showMenuBar"))) {
-        a->setChecked(m_settings.menuBarVisible);
-    }
-    menuBar()->setVisible(m_settings.menuBarVisible);
 }
 
 void MainWindow::updateTitle()
@@ -245,11 +250,9 @@ void MainWindow::setFontSize(int points)
 
 void MainWindow::setMenuBarShown(bool shown)
 {
+    // Hiding lasts for this window only: every new window starts with the menu
+    // bar visible, so a hidden bar can never be "stuck" across runs.
     menuBar()->setVisible(shown);
-    if (m_settings.menuBarVisible != shown) {
-        m_settings.menuBarVisible = shown;
-        m_settings.save();
-    }
 }
 
 void MainWindow::showContextMenu(const QPoint &globalPos)

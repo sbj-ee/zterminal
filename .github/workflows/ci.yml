@@ -22,7 +22,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            qt6-base-dev libgl1-mesa-dev cmake ninja-build g++ dpkg-dev fonts-dejavu-core
+            qt6-base-dev qt6-qpa-plugins libgl1-mesa-dev cmake ninja-build g++ dpkg-dev fonts-dejavu-core \
+            xvfb xauth dbus
 
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -31,7 +32,11 @@ jobs:
         run: cmake --build build
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          # The global-menu regression test must actually be built and run here.
+          ctest --test-dir build -N | grep -q tst_globalmenu
+          ctest --test-dir build --output-on-failure
+          ctest --test-dir build -R tst_globalmenu -V | grep -E 'PASS|SKIP|FAIL|Totals'
 
       - name: Package .deb
         run: |

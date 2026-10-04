@@ -14,7 +14,6 @@ struct AppSettings {
     int fontSize = 11;
     QString colorScheme = QStringLiteral("xterm");
     int scrollbackLines = 10000;
-    bool menuBarVisible = true;
     MouseSettings mouse;
 
     static constexpr int kDefaultFontSize = 11;
