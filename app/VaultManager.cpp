@@ -34,7 +34,14 @@ void VaultManager::setPath(const QString &path)
 
 void VaultManager::setAutoLockMinutes(int minutes)
 {
-    m_minutes = std::max(0, minutes);
+    minutes = std::max(0, minutes);
+    // Every window applies the preferences when it opens and whenever the
+    // settings file changes; re-applying the same value must not push the
+    // idle deadline back (only real input and use of the vault do that).
+    if (minutes == m_minutes && (m_idle->isActive() || !m_vault->isUnlocked())) {
+        return;
+    }
+    m_minutes = minutes;
     restartIdleTimer();
 }
 
@@ -77,16 +84,41 @@ bool VaultManager::eventFilter(QObject *watched, QEvent *event)
 
 void VaultManager::lock()
 {
-    const bool was = m_vault->isUnlocked();
+    // m_announced: the Vault may already have locked itself (a failed
+    // refresh); the windows still need to hear about it.
+    const bool was = m_vault->isUnlocked() || m_announced;
     m_vault->lock(); // wipes + frees key and secrets
     m_idle->stop();
+    m_announced = false;
     if (was) {
         emit lockedChanged(false);
     }
 }
 
+void VaultManager::touch()
+{
+    if (m_vault->isUnlocked() && m_idle->isActive()) {
+        restartIdleTimer();
+    }
+}
+
+bool VaultManager::refresh()
+{
+    if (!m_vault->isUnlocked()) {
+        return false;
+    }
+    if (m_vault->refresh()) {
+        return true;
+    }
+    if (!m_vault->isUnlocked()) { // Vault::refresh locked it: tell everyone
+        lock();
+    }
+    return false;
+}
+
 void VaultManager::noteUnlocked()
 {
+    m_announced = m_vault->isUnlocked();
     restartIdleTimer();
     emit lockedChanged(true);
 }
@@ -121,9 +153,21 @@ bool VaultManager::createInteractive(QWidget *parent)
 
 bool VaultManager::unlockInteractive(QWidget *parent, const QString &why)
 {
+    if (m_vault->isUnlocked()) {
+        return true; // already open app-wide: nothing to ask
+    }
     DialogScope scope(*this);
     UnlockVaultDialog dlg(*m_vault, why, parent);
-    if (dlg.exec() != QDialog::Accepted) {
+    // Another window unlocked meanwhile (e.g. two sessions starting at once):
+    // this prompt is no longer needed.
+    const QMetaObject::Connection c = connect(this, &VaultManager::lockedChanged, &dlg, [&dlg](bool unlocked) {
+        if (unlocked) {
+            dlg.accept();
+        }
+    });
+    const int r = dlg.exec();
+    disconnect(c);
+    if (r != QDialog::Accepted || !m_vault->isUnlocked()) {
         return false;
     }
     noteUnlocked();

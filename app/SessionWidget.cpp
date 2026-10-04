@@ -376,7 +376,11 @@ QStringList SessionWidget::prepareStoredPassword()
         note(QStringLiteral("vault locked; ssh will ask for the password"));
         return {};
     }
-    vm.vault().refresh();
+    if (!vm.refresh()) {
+        note(QStringLiteral("vault locked (%1); ssh will ask for the password").arg(vm.vault().lastError()));
+        return {};
+    }
+    vm.touch(); // using a stored password counts as activity
     const SecureBuffer *secret =
         vm.vault().secret(Vault::secretKeyFor(QStringLiteral("ssh-password"), m_saved->name));
     if (!secret) {
@@ -434,7 +438,11 @@ bool SessionWidget::sendStoredLogin()
     if (!vm.ensureUnlocked(this, QStringLiteral("Send Stored Login for \"%1\".").arg(m_saved->name.toHtmlEscaped()))) {
         return false;
     }
-    vm.vault().refresh();
+    if (!vm.refresh()) {
+        QMessageBox::warning(this, QStringLiteral("Send Stored Login"), vm.vault().lastError());
+        return false;
+    }
+    vm.touch();
     if (!vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))) {
         QMessageBox::information(this, QStringLiteral("Send Stored Login"),
                                  QStringLiteral("No login password is stored for \"%1\".").arg(m_saved->name));
@@ -476,6 +484,7 @@ void SessionWidget::finishLogin(bool sendPassword)
     if (!pw) {
         return;
     }
+    vm.touch();
     // QSerialPort keeps its own write buffer (not locked memory); wipe our copy.
     QByteArray bytes(reinterpret_cast<const char *>(pw->data()), qsizetype(pw->size()));
     bytes += '\r';

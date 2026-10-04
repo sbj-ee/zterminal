@@ -11,12 +11,16 @@ class QWidget;
 
 namespace zterminal {
 
-// The process-wide password vault (each zterminal window is its own process,
-// so each window unlocks - and auto-locks - on its own).
+// The one app-wide password vault and key holder. Every window opened from
+// inside zterminal (File > New Session / Open Saved Session, the session
+// dialog's Open, Session > Duplicate) runs in this same process (since 0.6.1),
+// so a single unlock serves all of them until Lock Vault or the idle auto-lock.
+// The key never leaves this process: ssh's askpass helper asks it over a
+// one-shot 0700 socket (AskpassServer); nothing is passed in argv or env.
 //
 // Auto-lock: after `autoLockMinutes` without keyboard, mouse-button or wheel
-// input in this process the vault is locked, which wipes and frees the key
-// and every decrypted secret. 0 disables it.
+// input in any window, or use of a stored password, the vault is locked,
+// which wipes and frees the key and every decrypted secret. 0 disables it.
 class VaultManager : public QObject
 {
     Q_OBJECT
@@ -42,6 +46,12 @@ public:
     bool unlockInteractive(QWidget *parent, const QString &why = {});
     bool changePasswordInteractive(QWidget *parent);
     void lock();
+    // A stored password was just used: counts as activity for the idle timer.
+    void touch();
+    // Re-read the file with the in-memory key (Vault::refresh). If that had
+    // to lock (password changed elsewhere, unreadable file) the lock is
+    // announced like any other, so every window's menu and timer follow.
+    bool refresh();
 
     // Called by the dialogs after a successful create/unlock/change.
     void noteUnlocked();
@@ -66,6 +76,7 @@ private:
     int m_minutes = 15;
     int m_testIntervalMs = 0;
     int m_dialogs = 0;
+    bool m_announced = false; // lockedChanged(true) was the last state sent
     friend struct DialogScope;
 };
 
