@@ -16,6 +16,7 @@ zterminal_add_test(tst_selection zterminal_core)
 zterminal_add_test(tst_pty zterminal_core)
 zterminal_add_test(tst_misc zterminal_core)
 zterminal_add_test(tst_view zterminal_ui)
+zterminal_add_test(tst_settings zterminal_ui)
 
 # The binary and the zt launcher answer --version/--help without a display.
 add_test(NAME zterminal_version COMMAND zterminal --version)
