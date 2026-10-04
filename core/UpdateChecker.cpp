@@ -41,9 +41,9 @@ UpdateChecker::UpdateChecker(QObject *parent)
 
 UpdateChecker::~UpdateChecker()
 {
-    if (m_reply) {
-        m_reply->disconnect(this);
-        m_reply->abort();
+    if (QNetworkReply *r = m_reply.data()) {
+        r->disconnect(this);
+        r->abort();
     }
 }
 
@@ -58,8 +58,8 @@ void UpdateChecker::check()
 
 void UpdateChecker::abort()
 {
-    if (m_reply) {
-        m_reply->abort(); // finished() still fires, with an error
+    if (QNetworkReply *r = m_reply.data()) {
+        r->abort(); // finished() still fires, with an error
     }
 }
 
@@ -147,9 +147,9 @@ UpdateDownloader::UpdateDownloader(QObject *parent)
 
 UpdateDownloader::~UpdateDownloader()
 {
-    if (m_reply) {
-        m_reply->disconnect(this);
-        m_reply->abort();
+    if (QNetworkReply *r = m_reply.data()) {
+        r->disconnect(this);
+        r->abort();
     }
     delete m_file;
 }
@@ -210,8 +210,8 @@ void UpdateDownloader::onReadyRead()
 void UpdateDownloader::cancel()
 {
     m_cancelled = true;
-    if (m_reply) {
-        m_reply->abort();
+    if (QNetworkReply *r = m_reply.data()) {
+        r->abort();
     }
 }
 

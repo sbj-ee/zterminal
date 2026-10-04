@@ -78,7 +78,11 @@ public:
     bool saveCurrentSessionAs(const QString &name, QString *error = nullptr);
     std::optional<SessionConfig> currentSessionConfig(QString *why = nullptr) const;
 
-    // File > New Window starts another zterminal process (tests replace it).
+    // A new window for `args` (zterminal's command line) in this process, so it
+    // shares the running app's unlocked vault. nullptr (and *error) if invalid.
+    static MainWindow *openWindow(const QStringList &args, QString *error = nullptr);
+    // How File > New Window opens a window (tests replace it). Default:
+    // openWindow() in this process (until 0.7.0: a new zterminal process).
     using Launcher = std::function<bool(const QString &program, const QStringList &args)>;
     void setLauncher(Launcher l) { m_launcher = std::move(l); }
     QAction *action(const QString &name) const;

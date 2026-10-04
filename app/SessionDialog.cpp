@@ -579,8 +579,12 @@ bool SessionDialog::storeSecrets(const SessionConfig &c)
     field->clear();
     if (!vm.vault().setSecret(key, std::move(secret))) {
         setError(QStringLiteral("Session saved, but storing its password failed: %1").arg(vm.vault().lastError()));
+        if (!vm.vault().isUnlocked()) {
+            vm.lock(); // setSecret's refresh locked it: announce it app-wide
+        }
         return false;
     }
+    vm.touch();
     return true;
 }
 
