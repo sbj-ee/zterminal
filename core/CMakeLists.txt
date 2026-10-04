@@ -14,6 +14,8 @@ add_library(zterminal_core STATIC
   SecureBuffer.cpp SecureBuffer.hpp
   Vault.cpp Vault.hpp
   AskpassServer.cpp AskpassServer.hpp
+  LogTextFilter.cpp LogTextFilter.hpp
+  SessionLog.cpp SessionLog.hpp
 )
 target_include_directories(zterminal_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}

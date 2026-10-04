@@ -37,7 +37,7 @@ zterminal is a PuTTY-like terminal for Linux. It has a classic menu bar, saved s
 - **Packaging:** **`.deb` only**, via CPack (zwriter style, depends on `qt6-wayland`). The file is named `zterminal_<ver>_amd64.deb`, and a tag push publishes it with `SHA256SUMS` to GitHub Releases.
 
 ### Later
-Tabs and splits, session logging to a file (PuTTY "All session output"), hyperlinks (OSC 8), URL click, sixel/kitty graphics, Telnet/raw TCP, import of PuTTY sessions, keyword highlighting, signed releases (minisign/GPG). macOS is **not planned** (Stephen: Linux only).
+Tabs and splits, hyperlinks (OSC 8), URL click, sixel/kitty graphics, Telnet/raw TCP, import of PuTTY sessions, keyword highlighting, signed releases (minisign/GPG). macOS is **not planned** (Stephen: Linux only).
 
 ## 3. Menus (Stephen's spec)
 
@@ -48,7 +48,7 @@ A classic `QMenuBar`. Every item is a `QAction` owned by an `Actions` registry i
 | **File** | New Session… (Ctrl+Shift+N), Open Saved Session… (Ctrl+Shift+O), Save Session (Ctrl+Shift+S), Close (Ctrl+Shift+W), Quit (Ctrl+Shift+Q) |
 | **Edit** | Copy (Ctrl+Shift+C), Paste (Ctrl+Shift+V; Shift+Insert pastes PRIMARY), Select All (Ctrl+Shift+A), Find… (Ctrl+Shift+F) |
 | **View** | Font Size Up (Ctrl+Shift+=), Font Size Down (Ctrl+Shift+−), Reset Font Size (Ctrl+Shift+0), Color Scheme ▸ (radio list), Full Screen (F11), Show Menu Bar (toggle, Ctrl+Shift+M) |
-| **Session** | Duplicate Session (Ctrl+Shift+D), Restart Session (Ctrl+Shift+R, enabled once the process has exited or after confirming), Send Break (serial only), Send Stored Login (saved serial sessions, 0.4.0), Clear Scrollback (Ctrl+Shift+K), Reset Terminal, Change Settings… (opens this session's settings and applies live where possible; **until per-session settings land (M6) it opens Preferences**) |
+| **Session** | Duplicate Session (Ctrl+Shift+D), Restart Session (Ctrl+Shift+R, enabled once the process has exited or after confirming), Send Break (serial only), Send Stored Login (saved serial sessions, 0.4.0), Start/Stop Logging (Ctrl+Shift+G, 0.5.0), Clear Scrollback (Ctrl+Shift+K), Reset Terminal, Change Settings… (opens this session's settings and applies live where possible; **until per-session settings land (M6) it opens Preferences**) |
 | **Settings** | Preferences… (**Ctrl+Shift+,**, also in the Ctrl+right-click menu; global defaults: mouse, clipboard, fonts, schemes, shortcuts, "Check for updates at startup" (default on), and clearing a skipped version); **Password Vault ▸** Create/Unlock Vault…, Lock Vault (Ctrl+Shift+L), Change Master Password… (0.4.0) |
 | **Help** | About zterminal (version, Qt and libvterm versions, MIT license, repo link), Check for Updates… (manual check; the startup check is controlled in Preferences) |
 
@@ -130,6 +130,17 @@ build: project(VERSION) → configure_file(version.hpp.in) → zterminal::kVersi
     - **Serial:** `serial/loginUser` in the INI, password in the vault. Session > **Send Stored Login** sends the user + Enter, then the password + Enter only when the device's last line is a password prompt (within 10 s); otherwise nothing is typed blind. Local echo is skipped for the password.
     - **Later:** unlock via Secret Service / GNOME Keyring (keep the master key there).
 
+13. **Session logging (0.5.0).** Session > Start/Stop Logging (Ctrl+Shift+G), or per saved session "Log this session to a file automatically" (`logging/auto=true`).
+    - **Files:** `<folder>/<sanitized name>-<YYYYMMDD-HHMMSS>.log`; folder from Preferences > Session logs (default `~/zterminal-logs`). Every directory zterminal creates is 0700; files are created 0600 with `O_EXCL|O_NOFOLLOW` (same second again: `-2`, `-3`, ...). Names keep `[A-Za-z0-9._-]`, everything else becomes `_`, no leading `.`/`-`, max 64 characters. Header/footer lines with version and times; each line is flushed. Optional per-line timestamp `yyyy-MM-ddTHH:mm:ss.zzz` (ISO 8601, local time).
+    - **Text: a stream stripper with a line model** (`core/LogTextFilter`), not libvterm's rendered lines. Reasons: libvterm only hands over lines that scroll off the top, so `clear`/Ctrl+L, lines still on screen, and output overwritten in place would be lost or need snapshotting (with duplicates at stop); a full-screen redraw has no meaningful "line" anyway. The stripper logs each output line once, in order, as one logical line however many rows it wrapped over (it knows the window width so CR/BS/cursor-up after an autowrap act on the right row, as with readline's long command lines). It drops all escape sequences (CSI, OSC incl. BEL/ST endings, DCS/SOS/PM/APC, charset selection, C1) and controls, and applies CR (overwrite from column 0), BS, TAB, erase-in-line, cursor left/right/column, delete/insert characters, so progress meters and line editing log their final text. A cursor jump to another row ends the line; the alternate screen (vim, less, htop) isn't logged. UTF-8 is decoded across chunks.
+    - **Secrets.** Only *output* is logged, never keystrokes. What is covered:
+      1. **Askpass:** the stored password goes vault -> Unix socket -> helper stdout -> ssh's pipe; it never touches the PTY, so it can't be in the output stream (`tst_logui` checks the log).
+      2. **Vault dialogs** (create/unlock/change): logging is paused while one is open (`VaultManager::dialogOpenChanged`).
+      3. **Send Stored Login:** paused from the action until 1.5 s after the password is sent (a device that echoes it is not logged); the password itself is also never local-echoed.
+      4. **No-echo prompts on our PTY:** while the terminal is canonical with ECHO off (sudo, passwd, ssh's own password prompt, the askpass manual fallback) output is not logged at all, so even a program that prints during a password prompt stays out. Raw mode (an ssh session, vim) is not treated as a prompt.
+      5. Each pause leaves `[zterminal: logging paused: <reason>]` / `[zterminal: logging resumed]` in the log.
+    - **Not covered:** a *remote* program that echoes a password back (the local PTY is in raw mode during an ssh session, so remote prompts can't be detected locally; normally remote prompts don't echo, so nothing reaches the stream); a serial device that echoes a password you type by hand; secrets that a program simply prints. Logs are plain text: treat them as sensitive.
+
 ## 5. Test plan
 - **Unit (Qt Test suites run by ctest, `QT_QPA_PLATFORM=offscreen`, the same headless approach as zwriter):** feed escape-sequence fixtures into `core::Terminal` and assert cell text and attributes. Covered: SGR 30–37/90–97/38;5;n/38;2;r;g;b, altscreen, scroll regions, reflow, word/line selection boundaries, wide chars, bracketed-paste wrapping, OSC 52 gating, SessionStore round-trip, ssh argv building (including injection-proof host names), the Search matcher (regex, matches that wrap lines), and UpdateCheck semver (`v0.1.0` vs `0.1`, `1.10.0` > `1.9.9`). An update-check test points the API base URL at a local `QTcpServer` serving canned replies (200 newer/same/older, 404, 403 rate limit, timeout). Further tests cover skip-version logic and the install pipeline with a fake `pkexec` script on `PATH`: matching checksum → install invoked with the exact argv, mismatched checksum / missing `SHA256SUMS` / missing `.deb` asset → abort with no install, and no `pkexec` → falls back to the release page. A version test asserts that `kVersionString == PROJECT_VERSION` and that `MainWindow::windowTitle()` starts with `zterminal <PROJECT_VERSION> — `.
 - **Backends:** a PTY echo test (`/bin/cat`) and resize to `stty size`. Serial via a `socat -d -d pty,raw,echo=0 pty,raw,echo=0` pair in CI, plus checks of the pacing timing.
@@ -173,7 +184,7 @@ build: project(VERSION) → configure_file(version.hpp.in) → zterminal::kVersi
 5. Session files: INI via QSettings. *Default, changeable.*
 6. SG250 console device and baud: settings per session, default **9600 8N1** (Cisco console default, per Stephen 2026-10-03). To verify on the hardware in M5.
 7. License: **MIT**.
-8. Session logging: later (not v1). *Default, changeable.*
+8. Session logging: originally "later"; **implemented in 0.5.0** (§4.13, approved by Stephen 2026-10-03).
 9. Packaging: **.deb only**.
 10. Shortcuts: **Ctrl+Shift+…** as in §3, font size on Ctrl+Shift+=/−/0. *Default, changeable.*
 11. Window title: **append the program's title** after the session name. *Default, changeable.*

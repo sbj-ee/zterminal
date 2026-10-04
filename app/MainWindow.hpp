@@ -6,6 +6,7 @@
 #include "SessionStore.hpp"
 
 #include <functional>
+#include <memory>
 #include <optional>
 
 #include <QMainWindow>
@@ -23,6 +24,7 @@ namespace zterminal {
 
 class AskpassServer;
 class Pty;
+class SessionLog;
 class SerialBackend;
 class Terminal;
 class TerminalView;
@@ -94,6 +96,13 @@ public:
     bool sendStoredLogin();
     bool loginPending() const { return m_loginWait != nullptr; }
 
+    // Session > Start/Stop Logging (Ctrl+Shift+G); also automatic for saved
+    // sessions with "Log this session automatically".
+    bool startLogging(QString *error = nullptr);
+    void stopLogging();
+    SessionLog *sessionLog() const { return m_log.get(); }
+    QLabel *recIndicator() const { return m_recLabel; }
+
 protected:
     void closeEvent(QCloseEvent *e) override;
 
@@ -122,6 +131,8 @@ private:
     void updateVaultActions();
     void onSerialData(const QByteArray &d);
     void finishLogin(bool sendPassword);
+    void logOutput(const QByteArray &d, bool fromPty);
+    void updateLoggingUi();
 
     LaunchRequest m_request;
     std::optional<SessionConfig> m_saved;
@@ -145,6 +156,8 @@ private:
     AskpassServer *m_askpass = nullptr;
     QByteArray m_serialTail; // last bytes received (prompt detection for Send Stored Login)
     QTimer *m_loginWait = nullptr;
+    std::unique_ptr<SessionLog> m_log;
+    QLabel *m_recLabel = nullptr;
 };
 
 } // namespace zterminal

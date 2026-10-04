@@ -1,5 +1,9 @@
 #include "AppSettings.hpp"
 
+#include "SessionLog.hpp"
+
+#include <QDir>
+
 #include <algorithm>
 
 #include <QFontDatabase>
@@ -41,6 +45,18 @@ void AppSettings::save() const
     s.sync();
 }
 
+QString AppSettings::effectiveLogDirectory() const
+{
+    QString d = logDirectory.trimmed();
+    if (d.isEmpty()) {
+        return SessionLog::defaultDirectory();
+    }
+    if (d == QLatin1String("~") || d.startsWith(QLatin1String("~/"))) {
+        d = QDir::homePath() + d.mid(1);
+    }
+    return d;
+}
+
 QString AppSettings::filePath()
 {
     return QSettings().fileName();
@@ -51,6 +67,7 @@ bool AppSettings::operator==(const AppSettings &o) const
     return fontFamily == o.fontFamily && fontSize == o.fontSize && colorScheme == o.colorScheme
         && scrollbackLines == o.scrollbackLines && checkForUpdatesOnStartup == o.checkForUpdatesOnStartup
         && vaultAutoLockMinutes == o.vaultAutoLockMinutes
+        && logDirectory == o.logDirectory && logTimestamps == o.logTimestamps
         && mouse.middleClick == o.mouse.middleClick
         && mouse.copyOnSelectToClipboard == o.mouse.copyOnSelectToClipboard
         && mouse.wordDelimiters == o.mouse.wordDelimiters;
@@ -65,6 +82,8 @@ AppSettings AppSettings::load(const QSettings &s)
     a.scrollbackLines = s.value(QStringLiteral("terminal/scrollbackLines"), a.scrollbackLines).toInt();
     a.vaultAutoLockMinutes = std::clamp(
         s.value(QStringLiteral("vault/autoLockMinutes"), a.vaultAutoLockMinutes).toInt(), 0, 24 * 60);
+    a.logDirectory = s.value(QStringLiteral("logging/directory")).toString();
+    a.logTimestamps = s.value(QStringLiteral("logging/timestamps"), a.logTimestamps).toBool();
     a.checkForUpdatesOnStartup =
         s.value(QStringLiteral("updates/checkOnStartup"), a.checkForUpdatesOnStartup).toBool();
     a.mouse.load(s);
@@ -78,6 +97,8 @@ void AppSettings::save(QSettings &s) const
     s.setValue(QStringLiteral("appearance/colorScheme"), colorScheme);
     s.setValue(QStringLiteral("terminal/scrollbackLines"), scrollbackLines);
     s.setValue(QStringLiteral("vault/autoLockMinutes"), vaultAutoLockMinutes);
+    s.setValue(QStringLiteral("logging/directory"), logDirectory);
+    s.setValue(QStringLiteral("logging/timestamps"), logTimestamps);
     s.setValue(QStringLiteral("updates/checkOnStartup"), checkForUpdatesOnStartup);
     // Menu-bar visibility is deliberately NOT persisted (see MainWindow::setMenuBarShown);
     // drop the key 0.1.0 wrote so an old "hidden" value can never come back.

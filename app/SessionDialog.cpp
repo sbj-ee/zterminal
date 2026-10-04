@@ -93,6 +93,11 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_type->addItem(QStringLiteral("SSH"), SessionConfig::typeToString(SessionConfig::Type::Ssh));
     m_type->addItem(QStringLiteral("Serial"), SessionConfig::typeToString(SessionConfig::Type::Serial));
     typeForm->addRow(QStringLiteral("Type:"), m_type);
+    m_autoLog = new QCheckBox(QStringLiteral("Log this session to a file automatically"));
+    m_autoLog->setObjectName(QStringLiteral("autoLog"));
+    m_autoLog->setToolTip(QStringLiteral("Starts Session > Start Logging when the session opens "
+                                         "(folder and timestamps: Preferences > Session logs)"));
+    typeForm->addRow(m_autoLog);
     connLayout->addLayout(typeForm);
 
     m_sshBox = new QGroupBox(QStringLiteral("SSH (runs the system ssh)"));
@@ -375,6 +380,7 @@ SessionConfig SessionDialog::config() const
     SessionConfig c;
     c.name = m_name->text().trimmed();
     c.type = SessionConfig::typeFromString(m_type->currentData().toString());
+    c.autoLog = m_autoLog->isChecked();
     if (c.type == SessionConfig::Type::Ssh) {
         c.host = m_host->text().trimmed();
         c.user = m_user->text().trimmed();
@@ -410,6 +416,7 @@ void SessionDialog::setConfig(const SessionConfig &s)
 {
     m_name->setText(s.name);
     m_type->setCurrentIndex(std::max(0, m_type->findData(SessionConfig::typeToString(s.type))));
+    m_autoLog->setChecked(s.autoLog);
     m_host->setText(s.host);
     m_user->setText(s.user);
     m_port->setValue(s.port);

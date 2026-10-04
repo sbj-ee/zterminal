@@ -64,6 +64,7 @@ private:
     QLineEdit *m_jump = nullptr;
     QLineEdit *m_extra = nullptr;
     QCheckBox *m_useStored = nullptr;
+    QCheckBox *m_autoLog = nullptr;
     QLineEdit *m_sshPassword = nullptr;
     QLineEdit *m_loginUser = nullptr;
     QLineEdit *m_loginPassword = nullptr;

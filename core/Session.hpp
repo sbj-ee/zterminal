@@ -40,6 +40,8 @@ struct SessionConfig {
     int breakMs = 300;               // Session > Send Break duration
     QString loginUser;               // Session > Send Stored Login (password in the vault)
 
+    bool autoLog = false; // start Session > Logging when the session opens
+
     // Optional per-session appearance overrides (empty / 0: use Preferences).
     QString fontFamily;
     int fontSize = 0;

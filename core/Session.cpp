@@ -66,7 +66,7 @@ bool SessionConfig::operator==(const SessionConfig &o) const
         && parity == o.parity && stopBits == o.stopBits && flowControl == o.flowControl
         && localEcho == o.localEcho && enterSends == o.enterSends && charDelayMs == o.charDelayMs
         && lineDelayMs == o.lineDelayMs && breakMs == o.breakMs
-        && useStoredPassword == o.useStoredPassword && loginUser == o.loginUser
+        && useStoredPassword == o.useStoredPassword && loginUser == o.loginUser && autoLog == o.autoLog
         && fontFamily == o.fontFamily && fontSize == o.fontSize && colorScheme == o.colorScheme;
 }
 

@@ -7,6 +7,7 @@
 class QCheckBox;
 class QComboBox;
 class QFontComboBox;
+class QLineEdit;
 class QSpinBox;
 
 namespace zterminal {
@@ -35,6 +36,8 @@ private:
     QSpinBox *m_scrollback = nullptr;
     QSpinBox *m_vaultAutoLock = nullptr;
     QCheckBox *m_checkUpdates = nullptr;
+    QLineEdit *m_logDir = nullptr;
+    QCheckBox *m_logTimestamps = nullptr;
     QString m_initialComboFamily; // what the font combo showed before any edit
 };
 

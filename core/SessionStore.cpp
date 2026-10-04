@@ -48,6 +48,7 @@ std::optional<SessionConfig> readFile(const QString &path)
     s.lineDelayMs = f.value(QStringLiteral("serial/lineDelayMs"), d.lineDelayMs).toInt();
     s.breakMs = f.value(QStringLiteral("serial/breakMs"), d.breakMs).toInt();
     s.loginUser = f.value(QStringLiteral("serial/loginUser")).toString();
+    s.autoLog = f.value(QStringLiteral("logging/auto"), false).toBool();
     s.fontFamily = f.value(QStringLiteral("appearance/fontFamily")).toString();
     s.fontSize = f.value(QStringLiteral("appearance/fontSize"), 0).toInt();
     s.colorScheme = f.value(QStringLiteral("appearance/colorScheme")).toString();
@@ -164,6 +165,9 @@ bool SessionStore::save(const SessionConfig &s, QString *error) const
             if (!s.loginUser.isEmpty()) {
                 f.setValue(QStringLiteral("serial/loginUser"), s.loginUser); // a user name, not a secret
             }
+        }
+        if (s.autoLog) {
+            f.setValue(QStringLiteral("logging/auto"), true);
         }
         if (!s.fontFamily.isEmpty()) {
             f.setValue(QStringLiteral("appearance/fontFamily"), s.fontFamily);
