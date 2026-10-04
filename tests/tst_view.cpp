@@ -240,13 +240,13 @@ private slots:
         QCOMPARE(menus, (QStringList{QStringLiteral("File"), QStringLiteral("Edit"), QStringLiteral("View"),
                                      QStringLiteral("Session"), QStringLiteral("Settings"), QStringLiteral("Help")}));
 
-        for (const char *name : {"newSession", "close", "quit", "copy", "paste", "selectAll", "fontLarger",
+        for (const char *name : {"newSession", "openSavedSession", "saveSession", "close", "quit", "copy", "paste", "selectAll", "fontLarger",
                                  "fontSmaller", "fontReset", "fullScreen", "showMenuBar", "duplicateSession",
                                  "restartSession", "clearScrollback", "resetTerminal", "changeSettings", "preferences",
                                  "about"}) {
             QVERIFY2(w.action(QString::fromLatin1(name)) && w.action(QString::fromLatin1(name))->isEnabled(), name);
         }
-        for (const char *name : {"openSavedSession", "saveSession", "find", "sendBreak", "checkForUpdates"}) {
+        for (const char *name : {"find", "sendBreak", "checkForUpdates"}) {
             QVERIFY2(w.action(QString::fromLatin1(name)) && !w.action(QString::fromLatin1(name))->isEnabled(), name);
         }
         QCOMPARE(w.action(QStringLiteral("copy"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+C")));

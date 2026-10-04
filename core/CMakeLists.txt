@@ -8,6 +8,8 @@ add_library(zterminal_core STATIC
   MouseSettings.cpp MouseSettings.hpp
   WindowTitle.cpp WindowTitle.hpp
   CommandLine.cpp CommandLine.hpp
+  Session.cpp Session.hpp
+  SessionStore.cpp SessionStore.hpp
 )
 target_include_directories(zterminal_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}

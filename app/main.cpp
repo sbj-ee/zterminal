@@ -1,5 +1,6 @@
 #include "CommandLine.hpp"
 #include "MainWindow.hpp"
+#include "SessionStore.hpp"
 #include "version.hpp"
 
 #include <QApplication>
@@ -24,6 +25,24 @@ int main(int argc, char *argv[])
         if (r.kind == zterminal::LaunchRequest::Kind::Help) {
             std::fputs(zterminal::usageText().toLocal8Bit().constData(), stdout);
             return 0;
+        }
+        // Session lookups also run without a display (zt checks before detaching).
+        const zterminal::SessionStore store;
+        if (r.kind == zterminal::LaunchRequest::Kind::ListSessions) {
+            for (const QString &n : store.names()) {
+                std::printf("%s\n", n.toLocal8Bit().constData());
+            }
+            return 0;
+        }
+        if (r.kind == zterminal::LaunchRequest::Kind::CheckSession
+            || r.kind == zterminal::LaunchRequest::Kind::SavedSession) {
+            if (!store.contains(r.sessionName)) {
+                std::fprintf(stderr, "zterminal: %s\n", store.unknownSessionMessage(r.sessionName).toLocal8Bit().constData());
+                return 2;
+            }
+            if (r.kind == zterminal::LaunchRequest::Kind::CheckSession) {
+                return 0;
+            }
         }
     }
 

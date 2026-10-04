@@ -17,6 +17,8 @@ zterminal_add_test(tst_pty zterminal_core)
 zterminal_add_test(tst_misc zterminal_core)
 zterminal_add_test(tst_view zterminal_ui)
 zterminal_add_test(tst_settings zterminal_ui)
+zterminal_add_test(tst_sessions zterminal_core)
+zterminal_add_test(tst_sessionui zterminal_ui)
 
 # The binary and the zt launcher answer --version/--help without a display.
 add_test(NAME zterminal_version COMMAND zterminal --version)
@@ -28,6 +30,31 @@ set_tests_properties(zt_version PROPERTIES
   PASS_REGULAR_EXPRESSION "^zterminal ${PROJECT_VERSION}\n$")
 add_test(NAME zt_help COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt --help)
 set_tests_properties(zt_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage: zt ")
+# Saved sessions from the command line, against a read-only fixture config
+# (tests/data/config/zterminal/sessions: "core-sw1" (ssh) and "lab box" (local)).
+set(ZT_FIXTURE_ENV "XDG_CONFIG_HOME=${CMAKE_CURRENT_SOURCE_DIR}/data/config")
+add_test(NAME zterminal_list_sessions COMMAND zterminal --list-sessions)
+set_tests_properties(zterminal_list_sessions PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}"
+  PASS_REGULAR_EXPRESSION "^core-sw1\nlab box\n$")
+add_test(NAME zterminal_check_session_ok COMMAND zterminal --check-session "lab box")
+set_tests_properties(zterminal_check_session_ok PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}")
+add_test(NAME zterminal_unknown_session_message COMMAND zterminal --check-session nope)
+set_tests_properties(zterminal_unknown_session_message PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}"
+  PASS_REGULAR_EXPRESSION "unknown session \"nope\"; saved sessions: core-sw1, lab box")
+add_test(NAME zterminal_unknown_session_fails COMMAND zterminal nope)
+set_tests_properties(zterminal_unknown_session_fails PROPERTIES WILL_FAIL ON
+  ENVIRONMENT "${ZT_FIXTURE_ENV};QT_QPA_PLATFORM=offscreen")
+add_test(NAME zt_unknown_session_message COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt nope)
+set_tests_properties(zt_unknown_session_message PROPERTIES
+  ENVIRONMENT "${ZT_FIXTURE_ENV};ZTERMINAL_BIN=$<TARGET_FILE:zterminal>"
+  PASS_REGULAR_EXPRESSION "zterminal: unknown session \"nope\"; saved sessions: core-sw1, lab box")
+add_test(NAME zt_unknown_session_fails COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt nope)
+set_tests_properties(zt_unknown_session_fails PROPERTIES WILL_FAIL ON
+  ENVIRONMENT "${ZT_FIXTURE_ENV};ZTERMINAL_BIN=$<TARGET_FILE:zterminal>")
+add_test(NAME zt_list_sessions COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt --list-sessions)
+set_tests_properties(zt_list_sessions PROPERTIES
+  ENVIRONMENT "${ZT_FIXTURE_ENV};ZTERMINAL_BIN=$<TARGET_FILE:zterminal>"
+  PASS_REGULAR_EXPRESSION "^core-sw1\nlab box\n$")
 add_test(NAME zterminal_bad_option COMMAND zterminal --bogus)
 set_tests_properties(zterminal_bad_option PROPERTIES WILL_FAIL ON
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

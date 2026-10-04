@@ -2,6 +2,11 @@
 
 #include "AppSettings.hpp"
 #include "CommandLine.hpp"
+#include "Session.hpp"
+#include "SessionStore.hpp"
+
+#include <functional>
+#include <optional>
 
 #include <QMainWindow>
 
@@ -31,7 +36,31 @@ public:
     TerminalView *view() const { return m_view; }
     Terminal *terminal() const { return m_term; }
     Pty *pty() const { return m_pty; }
-    QString sessionName() const { return m_request.displayName(); }
+    QString sessionName() const { return m_saved ? m_saved->name : m_request.displayName(); }
+    // The saved session this window runs (empty for local/ad-hoc windows).
+    const std::optional<SessionConfig> &savedSession() const { return m_saved; }
+
+    // What startSession() runs: program "" means the user's login shell.
+    struct Launch {
+        QString program;
+        QStringList args;
+        QString error;
+    };
+    Launch launchCommand() const;
+
+    // File > New Session / Open Saved Session: opens the session dialog.
+    void showSessionDialog(bool focusSaved);
+    // Start `cfg` in a new window (by name when it matches the saved copy).
+    bool openInNewWindow(const SessionConfig &cfg, QString *error = nullptr);
+    // File > Save Session without the name prompt; the window then *is* that session.
+    bool saveCurrentSessionAs(const QString &name, QString *error = nullptr);
+    // Current window's session as a SessionConfig (nullopt if it can't be saved).
+    std::optional<SessionConfig> currentSessionConfig(QString *why = nullptr) const;
+
+    // How new windows are started (tests replace it). Default: QProcess::startDetached.
+    using Launcher = std::function<bool(const QString &program, const QStringList &args)>;
+    void setLauncher(Launcher l) { m_launcher = std::move(l); }
+    QStringList relaunchArgs() const { return m_originalArgs; }
     // Every QAction by objectName (used by tests and the context menu).
     QAction *action(const QString &name) const;
     QMenu *contextMenu() const { return m_contextMenu; }
@@ -59,13 +88,18 @@ private:
     void onSessionFinished(int exitCode, bool crashed);
     void restartSession();
     void duplicateSession();
-    void newSession();
     void showAbout();
     void watchSettingsFile();
     void setMenuBarShown(bool shown);
     void showContextMenu(const QPoint &globalPos);
 
+    void saveSessionInteractive();
+    bool launch(const QStringList &args);
+
     LaunchRequest m_request;
+    std::optional<SessionConfig> m_saved;
+    SessionStore m_store;
+    Launcher m_launcher;
     QStringList m_originalArgs;
     AppSettings m_settings;
     Terminal *m_term = nullptr;

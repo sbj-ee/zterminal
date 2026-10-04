@@ -2,6 +2,7 @@
 
 #include "ColorScheme.hpp"
 #include "PreferencesDialog.hpp"
+#include "SessionDialog.hpp"
 #include "Pty.hpp"
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
@@ -15,6 +16,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QInputDialog>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -34,6 +36,12 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     , m_originalArgs(originalArgs)
     , m_settings(AppSettings::load())
 {
+    m_launcher = [](const QString &program, const QStringList &args) {
+        return QProcess::startDetached(program, args);
+    };
+    if (m_request.kind == LaunchRequest::Kind::SavedSession) {
+        m_saved = m_store.load(m_request.sessionName);
+    }
     m_term = new Terminal(24, 80, this);
     m_pty = new Pty(this);
     m_view = new TerminalView(m_term, this);
@@ -104,13 +112,15 @@ void MainWindow::buildMenus()
 
     // File
     QMenu *file = menuBar()->addMenu(QStringLiteral("&File"));
-    connect(addAct(file, QStringLiteral("newSession"), QStringLiteral("&New Session"),
+    connect(addAct(file, QStringLiteral("newSession"), QStringLiteral("&New Session\u2026"),
                    QKS(QStringLiteral("Ctrl+Shift+N"))),
-            &QAction::triggered, this, &MainWindow::newSession);
-    addAct(file, QStringLiteral("openSavedSession"), QStringLiteral("&Open Saved Session\u2026"),
-           QKS(QStringLiteral("Ctrl+Shift+O")), false, later);
-    addAct(file, QStringLiteral("saveSession"), QStringLiteral("&Save Session"),
-           QKS(QStringLiteral("Ctrl+Shift+S")), false, later);
+            &QAction::triggered, this, [this]() { showSessionDialog(false); });
+    connect(addAct(file, QStringLiteral("openSavedSession"), QStringLiteral("&Open Saved Session\u2026"),
+                   QKS(QStringLiteral("Ctrl+Shift+O"))),
+            &QAction::triggered, this, [this]() { showSessionDialog(true); });
+    connect(addAct(file, QStringLiteral("saveSession"), QStringLiteral("&Save Session\u2026"),
+                   QKS(QStringLiteral("Ctrl+Shift+S"))),
+            &QAction::triggered, this, &MainWindow::saveSessionInteractive);
     file->addSeparator();
     connect(addAct(file, QStringLiteral("close"), QStringLiteral("&Close"), QKS(QStringLiteral("Ctrl+Shift+W"))),
             &QAction::triggered, this, &QWidget::close);
@@ -138,10 +148,10 @@ void MainWindow::buildMenus()
     // Shift changes the key Qt reports (= -> +, - -> _, 0 -> ), so register both forms.
     QAction *larger = addAct(view, QStringLiteral("fontLarger"), QStringLiteral("Font Size &Up"));
     larger->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Plus), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal)});
-    connect(larger, &QAction::triggered, this, [this]() { setFontSize(m_settings.fontSize + 1); });
+    connect(larger, &QAction::triggered, this, [this]() { setFontSize(m_view->terminalFont().pointSize() + 1); });
     QAction *smaller = addAct(view, QStringLiteral("fontSmaller"), QStringLiteral("Font Size &Down"));
     smaller->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Underscore), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Minus)});
-    connect(smaller, &QAction::triggered, this, [this]() { setFontSize(m_settings.fontSize - 1); });
+    connect(smaller, &QAction::triggered, this, [this]() { setFontSize(m_view->terminalFont().pointSize() - 1); });
     QAction *resetFont = addAct(view, QStringLiteral("fontReset"), QStringLiteral("&Reset Font Size"));
     resetFont->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_ParenRight), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_0)});
     connect(resetFont, &QAction::triggered, this, [this]() { setFontSize(AppSettings::kDefaultFontSize); });
@@ -157,6 +167,13 @@ void MainWindow::buildMenus()
         m_actions << a;
     }
     connect(m_schemeGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        if (m_saved && !m_saved->colorScheme.isEmpty()) {
+            // This session overrides the scheme: change (and save) the override.
+            m_saved->colorScheme = a->data().toString();
+            m_store.save(*m_saved);
+            applySettings();
+            return;
+        }
         AppSettings s = m_settings;
         s.colorScheme = a->data().toString();
         setSettings(s);
@@ -240,10 +257,23 @@ void MainWindow::buildMenus()
 
 void MainWindow::applySettings()
 {
-    m_view->setTerminalFont(m_settings.font());
+    // Preferences, with this saved session's font/scheme overrides on top.
+    AppSettings eff = m_settings;
+    if (m_saved) {
+        if (!m_saved->fontFamily.isEmpty()) {
+            eff.fontFamily = m_saved->fontFamily;
+        }
+        if (m_saved->fontSize > 0) {
+            eff.fontSize = m_saved->fontSize;
+        }
+        if (!m_saved->colorScheme.isEmpty()) {
+            eff.colorScheme = m_saved->colorScheme;
+        }
+    }
+    m_view->setTerminalFont(eff.font());
     m_view->setMouseSettings(m_settings.mouse);
     m_term->setScrollbackLimit(m_settings.scrollbackLines);
-    m_term->setColorScheme(ColorScheme::byId(m_settings.colorScheme));
+    m_term->setColorScheme(ColorScheme::byId(eff.colorScheme));
     for (QAction *a : m_schemeGroup->actions()) {
         a->setChecked(a->data().toString() == m_term->colorScheme().id);
     }
@@ -256,6 +286,13 @@ void MainWindow::updateTitle()
 
 void MainWindow::setFontSize(int points)
 {
+    if (m_saved && m_saved->fontSize > 0) {
+        // This session overrides the size: zoom changes (and saves) the override.
+        m_saved->fontSize = std::clamp(points, 6, 48);
+        m_store.save(*m_saved);
+        applySettings();
+        return;
+    }
     AppSettings s = m_settings;
     s.fontSize = std::clamp(points, 6, 48);
     setSettings(s);
@@ -317,27 +354,56 @@ void MainWindow::showContextMenu(const QPoint &globalPos)
     m_contextMenu->popup(globalPos);
 }
 
-void MainWindow::startSession()
+MainWindow::Launch MainWindow::launchCommand() const
 {
-    QString program;
-    QStringList args;
+    Launch l;
     switch (m_request.kind) {
     case LaunchRequest::Kind::Ssh:
     case LaunchRequest::Kind::Command:
-        program = m_request.program;
-        args = m_request.args;
+        l.program = m_request.program;
+        l.args = m_request.args;
         break;
     case LaunchRequest::Kind::SavedSession:
-        m_term->feed(QByteArrayLiteral("\x1b[33mzterminal: saved sessions are not implemented yet "
-                                       "(planned); opening a local shell.\x1b[0m\r\n"));
+        if (!m_saved) {
+            l.error = m_store.unknownSessionMessage(m_request.sessionName);
+            break;
+        }
+        switch (m_saved->type) {
+        case SessionConfig::Type::Ssh: {
+            const SshCommand c = buildSshCommand(*m_saved);
+            if (!c.ok()) {
+                l.error = QStringLiteral("session \"%1\": %2").arg(m_saved->name, c.error);
+            } else {
+                l.program = c.program;
+                l.args = c.args;
+            }
+            break;
+        }
+        case SessionConfig::Type::Serial:
+            l.error = QStringLiteral("session \"%1\" is a serial session; serial support is coming in a later release")
+                          .arg(m_saved->name);
+            break;
+        case SessionConfig::Type::LocalShell:
+            break;
+        }
         break;
     default:
         break; // local shell
     }
+    return l;
+}
+
+void MainWindow::startSession()
+{
+    const Launch l = launchCommand();
+    if (!l.error.isEmpty()) {
+        m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n").arg(l.error).toUtf8());
+        return;
+    }
     const QSize grid(m_view->gridCols(), m_view->gridRows());
-    if (!m_pty->start(program, args, grid.height(), grid.width())) {
+    if (!m_pty->start(l.program, l.args, grid.height(), grid.width())) {
         m_term->feed(QStringLiteral("\x1b[31mzterminal: could not start %1: %2\x1b[0m\r\n")
-                         .arg(program.isEmpty() ? Pty::defaultShell() : program, m_pty->errorString())
+                         .arg(l.program.isEmpty() ? Pty::defaultShell() : l.program, m_pty->errorString())
                          .toUtf8());
     }
 }
@@ -366,15 +432,143 @@ void MainWindow::restartSession()
     startSession();
 }
 
-void MainWindow::newSession()
+bool MainWindow::launch(const QStringList &args)
 {
-    // Until saved sessions land, New Session opens a local shell in a new window.
-    QProcess::startDetached(QApplication::applicationFilePath(), {});
+    return m_launcher(QApplication::applicationFilePath(), args);
 }
 
 void MainWindow::duplicateSession()
 {
-    QProcess::startDetached(QApplication::applicationFilePath(), m_originalArgs);
+    launch(m_originalArgs);
+}
+
+void MainWindow::showSessionDialog(bool focusSaved)
+{
+    // New Session starts blank; Open Saved Session starts on this window's
+    // saved session (if any) with the list focused.
+    SessionConfig initial;
+    if (focusSaved && m_saved) {
+        initial = *m_saved;
+    }
+    SessionDialog dlg(m_store, initial, this);
+    if (focusSaved) {
+        dlg.findChild<QWidget *>(QStringLiteral("sessionList"))->setFocus();
+    }
+    if (dlg.exec() == QDialog::Accepted) {
+        QString err;
+        if (!openInNewWindow(dlg.config(), &err)) {
+            QMessageBox::warning(this, QStringLiteral("Open Session"), err);
+        }
+    }
+}
+
+bool MainWindow::openInNewWindow(const SessionConfig &cfg, QString *error)
+{
+    auto fail = [error](const QString &m) {
+        if (error) {
+            *error = m;
+        }
+        return false;
+    };
+    // A saved session that matches what is in the dialog opens by name, so the
+    // new window's title, Duplicate and overrides all refer to it.
+    if (!cfg.name.isEmpty()) {
+        if (const auto stored = m_store.load(cfg.name); stored && *stored == cfg) {
+            return launch({cfg.name}) || fail(QStringLiteral("Could not start a new zterminal window."));
+        }
+    }
+    switch (cfg.type) {
+    case SessionConfig::Type::LocalShell:
+        return launch({}) || fail(QStringLiteral("Could not start a new zterminal window."));
+    case SessionConfig::Type::Ssh: {
+        const SshCommand c = buildSshCommand(cfg);
+        if (!c.ok()) {
+            return fail(c.error);
+        }
+        return launch(QStringList{QStringLiteral("ssh")} + c.args)
+            || fail(QStringLiteral("Could not start a new zterminal window."));
+    }
+    case SessionConfig::Type::Serial:
+        break;
+    }
+    return fail(QStringLiteral("Serial sessions are coming in a later release."));
+}
+
+std::optional<SessionConfig> MainWindow::currentSessionConfig(QString *why) const
+{
+    if (m_saved) {
+        return m_saved;
+    }
+    switch (m_request.kind) {
+    case LaunchRequest::Kind::LocalShell:
+        return SessionConfig{};
+    case LaunchRequest::Kind::Ssh:
+        return sessionFromSshArgs(m_request.args, why);
+    default:
+        if (why) {
+            *why = QStringLiteral("only local shell and SSH sessions can be saved");
+        }
+        return std::nullopt;
+    }
+}
+
+bool MainWindow::saveCurrentSessionAs(const QString &name, QString *error)
+{
+    auto cfg = currentSessionConfig(error);
+    if (!cfg) {
+        return false;
+    }
+    cfg->name = name.trimmed();
+    if (!m_store.save(*cfg, error)) {
+        return false;
+    }
+    m_saved = cfg;
+    m_request = LaunchRequest{};
+    m_request.kind = LaunchRequest::Kind::SavedSession;
+    m_request.sessionName = cfg->name;
+    m_originalArgs = {cfg->name}; // Duplicate now opens the saved session
+    updateTitle();
+    return true;
+}
+
+void MainWindow::saveSessionInteractive()
+{
+    QString why;
+    if (!currentSessionConfig(&why)) {
+        QMessageBox::warning(this, QStringLiteral("Save Session"), QStringLiteral("This window can't be saved: %1.").arg(why));
+        return;
+    }
+    QString suggestion = m_saved ? m_saved->name : QString();
+    if (suggestion.isEmpty() && m_request.kind == LaunchRequest::Kind::Ssh) {
+        suggestion = m_request.displayName().mid(4); // "ssh user@host" -> "user@host"
+    }
+    for (;;) {
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, QStringLiteral("Save Session"),
+                                                   QStringLiteral("Save this window's session as:"),
+                                                   QLineEdit::Normal, suggestion, &ok)
+                                 .trimmed();
+        if (!ok) {
+            return;
+        }
+        if (const QString e = validateSessionName(name); !e.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("Save Session"), e);
+            suggestion = name;
+            continue;
+        }
+        if (m_store.contains(name) && (!m_saved || m_saved->name != name)
+            && QMessageBox::question(this, QStringLiteral("Save Session"),
+                                     QStringLiteral("Replace the saved session \"%1\"?").arg(name))
+                != QMessageBox::Yes) {
+            suggestion = name;
+            continue;
+        }
+        QString err;
+        if (!saveCurrentSessionAs(name, &err)) {
+            QMessageBox::warning(this, QStringLiteral("Save Session"), err);
+        }
+        return;
+    }
 }
 
 void MainWindow::showPreferences()
