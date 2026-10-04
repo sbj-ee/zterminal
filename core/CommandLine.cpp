@@ -40,6 +40,8 @@ QString LaunchRequest::displayName() const
         return QFileInfo(program).fileName();
     case Kind::Version:
     case Kind::Help:
+    case Kind::ListSessions:
+    case Kind::CheckSession:
     case Kind::Error:
         break;
     }
@@ -59,6 +61,21 @@ LaunchRequest parseCommandLine(const QStringList &args)
     }
     if (first == QLatin1String("-h") || first == QLatin1String("--help")) {
         r.kind = LaunchRequest::Kind::Help;
+        return r;
+    }
+    if (first == QLatin1String("--list-sessions")) {
+        r.kind = args.size() == 1 ? LaunchRequest::Kind::ListSessions : LaunchRequest::Kind::Error;
+        r.error = QStringLiteral("--list-sessions takes no arguments");
+        return r;
+    }
+    if (first == QLatin1String("--check-session")) {
+        if (args.size() != 2) {
+            r.kind = LaunchRequest::Kind::Error;
+            r.error = QStringLiteral("--check-session needs exactly one session name");
+            return r;
+        }
+        r.kind = LaunchRequest::Kind::CheckSession;
+        r.sessionName = args.at(1);
         return r;
     }
     if (first == QLatin1String("-e") || first == QLatin1String("--command")) {
@@ -90,7 +107,7 @@ LaunchRequest parseCommandLine(const QStringList &args)
     }
     if (args.size() > 1) {
         r.kind = LaunchRequest::Kind::Error;
-        r.error = QStringLiteral("too many arguments (a saved session name is one argument)");
+        r.error = QStringLiteral("too many arguments (a saved session name is one argument; quote it if it has spaces)");
         return r;
     }
     r.kind = LaunchRequest::Kind::SavedSession;
@@ -108,9 +125,12 @@ QString usageText()
         "  SESSION                  open a saved session by name\n"
         "  ssh [user@]host [args]   open an ad-hoc SSH session using the system ssh\n"
         "  -e, --command prog args  run prog in the terminal\n"
+        "  --list-sessions          print the saved session names and exit\n"
+        "  --check-session SESSION  exit 0 if SESSION is saved, else list the saved ones\n"
         "  -v, --version            print the version and exit\n"
         "  -h, --help               print this help and exit\n"
         "\n"
+        "Saved sessions live in ~/.config/zterminal/sessions/ (one .ini per session).\n"
         "Use `zt` to start zterminal detached from the calling shell.\n");
 }
 

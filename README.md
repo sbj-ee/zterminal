@@ -28,19 +28,44 @@ and milestones.
   Shift+Insert, so plain Ctrl+C, Ctrl+W and the F-keys still reach the program.
 - Window title `zterminal <version> — <session>`. The version comes from CMake.
 - `zt` launcher: starts zterminal detached from your shell
+- Saved sessions (0.2.0): local shell or SSH, via a PuTTY-style dialog (File > New Session,
+  Open Saved Session, Save Session). SSH runs the system `ssh` with a validated argv
+  (no shell). Passwords are never stored: use keys, the agent, or ssh's own prompt.
 
-Planned next: SSH sessions, serial console, saved sessions, Find, and update checks (see the plan).
+Planned next: serial console, Find, and update checks (see the plan).
 
 ## Usage
 
 ```sh
 zt                      # local shell, returns to your prompt immediately
+zt core-sw1             # open a saved session (quote names with spaces: zt "lab box")
+zt --list-sessions      # list saved sessions
 zt ssh user@host        # ad-hoc SSH through the system ssh (all ssh args pass through)
 zt -e htop              # run a program
 zt --version
 ```
 
-`zt <saved-session>` is accepted, but it opens a local shell until saved sessions land.
+An unknown name fails at once with the list of saved sessions. Sessions are stored one
+INI file per session in `~/.config/zterminal/sessions/` (file name = percent-encoded
+session name; owner-only permissions), for example:
+
+```ini
+[session]
+name=core-sw1
+type=ssh
+
+[ssh]
+host=10.0.0.1
+user=admin
+port=22
+keyFile=~/.ssh/id_lab
+jumpHost=sbj@vertex
+extraArgs=-o ServerAliveInterval=30
+```
+
+That session runs `ssh -o ServerAliveInterval=30 -l admin -i /home/you/.ssh/id_lab -J sbj@vertex -- 10.0.0.1`.
+Host, user and jump host are validated (no leading `-`, no spaces or shell characters),
+extra arguments must be ssh options, and the host always follows `--`.
 
 ## Building
 
