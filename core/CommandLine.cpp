@@ -36,6 +36,8 @@ QString LaunchRequest::displayName() const
         }
         return dest.isEmpty() ? QStringLiteral("ssh") : QStringLiteral("ssh ") + dest;
     }
+    case Kind::Serial:
+        return QStringLiteral("serial ") + program;
     case Kind::Command:
         return QFileInfo(program).fileName();
     case Kind::Version:
@@ -100,6 +102,30 @@ LaunchRequest parseCommandLine(const QStringList &args)
         r.args = args.mid(1);
         return r;
     }
+    if (first == QLatin1String("serial")) {
+        if (args.size() < 2 || args.size() > 3) {
+            r.kind = LaunchRequest::Kind::Error;
+            r.error = QStringLiteral("usage: zt serial <device> [baud], e.g. zt serial /dev/ttyUSB0 9600");
+            return r;
+        }
+        r.program = args.at(1);
+        if (!r.program.startsWith(QLatin1Char('/'))) {
+            r.kind = LaunchRequest::Kind::Error;
+            r.error = QStringLiteral("serial device must be an absolute path, e.g. /dev/ttyUSB0");
+            return r;
+        }
+        if (args.size() == 3) {
+            bool ok = false;
+            r.baudRate = args.at(2).toInt(&ok);
+            if (!ok || r.baudRate < 50 || r.baudRate > 4000000) {
+                r.kind = LaunchRequest::Kind::Error;
+                r.error = QStringLiteral("invalid baud rate: %1").arg(args.at(2));
+                return r;
+            }
+        }
+        r.kind = LaunchRequest::Kind::Serial;
+        return r;
+    }
     if (first.startsWith(QLatin1Char('-'))) {
         r.kind = LaunchRequest::Kind::Error;
         r.error = QStringLiteral("unknown option: %1").arg(first);
@@ -118,12 +144,13 @@ LaunchRequest parseCommandLine(const QStringList &args)
 QString usageText()
 {
     return QStringLiteral(
-        "Usage: zterminal [SESSION | ssh [user@]host [ssh-args...] | -e command [args...]]\n"
+        "Usage: zterminal [SESSION | ssh [user@]host [ssh-args...] | serial DEVICE [BAUD] | -e command [args...]]\n"
         "       zterminal --version | --help\n"
         "\n"
         "  (no arguments)           open a local shell\n"
         "  SESSION                  open a saved session by name\n"
         "  ssh [user@]host [args]   open an ad-hoc SSH session using the system ssh\n"
+        "  serial DEVICE [BAUD]     open a serial console (default 9600 8N1), e.g. /dev/ttyUSB0\n"
         "  -e, --command prog args  run prog in the terminal\n"
         "  --list-sessions          print the saved session names and exit\n"
         "  --check-session SESSION  exit 0 if SESSION is saved, else list the saved ones\n"

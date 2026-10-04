@@ -13,12 +13,16 @@
 class QAction;
 class QActionGroup;
 class QFileSystemWatcher;
+class QLabel;
+class QPushButton;
+class QWidget;
 class QTimer;
 class QMenu;
 
 namespace zterminal {
 
 class Pty;
+class SerialBackend;
 class Terminal;
 class TerminalView;
 
@@ -36,6 +40,13 @@ public:
     TerminalView *view() const { return m_view; }
     Terminal *terminal() const { return m_term; }
     Pty *pty() const { return m_pty; }
+    SerialBackend *serial() const { return m_serial; }
+    bool isSerialSession() const;
+    // The red "disconnected / could not open" bar with Reconnect (tests).
+    QWidget *serialBanner() const { return m_banner; }
+    QString serialBannerText() const;
+    // "Sending paste... [Cancel]" bar shown while paced output is queued.
+    QWidget *pasteBar() const { return m_pasteBar; }
     QString sessionName() const { return m_saved ? m_saved->name : m_request.displayName(); }
     // The saved session this window runs (empty for local/ad-hoc windows).
     const std::optional<SessionConfig> &savedSession() const { return m_saved; }
@@ -45,6 +56,7 @@ public:
         QString program;
         QStringList args;
         QString error;
+        std::optional<SessionConfig> serial; // set: open this serial port instead of a PTY
     };
     Launch launchCommand() const;
 
@@ -94,6 +106,9 @@ private:
     void showContextMenu(const QPoint &globalPos);
 
     void saveSessionInteractive();
+    void showSerialBanner(const QString &text);
+    void onSerialDisconnected(const QString &reason);
+    void updatePasteBar(qint64 remaining);
     bool launch(const QStringList &args);
 
     LaunchRequest m_request;
@@ -104,6 +119,11 @@ private:
     AppSettings m_settings;
     Terminal *m_term = nullptr;
     Pty *m_pty = nullptr;
+    SerialBackend *m_serial = nullptr;
+    QWidget *m_banner = nullptr;
+    QLabel *m_bannerText = nullptr;
+    QWidget *m_pasteBar = nullptr;
+    QLabel *m_pasteText = nullptr;
     TerminalView *m_view = nullptr;
     QMenu *m_contextMenu = nullptr;
     QActionGroup *m_schemeGroup = nullptr;

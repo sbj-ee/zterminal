@@ -10,9 +10,10 @@ add_library(zterminal_core STATIC
   CommandLine.cpp CommandLine.hpp
   Session.cpp Session.hpp
   SessionStore.cpp SessionStore.hpp
+  SerialBackend.cpp SerialBackend.hpp
 )
 target_include_directories(zterminal_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${ZTERMINAL_GENERATED_DIR})
-target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui vterm PRIVATE util)
+target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui Qt6::SerialPort vterm PRIVATE util)
 zterminal_set_warnings(zterminal_core)

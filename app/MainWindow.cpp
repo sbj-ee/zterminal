@@ -4,6 +4,7 @@
 #include "PreferencesDialog.hpp"
 #include "SessionDialog.hpp"
 #include "Pty.hpp"
+#include "SerialBackend.hpp"
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
 #include "WindowTitle.hpp"
@@ -16,6 +17,10 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <QInputDialog>
 #include <QMenu>
 #include <QMenuBar>
@@ -44,8 +49,48 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     }
     m_term = new Terminal(24, 80, this);
     m_pty = new Pty(this);
+    m_serial = new SerialBackend(this);
     m_view = new TerminalView(m_term, this);
-    setCentralWidget(m_view);
+
+    // Central area: [serial banner] [paste bar] terminal.
+    auto *central = new QWidget(this);
+    auto *col = new QVBoxLayout(central);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(0);
+    m_banner = new QWidget;
+    m_banner->setObjectName(QStringLiteral("serialBanner"));
+    m_banner->setAutoFillBackground(true);
+    m_banner->setStyleSheet(QStringLiteral("#serialBanner { background: #7b1d1d; } #serialBanner QLabel { color: white; }"));
+    auto *bannerRow = new QHBoxLayout(m_banner);
+    bannerRow->setContentsMargins(8, 4, 8, 4);
+    m_bannerText = new QLabel;
+    m_bannerText->setWordWrap(true);
+    m_bannerText->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto *reconnect = new QPushButton(QStringLiteral("&Reconnect"));
+    reconnect->setObjectName(QStringLiteral("reconnect"));
+    reconnect->setFocusPolicy(Qt::NoFocus);
+    connect(reconnect, &QPushButton::clicked, this, [this]() { startSession(); });
+    bannerRow->addWidget(m_bannerText, 1);
+    bannerRow->addWidget(reconnect, 0, Qt::AlignTop);
+    m_banner->hide();
+    m_pasteBar = new QWidget;
+    m_pasteBar->setObjectName(QStringLiteral("pasteBar"));
+    m_pasteBar->setAutoFillBackground(true);
+    m_pasteBar->setStyleSheet(QStringLiteral("#pasteBar { background: #5c4a00; } #pasteBar QLabel { color: white; }"));
+    auto *pasteRow = new QHBoxLayout(m_pasteBar);
+    pasteRow->setContentsMargins(8, 2, 8, 2);
+    m_pasteText = new QLabel;
+    auto *cancelPaste = new QPushButton(QStringLiteral("Cancel"));
+    cancelPaste->setObjectName(QStringLiteral("cancelPaste"));
+    cancelPaste->setFocusPolicy(Qt::NoFocus);
+    connect(cancelPaste, &QPushButton::clicked, m_serial, &SerialBackend::cancelPending);
+    pasteRow->addWidget(m_pasteText, 1);
+    pasteRow->addWidget(cancelPaste);
+    m_pasteBar->hide();
+    col->addWidget(m_banner);
+    col->addWidget(m_pasteBar);
+    col->addWidget(m_view, 1);
+    setCentralWidget(central);
 
     // Always draw the menu bar inside the window. Without this, Qt hands the
     // menus to a global-menu service whenever com.canonical.AppMenu.Registrar
@@ -53,7 +98,17 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     // in-window bar, and on GNOME nothing may show the exported menus.
     menuBar()->setNativeMenuBar(false);
 
-    connect(m_term, &Terminal::output, m_pty, &Pty::write);
+    // Keys/pastes go to whichever backend this window runs.
+    connect(m_term, &Terminal::output, this, [this](const QByteArray &d) {
+        if (m_serial->isOpen()) {
+            m_serial->write(d);
+        } else {
+            m_pty->write(d);
+        }
+    });
+    connect(m_serial, &SerialBackend::dataReceived, m_term, &Terminal::feed);
+    connect(m_serial, &SerialBackend::disconnected, this, &MainWindow::onSerialDisconnected);
+    connect(m_serial, &SerialBackend::pendingChanged, this, &MainWindow::updatePasteBar);
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
     connect(m_pty, &Pty::finished, this, &MainWindow::onSessionFinished);
     connect(m_view, &TerminalView::gridSizeChanged, m_pty, &Pty::resize);
@@ -71,6 +126,7 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
 
 MainWindow::~MainWindow()
 {
+    m_serial->close();
     m_pty->terminate();
 }
 
@@ -200,8 +256,18 @@ void MainWindow::buildMenus()
     connect(addAct(session, QStringLiteral("restartSession"), QStringLiteral("&Restart Session"),
                    QKS(QStringLiteral("Ctrl+Shift+R"))),
             &QAction::triggered, this, &MainWindow::restartSession);
-    addAct(session, QStringLiteral("sendBreak"), QStringLiteral("Send &Break"), {}, false,
-           QStringLiteral("Serial sessions only (planned)"));
+    QAction *brk = addAct(session, QStringLiteral("sendBreak"), QStringLiteral("Send &Break"), {}, isSerialSession());
+    brk->setToolTip(QStringLiteral("Holds the serial line in break (duration set per session; default 300 ms)"));
+    if (!isSerialSession()) {
+        brk->setToolTip(QStringLiteral("Serial sessions only"));
+    }
+    connect(brk, &QAction::triggered, this, [this]() {
+        if (!m_serial->sendBreak() && !m_serial->isOpen()) {
+            showSerialBanner(QStringLiteral("Not connected: Send Break needs an open serial port."));
+        }
+    });
+    QAction *cancelPasteAct = addAct(session, QStringLiteral("cancelPaste"), QStringLiteral("Cancel &Paste"), {}, false);
+    connect(cancelPasteAct, &QAction::triggered, m_serial, &SerialBackend::cancelPending);
     session->addSeparator();
     connect(addAct(session, QStringLiteral("clearScrollback"), QStringLiteral("&Clear Scrollback"),
                    QKS(QStringLiteral("Ctrl+Shift+K"))),
@@ -363,6 +429,15 @@ MainWindow::Launch MainWindow::launchCommand() const
         l.program = m_request.program;
         l.args = m_request.args;
         break;
+    case LaunchRequest::Kind::Serial: {
+        SessionConfig s = *currentSessionConfig();
+        if (const QString e = validateSerial(s); !e.isEmpty()) {
+            l.error = e;
+        } else {
+            l.serial = s;
+        }
+        break;
+    }
     case LaunchRequest::Kind::SavedSession:
         if (!m_saved) {
             l.error = m_store.unknownSessionMessage(m_request.sessionName);
@@ -380,8 +455,11 @@ MainWindow::Launch MainWindow::launchCommand() const
             break;
         }
         case SessionConfig::Type::Serial:
-            l.error = QStringLiteral("session \"%1\" is a serial session; serial support is coming in a later release")
-                          .arg(m_saved->name);
+            if (const QString e = validateSerial(*m_saved); !e.isEmpty()) {
+                l.error = QStringLiteral("session \"%1\": %2").arg(m_saved->name, e);
+            } else {
+                l.serial = *m_saved;
+            }
             break;
         case SessionConfig::Type::LocalShell:
             break;
@@ -398,6 +476,28 @@ void MainWindow::startSession()
     const Launch l = launchCommand();
     if (!l.error.isEmpty()) {
         m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n").arg(l.error).toUtf8());
+        return;
+    }
+    if (l.serial) {
+        const SessionConfig &s = *l.serial;
+        if (!m_serial->open(s)) {
+            m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n")
+                             .arg(QString(m_serial->errorString()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")))
+                             .toUtf8());
+            showSerialBanner(m_serial->errorString());
+            return;
+        }
+        m_banner->hide();
+        const QString line = QStringLiteral("%1 at %2 %3%4%5%6")
+                                 .arg(s.serialDevice)
+                                 .arg(s.baudRate)
+                                 .arg(s.dataBits)
+                                 .arg(s.parity.left(1).toUpper())
+                                 .arg(s.stopBits)
+                                 .arg(s.flowControl == QLatin1String("none") ? QString() : QStringLiteral(", ") + s.flowControl);
+        m_term->feed(QStringLiteral("\x1b[2m[connected to %1]\x1b[0m\r\n")
+                         .arg(line)
+                         .toUtf8());
         return;
     }
     const QSize grid(m_view->gridCols(), m_view->gridRows());
@@ -418,8 +518,54 @@ void MainWindow::onSessionFinished(int exitCode, bool crashed)
     m_term->feed(msg.toUtf8());
 }
 
+bool MainWindow::isSerialSession() const
+{
+    return m_request.kind == LaunchRequest::Kind::Serial
+        || (m_saved && m_saved->type == SessionConfig::Type::Serial);
+}
+
+QString MainWindow::serialBannerText() const
+{
+    return m_banner->isHidden() ? QString() : m_bannerText->text();
+}
+
+void MainWindow::showSerialBanner(const QString &text)
+{
+    m_bannerText->setText(text);
+    m_banner->show();
+}
+
+void MainWindow::onSerialDisconnected(const QString &reason)
+{
+    m_term->feed(QStringLiteral("\r\n\x1b[41;97m[%1]\x1b[0m\r\n").arg(reason).toUtf8());
+    showSerialBanner(QStringLiteral("Disconnected: %1 Plug it back in and press Reconnect.").arg(reason));
+    updatePasteBar(0);
+}
+
+void MainWindow::updatePasteBar(qint64 remaining)
+{
+    const bool show = remaining > 0 && m_serial->pacingEnabled();
+    m_pasteBar->setVisible(show);
+    if (QAction *a = action(QStringLiteral("cancelPaste"))) {
+        a->setEnabled(remaining > 0);
+    }
+    if (show) {
+        m_pasteText->setText(QStringLiteral("Sending paste slowly (%1 ms/char, %2 ms/line)\u2026 %3 bytes left")
+                                 .arg(m_serial->config().charDelayMs)
+                                 .arg(m_serial->config().lineDelayMs)
+                                 .arg(remaining));
+    }
+}
+
 void MainWindow::restartSession()
 {
+    if (isSerialSession()) {
+        // Reconnect: close and reopen the port.
+        m_serial->close();
+        m_term->feed(QByteArrayLiteral("\r\n"));
+        startSession();
+        return;
+    }
     if (m_pty->isRunning()) {
         const auto ret = QMessageBox::question(this, QStringLiteral("Restart Session"),
                                                QStringLiteral("The session is still running. Terminate it and restart?"));
@@ -489,9 +635,15 @@ bool MainWindow::openInNewWindow(const SessionConfig &cfg, QString *error)
             || fail(QStringLiteral("Could not start a new zterminal window."));
     }
     case SessionConfig::Type::Serial:
-        break;
+        if (const QString e = validateSerial(cfg); !e.isEmpty()) {
+            return fail(e);
+        }
+        // Unsaved: device and baud travel on the command line (8N1, no flow
+        // control); save the session to keep the other line settings.
+        return launch({QStringLiteral("serial"), cfg.serialDevice, QString::number(cfg.baudRate)})
+            || fail(QStringLiteral("Could not start a new zterminal window."));
     }
-    return fail(QStringLiteral("Serial sessions are coming in a later release."));
+    return fail(QStringLiteral("Unknown session type."));
 }
 
 std::optional<SessionConfig> MainWindow::currentSessionConfig(QString *why) const
@@ -504,9 +656,16 @@ std::optional<SessionConfig> MainWindow::currentSessionConfig(QString *why) cons
         return SessionConfig{};
     case LaunchRequest::Kind::Ssh:
         return sessionFromSshArgs(m_request.args, why);
+    case LaunchRequest::Kind::Serial: {
+        SessionConfig s;
+        s.type = SessionConfig::Type::Serial;
+        s.serialDevice = m_request.program;
+        s.baudRate = m_request.baudRate;
+        return s;
+    }
     default:
         if (why) {
-            *why = QStringLiteral("only local shell and SSH sessions can be saved");
+            *why = QStringLiteral("only local shell, SSH and serial sessions can be saved");
         }
         return std::nullopt;
     }
@@ -597,6 +756,7 @@ void MainWindow::showAbout()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    m_serial->close();
     m_pty->terminate();
     e->accept();
 }

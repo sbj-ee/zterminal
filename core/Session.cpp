@@ -62,6 +62,10 @@ bool SessionConfig::operator==(const SessionConfig &o) const
 {
     return name == o.name && type == o.type && host == o.host && user == o.user && port == o.port
         && keyFile == o.keyFile && jumpHost == o.jumpHost && extraArgs == o.extraArgs
+        && serialDevice == o.serialDevice && baudRate == o.baudRate && dataBits == o.dataBits
+        && parity == o.parity && stopBits == o.stopBits && flowControl == o.flowControl
+        && localEcho == o.localEcho && enterSends == o.enterSends && charDelayMs == o.charDelayMs
+        && lineDelayMs == o.lineDelayMs && breakMs == o.breakMs
         && fontFamily == o.fontFamily && fontSize == o.fontSize && colorScheme == o.colorScheme;
 }
 
@@ -79,8 +83,8 @@ QString validateSessionName(const QString &name)
     if (name.startsWith(QLatin1Char('-'))) {
         return QStringLiteral("Session name must not start with '-' (it would look like an option to zt).");
     }
-    if (name == QLatin1String("ssh")) {
-        return QStringLiteral("\"ssh\" is reserved (zt ssh ... opens an ad-hoc SSH session).");
+    if (name == QLatin1String("ssh") || name == QLatin1String("serial")) {
+        return QStringLiteral("\"%1\" is reserved (zt %1 ... opens an ad-hoc session).").arg(name);
     }
     if (name.size() > 200) {
         return QStringLiteral("Session name is too long.");
@@ -138,6 +142,56 @@ QString validateJumpHost(const QString &jump)
         }
     }
     return {};
+}
+
+QString validateSerial(const SessionConfig &s)
+{
+    if (s.serialDevice.isEmpty()) {
+        return QStringLiteral("Serial device is empty (e.g. /dev/ttyUSB0).");
+    }
+    if (!s.serialDevice.startsWith(QLatin1Char('/')) || hasControlChars(s.serialDevice)) {
+        return QStringLiteral("Serial device must be an absolute path such as /dev/ttyUSB0.");
+    }
+    if (s.baudRate < 50 || s.baudRate > 4000000) {
+        return QStringLiteral("Baud rate must be between 50 and 4000000.");
+    }
+    if (s.dataBits < 5 || s.dataBits > 8) {
+        return QStringLiteral("Data bits must be 5, 6, 7 or 8.");
+    }
+    static const QStringList parities{QStringLiteral("none"), QStringLiteral("even"), QStringLiteral("odd"),
+                                      QStringLiteral("mark"), QStringLiteral("space")};
+    if (!parities.contains(s.parity)) {
+        return QStringLiteral("Unknown parity \"%1\".").arg(s.parity);
+    }
+    if (s.stopBits != 1 && s.stopBits != 2) {
+        return QStringLiteral("Stop bits must be 1 or 2.");
+    }
+    static const QStringList flows{QStringLiteral("none"), QStringLiteral("rtscts"), QStringLiteral("xonxoff")};
+    if (!flows.contains(s.flowControl)) {
+        return QStringLiteral("Unknown flow control \"%1\".").arg(s.flowControl);
+    }
+    static const QStringList enters{QStringLiteral("cr"), QStringLiteral("crlf"), QStringLiteral("lf")};
+    if (!enters.contains(s.enterSends)) {
+        return QStringLiteral("Enter must send cr, crlf or lf.");
+    }
+    if (s.charDelayMs < 0 || s.charDelayMs > 1000 || s.lineDelayMs < 0 || s.lineDelayMs > 10000) {
+        return QStringLiteral("Paste delays must be 0-1000 ms per character and 0-10000 ms per line.");
+    }
+    if (s.breakMs < 10 || s.breakMs > 5000) {
+        return QStringLiteral("Break duration must be 10-5000 ms.");
+    }
+    return {};
+}
+
+QByteArray enterSequence(const QString &enterSends)
+{
+    if (enterSends == QLatin1String("crlf")) {
+        return QByteArrayLiteral("\r\n");
+    }
+    if (enterSends == QLatin1String("lf")) {
+        return QByteArrayLiteral("\n");
+    }
+    return QByteArrayLiteral("\r");
 }
 
 SshCommand buildSshCommand(const SessionConfig &s)

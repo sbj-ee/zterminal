@@ -3,6 +3,7 @@
 #   zt                      local shell
 #   zt <saved-session>      open a saved session
 #   zt ssh user@host [...]  ad-hoc SSH session through the system ssh
+#   zt serial /dev/ttyUSB0 [baud]  ad-hoc serial console
 #   zt --list-sessions      print saved session names
 #   zt --version | --help
 # ZTERMINAL_BIN overrides the binary (used by the test suite).
@@ -11,13 +12,14 @@ ZT_BIN=${ZTERMINAL_BIN:-zterminal}
 case "$1" in
   -h|--help)
     cat <<'USAGE'
-Usage: zt [SESSION | ssh [user@]host [ssh-args...] | -e command [args...]]
+Usage: zt [SESSION | ssh [user@]host [ssh-args...] | serial DEVICE [BAUD] | -e command [args...]]
        zt --version | --help
 
 Starts zterminal in the background (detached from this shell).
   zt                       open a local shell
   zt <saved-session>       open a saved session by name
   zt ssh user@host [args]  open an ad-hoc SSH session using the system ssh
+  zt serial DEVICE [BAUD]  open a serial console (default 9600 8N1)
   zt -e prog [args]        run prog in a new zterminal window
   zt --list-sessions       print the saved session names
 
@@ -35,13 +37,10 @@ if ! command -v "$ZT_BIN" >/dev/null 2>&1; then
   exit 127
 fi
 
-# A saved-session name: check it here, while stderr is still the terminal, so an
-# unknown name gives a clear error (with the saved names) instead of nothing.
-if [ $# -eq 1 ] && [ "$1" != ssh ]; then
-  case "$1" in
-    -*) ;;
-    *) "$ZT_BIN" --check-session "$1" || exit $? ;;
-  esac
+# Check the arguments (and a saved-session name) here, while stderr is still
+# the terminal, so a typo gives a clear error instead of nothing.
+if [ $# -gt 0 ]; then
+  "$ZT_BIN" --check "$@" || exit $?
 fi
 
 if command -v setsid >/dev/null 2>&1; then

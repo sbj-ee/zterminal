@@ -86,13 +86,12 @@ private slots:
         auto *list = child<QListWidget>(&d, "sessionList");
         QCOMPARE(list->count(), 1);
 
-        // Serial is listed but greyed out.
+        // Local shell, SSH and (since 0.3.0) Serial are all selectable.
         auto *type = child<QComboBox>(&d, "type");
         auto *model = qobject_cast<QStandardItemModel *>(type->model());
         QVERIFY(model);
         QCOMPARE(type->count(), 3);
-        QVERIFY(!model->item(2)->isEnabled());
-        QVERIFY(model->item(0)->isEnabled() && model->item(1)->isEnabled());
+        QVERIFY(model->item(0)->isEnabled() && model->item(1)->isEnabled() && model->item(2)->isEnabled());
 
         // SSH fields only for SSH.
         QVERIFY(!child<QWidget>(&d, "sshGroup")->isEnabled());

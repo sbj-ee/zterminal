@@ -34,6 +34,18 @@ std::optional<SessionConfig> readFile(const QString &path)
     s.keyFile = f.value(QStringLiteral("ssh/keyFile")).toString();
     s.jumpHost = f.value(QStringLiteral("ssh/jumpHost")).toString();
     s.extraArgs = f.value(QStringLiteral("ssh/extraArgs")).toString();
+    const SessionConfig d;
+    s.serialDevice = f.value(QStringLiteral("serial/device")).toString();
+    s.baudRate = f.value(QStringLiteral("serial/baudRate"), d.baudRate).toInt();
+    s.dataBits = f.value(QStringLiteral("serial/dataBits"), d.dataBits).toInt();
+    s.parity = f.value(QStringLiteral("serial/parity"), d.parity).toString();
+    s.stopBits = f.value(QStringLiteral("serial/stopBits"), d.stopBits).toInt();
+    s.flowControl = f.value(QStringLiteral("serial/flowControl"), d.flowControl).toString();
+    s.localEcho = f.value(QStringLiteral("serial/localEcho"), d.localEcho).toBool();
+    s.enterSends = f.value(QStringLiteral("serial/enterSends"), d.enterSends).toString();
+    s.charDelayMs = f.value(QStringLiteral("serial/charDelayMs"), d.charDelayMs).toInt();
+    s.lineDelayMs = f.value(QStringLiteral("serial/lineDelayMs"), d.lineDelayMs).toInt();
+    s.breakMs = f.value(QStringLiteral("serial/breakMs"), d.breakMs).toInt();
     s.fontFamily = f.value(QStringLiteral("appearance/fontFamily")).toString();
     s.fontSize = f.value(QStringLiteral("appearance/fontSize"), 0).toInt();
     s.colorScheme = f.value(QStringLiteral("appearance/colorScheme")).toString();
@@ -131,6 +143,19 @@ bool SessionStore::save(const SessionConfig &s, QString *error) const
             f.setValue(QStringLiteral("ssh/keyFile"), s.keyFile);
             f.setValue(QStringLiteral("ssh/jumpHost"), s.jumpHost);
             f.setValue(QStringLiteral("ssh/extraArgs"), s.extraArgs);
+        }
+        if (s.type == SessionConfig::Type::Serial) {
+            f.setValue(QStringLiteral("serial/device"), s.serialDevice);
+            f.setValue(QStringLiteral("serial/baudRate"), s.baudRate);
+            f.setValue(QStringLiteral("serial/dataBits"), s.dataBits);
+            f.setValue(QStringLiteral("serial/parity"), s.parity);
+            f.setValue(QStringLiteral("serial/stopBits"), s.stopBits);
+            f.setValue(QStringLiteral("serial/flowControl"), s.flowControl);
+            f.setValue(QStringLiteral("serial/localEcho"), s.localEcho);
+            f.setValue(QStringLiteral("serial/enterSends"), s.enterSends);
+            f.setValue(QStringLiteral("serial/charDelayMs"), s.charDelayMs);
+            f.setValue(QStringLiteral("serial/lineDelayMs"), s.lineDelayMs);
+            f.setValue(QStringLiteral("serial/breakMs"), s.breakMs);
         }
         if (!s.fontFamily.isEmpty()) {
             f.setValue(QStringLiteral("appearance/fontFamily"), s.fontFamily);

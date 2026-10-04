@@ -2,6 +2,7 @@
 
 #include "AppSettings.hpp"
 #include "ColorScheme.hpp"
+#include "SerialBackend.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -13,6 +14,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QIntValidator>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -76,10 +78,7 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_type->setObjectName(QStringLiteral("type"));
     m_type->addItem(QStringLiteral("Local shell"), SessionConfig::typeToString(SessionConfig::Type::LocalShell));
     m_type->addItem(QStringLiteral("SSH"), SessionConfig::typeToString(SessionConfig::Type::Ssh));
-    m_type->addItem(QStringLiteral("Serial (coming soon)"), SessionConfig::typeToString(SessionConfig::Type::Serial));
-    if (auto *model = qobject_cast<QStandardItemModel *>(m_type->model())) {
-        model->item(2)->setEnabled(false);
-    }
+    m_type->addItem(QStringLiteral("Serial"), SessionConfig::typeToString(SessionConfig::Type::Serial));
     typeForm->addRow(QStringLiteral("Type:"), m_type);
     connLayout->addLayout(typeForm);
 
@@ -123,6 +122,97 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_preview->setToolTip(QStringLiteral("The exact argv zterminal runs (no shell is involved)"));
     sshForm->addRow(QStringLiteral("Runs:"), m_preview);
     connLayout->addWidget(m_sshBox);
+
+    m_serialBox = new QGroupBox(QStringLiteral("Serial"));
+    m_serialBox->setObjectName(QStringLiteral("serialGroup"));
+    auto *serForm = new QFormLayout(m_serialBox);
+    auto *devRow = new QHBoxLayout;
+    m_device = new QComboBox;
+    m_device->setObjectName(QStringLiteral("serialDevice"));
+    m_device->setEditable(true);
+    m_device->setInsertPolicy(QComboBox::NoInsert);
+    m_device->lineEdit()->setPlaceholderText(QStringLiteral("/dev/ttyUSB0"));
+    m_device->setMinimumContentsLength(16);
+    auto *rescan = new QPushButton(QStringLiteral("Rescan"));
+    rescan->setObjectName(QStringLiteral("rescanPorts"));
+    rescan->setAutoDefault(false);
+    connect(rescan, &QPushButton::clicked, this, &SessionDialog::refreshPorts);
+    devRow->addWidget(m_device, 1);
+    devRow->addWidget(rescan);
+    serForm->addRow(QStringLiteral("Device:"), devRow);
+    m_baud = new QComboBox;
+    m_baud->setObjectName(QStringLiteral("baudRate"));
+    m_baud->setEditable(true);
+    for (int b : {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600}) {
+        m_baud->addItem(QString::number(b));
+    }
+    m_baud->setValidator(new QIntValidator(50, 4000000, m_baud));
+    auto *lineRow = new QHBoxLayout;
+    m_dataBits = new QComboBox;
+    m_dataBits->setObjectName(QStringLiteral("dataBits"));
+    for (int d : {8, 7, 6, 5}) {
+        m_dataBits->addItem(QString::number(d), d);
+    }
+    m_parity = new QComboBox;
+    m_parity->setObjectName(QStringLiteral("parity"));
+    for (const auto &[label, id] : {std::pair{"None", "none"}, {"Even", "even"}, {"Odd", "odd"}, {"Mark", "mark"}, {"Space", "space"}}) {
+        m_parity->addItem(QString::fromLatin1(label), QString::fromLatin1(id));
+    }
+    m_stopBits = new QComboBox;
+    m_stopBits->setObjectName(QStringLiteral("stopBits"));
+    m_stopBits->addItem(QStringLiteral("1"), 1);
+    m_stopBits->addItem(QStringLiteral("2"), 2);
+    lineRow->addWidget(m_baud, 2);
+    lineRow->addWidget(new QLabel(QStringLiteral("Data")));
+    lineRow->addWidget(m_dataBits);
+    lineRow->addWidget(new QLabel(QStringLiteral("Parity")));
+    lineRow->addWidget(m_parity);
+    lineRow->addWidget(new QLabel(QStringLiteral("Stop")));
+    lineRow->addWidget(m_stopBits);
+    serForm->addRow(QStringLiteral("Baud:"), lineRow);
+    m_flow = new QComboBox;
+    m_flow->setObjectName(QStringLiteral("flowControl"));
+    m_flow->addItem(QStringLiteral("None"), QStringLiteral("none"));
+    m_flow->addItem(QStringLiteral("RTS/CTS (hardware)"), QStringLiteral("rtscts"));
+    m_flow->addItem(QStringLiteral("XON/XOFF (software)"), QStringLiteral("xonxoff"));
+    serForm->addRow(QStringLiteral("Flow control:"), m_flow);
+    auto *keyRow2 = new QHBoxLayout;
+    m_enter = new QComboBox;
+    m_enter->setObjectName(QStringLiteral("enterSends"));
+    m_enter->addItem(QStringLiteral("CR"), QStringLiteral("cr"));
+    m_enter->addItem(QStringLiteral("CR+LF"), QStringLiteral("crlf"));
+    m_enter->addItem(QStringLiteral("LF"), QStringLiteral("lf"));
+    m_localEcho = new QCheckBox(QStringLiteral("Local echo"));
+    m_localEcho->setObjectName(QStringLiteral("localEcho"));
+    keyRow2->addWidget(m_enter);
+    keyRow2->addSpacing(12);
+    keyRow2->addWidget(m_localEcho);
+    keyRow2->addStretch(1);
+    serForm->addRow(QStringLiteral("Enter sends:"), keyRow2);
+    auto *paceRow = new QHBoxLayout;
+    m_charDelay = new QSpinBox;
+    m_charDelay->setObjectName(QStringLiteral("charDelayMs"));
+    m_charDelay->setRange(0, 1000);
+    m_charDelay->setSuffix(QStringLiteral(" ms/char"));
+    m_lineDelay = new QSpinBox;
+    m_lineDelay->setObjectName(QStringLiteral("lineDelayMs"));
+    m_lineDelay->setRange(0, 10000);
+    m_lineDelay->setSingleStep(50);
+    m_lineDelay->setSuffix(QStringLiteral(" ms/line"));
+    paceRow->addWidget(m_charDelay);
+    paceRow->addWidget(m_lineDelay);
+    serForm->addRow(QStringLiteral("Paste pacing:"), paceRow);
+    m_breakMs = new QSpinBox;
+    m_breakMs->setObjectName(QStringLiteral("breakMs"));
+    m_breakMs->setRange(10, 5000);
+    m_breakMs->setSingleStep(50);
+    m_breakMs->setSuffix(QStringLiteral(" ms"));
+    serForm->addRow(QStringLiteral("Send Break:"), m_breakMs);
+    auto *paceNote = new QLabel(QStringLiteral(
+        "<small>Pacing slows pastes for consoles that drop characters (e.g. Cisco: 5 ms/char, 100 ms/line).</small>"));
+    serForm->addRow(paceNote);
+    connLayout->addWidget(m_serialBox);
+    refreshPorts();
 
     auto *lookBox = new QGroupBox(QStringLiteral("Appearance for this session"));
     auto *lookForm = new QFormLayout(lookBox);
@@ -215,7 +305,11 @@ void SessionDialog::refreshList(const QString &select)
 void SessionDialog::updateEnabled()
 {
     const bool ssh = m_type->currentData().toString() == SessionConfig::typeToString(SessionConfig::Type::Ssh);
+    const bool serial = m_type->currentData().toString() == SessionConfig::typeToString(SessionConfig::Type::Serial);
     m_sshBox->setEnabled(ssh);
+    m_sshBox->setVisible(ssh);
+    m_serialBox->setEnabled(serial);
+    m_serialBox->setVisible(serial);
     m_font->setEnabled(m_overrideFont->isChecked());
     m_load->setEnabled(m_list->currentItem() != nullptr);
     m_delete->setEnabled(m_list->currentItem() != nullptr);
@@ -262,6 +356,19 @@ SessionConfig SessionDialog::config() const
         c.jumpHost = m_jump->text().trimmed();
         c.extraArgs = m_extra->text().trimmed();
     }
+    if (c.type == SessionConfig::Type::Serial) {
+        c.serialDevice = m_device->currentText().trimmed();
+        c.baudRate = m_baud->currentText().toInt();
+        c.dataBits = m_dataBits->currentData().toInt();
+        c.parity = m_parity->currentData().toString();
+        c.stopBits = m_stopBits->currentData().toInt();
+        c.flowControl = m_flow->currentData().toString();
+        c.localEcho = m_localEcho->isChecked();
+        c.enterSends = m_enter->currentData().toString();
+        c.charDelayMs = m_charDelay->value();
+        c.lineDelayMs = m_lineDelay->value();
+        c.breakMs = m_breakMs->value();
+    }
     if (m_overrideFont->isChecked()) {
         c.fontFamily = m_font->currentFont().family();
     }
@@ -280,6 +387,17 @@ void SessionDialog::setConfig(const SessionConfig &s)
     m_key->setText(s.keyFile);
     m_jump->setText(s.jumpHost);
     m_extra->setText(s.extraArgs);
+    m_device->setCurrentText(s.serialDevice);
+    m_baud->setCurrentText(QString::number(s.baudRate));
+    m_dataBits->setCurrentIndex(std::max(0, m_dataBits->findData(s.dataBits)));
+    m_parity->setCurrentIndex(std::max(0, m_parity->findData(s.parity)));
+    m_stopBits->setCurrentIndex(std::max(0, m_stopBits->findData(s.stopBits)));
+    m_flow->setCurrentIndex(std::max(0, m_flow->findData(s.flowControl)));
+    m_localEcho->setChecked(s.localEcho);
+    m_enter->setCurrentIndex(std::max(0, m_enter->findData(s.enterSends)));
+    m_charDelay->setValue(s.charDelayMs);
+    m_lineDelay->setValue(s.lineDelayMs);
+    m_breakMs->setValue(s.breakMs);
     m_overrideFont->setChecked(!s.fontFamily.isEmpty());
     m_font->setCurrentFont(s.fontFamily.isEmpty() ? AppSettings::load().font() : QFont(s.fontFamily));
     m_fontSize->setValue(s.fontSize);
@@ -298,6 +416,14 @@ void SessionDialog::setError(const QString &e)
 {
     m_error->setText(e);
     m_error->setVisible(!e.isEmpty());
+}
+
+void SessionDialog::refreshPorts()
+{
+    const QString current = m_device->currentText();
+    m_device->clear();
+    m_device->addItems(SerialBackend::availablePorts());
+    m_device->setCurrentText(current);
 }
 
 bool SessionDialog::loadSelected()
@@ -326,6 +452,12 @@ bool SessionDialog::saveCurrent()
     if (c.type == SessionConfig::Type::Ssh) {
         if (const SshCommand cmd = buildSshCommand(c); !cmd.ok()) {
             setError(cmd.error);
+            return false;
+        }
+    }
+    if (c.type == SessionConfig::Type::Serial) {
+        if (const QString e = validateSerial(c); !e.isEmpty()) {
+            setError(e);
             return false;
         }
     }
@@ -359,8 +491,10 @@ bool SessionDialog::openSession()
 {
     const SessionConfig c = config();
     if (c.type == SessionConfig::Type::Serial) {
-        setError(QStringLiteral("Serial sessions are coming in a later release."));
-        return false;
+        if (const QString e = validateSerial(c); !e.isEmpty()) {
+            setError(e);
+            return false;
+        }
     }
     if (c.type == SessionConfig::Type::Ssh) {
         if (const SshCommand cmd = buildSshCommand(c); !cmd.ok()) {
