@@ -16,7 +16,7 @@ jobs:
     name: Linux (ubuntu-24.04)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Qt 6 + build tools
         run: |
@@ -44,7 +44,7 @@ jobs:
           dpkg-deb -c zterminal_*_amd64.deb | grep -q './usr/bin/zterminal$'
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zterminal-deb
           path: build/zterminal_*_amd64.deb
