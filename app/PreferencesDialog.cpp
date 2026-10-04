@@ -81,10 +81,30 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     auto *termForm = new QFormLayout(termBox);
     m_scrollback = new QSpinBox;
     m_scrollback->setObjectName(QStringLiteral("scrollbackLines"));
-    m_scrollback->setRange(0, 1000000);
-    m_scrollback->setSingleStep(1000);
-    m_scrollback->setValue(current.scrollbackLines);
-    termForm->addRow(QStringLiteral("Scrollback lines:"), m_scrollback);
+    m_scrollback->setRange(0, 10000000);
+    m_scrollback->setSingleStep(10000);
+    m_scrollback->setGroupSeparatorShown(true);
+    m_scrollback->setValue(current.scrollbackLines < 0 ? AppSettings::kDefaultScrollbackLines
+                                                       : current.scrollbackLines);
+    m_unlimitedScrollback = new QCheckBox(QStringLiteral("Unlimited"));
+    m_unlimitedScrollback->setObjectName(QStringLiteral("unlimitedScrollback"));
+    m_unlimitedScrollback->setChecked(current.scrollbackLines < 0);
+    auto *scrollRow = new QHBoxLayout;
+    scrollRow->addWidget(m_scrollback, 1);
+    scrollRow->addWidget(m_unlimitedScrollback);
+    termForm->addRow(QStringLiteral("Scrollback lines (per tab):"), scrollRow);
+    m_scrollbackWarning = new QLabel(QStringLiteral(
+        "<small><b>Unlimited keeps every line in memory.</b> History is compressed (about %1 per<br>"
+        "100,000 lines of typical output), but a busy session left running for days can still<br>"
+        "use a lot of memory. Session &gt; Clear Scrollback frees it.</small>").arg(QStringLiteral("3\u20135 MB")));
+    m_scrollbackWarning->setObjectName(QStringLiteral("unlimitedScrollbackWarning"));
+    termForm->addRow(m_scrollbackWarning);
+    auto syncUnlimited = [this]() {
+        m_scrollback->setEnabled(!m_unlimitedScrollback->isChecked());
+        m_scrollbackWarning->setVisible(m_unlimitedScrollback->isChecked());
+    };
+    connect(m_unlimitedScrollback, &QCheckBox::toggled, this, syncUnlimited);
+    syncUnlimited();
     m_vaultAutoLock = new QSpinBox;
     m_vaultAutoLock->setObjectName(QStringLiteral("vaultAutoLockMinutes"));
     m_vaultAutoLock->setRange(0, 24 * 60);
@@ -155,7 +175,7 @@ AppSettings PreferencesDialog::result() const
     }
     a.fontSize = m_fontSize->value();
     a.colorScheme = m_scheme->currentData().toString();
-    a.scrollbackLines = m_scrollback->value();
+    a.scrollbackLines = m_unlimitedScrollback->isChecked() ? AppSettings::kUnlimitedScrollback : m_scrollback->value();
     a.vaultAutoLockMinutes = m_vaultAutoLock->value();
     a.logDirectory = m_logDir->text().trimmed();
     a.logTimestamps = m_logTimestamps->isChecked();

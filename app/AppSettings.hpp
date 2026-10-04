@@ -15,7 +15,10 @@ struct AppSettings {
     QString fontFamily;
     int fontSize = 11;
     QString colorScheme = QStringLiteral("xterm");
-    int scrollbackLines = 10000;
+    // History lines per tab (0 = none, -1 = unlimited; see docs/PLAN.md §4.16).
+    int scrollbackLines = 100000;
+    static constexpr int kDefaultScrollbackLines = 100000;
+    static constexpr int kUnlimitedScrollback = -1;
     MouseSettings mouse;
     // Stored now; the startup update checker itself lands in a later release.
     bool checkForUpdatesOnStartup = true;

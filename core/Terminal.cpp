@@ -110,11 +110,11 @@ void Terminal::resize(int rows, int cols)
 
 void Terminal::setScrollbackLimit(int lines)
 {
-    m_scrollbackLimit = std::max(lines, 0);
+    m_scrollbackLimit = lines < 0 ? kUnlimitedScrollback : lines;
     int dropped = 0;
-    while (static_cast<int>(m_scrollback.size()) > m_scrollbackLimit) {
-        m_scrollback.pop_front();
-        ++dropped;
+    if (m_scrollbackLimit >= 0 && m_history.size() > m_scrollbackLimit) {
+        dropped = m_history.size() - m_scrollbackLimit;
+        dropHistoryFront(dropped);
     }
     if (dropped) {
         emit scrolledIntoHistory(0, dropped);
@@ -122,9 +122,89 @@ void Terminal::setScrollbackLimit(int lines)
     }
 }
 
+void Terminal::dropHistoryFront(int n)
+{
+    m_history.popFront(n);
+    m_historyBase += quint64(n);
+}
+
+void Terminal::trimHistory()
+{
+    if (m_scrollbackLimit >= 0 && m_history.size() > m_scrollbackLimit) {
+        const int n = m_history.size() - m_scrollbackLimit;
+        dropHistoryFront(n);
+        m_dropped += n;
+    }
+}
+
+const VTermScreenCell *Terminal::historyCell(int absLine, int col) const
+{
+    const quint64 key = m_historyBase + quint64(absLine);
+    for (auto &e : m_lineCache) {
+        if (e.first == key) {
+            return col < static_cast<int>(e.second.size()) ? &e.second[size_t(col)] : nullptr;
+        }
+    }
+    constexpr size_t kCacheLines = 8;
+    if (m_lineCache.size() >= kCacheLines) {
+        m_lineCache.erase(m_lineCache.begin());
+    }
+    m_lineCache.emplace_back(key, std::vector<VTermScreenCell>{});
+    m_history.line(absLine, &m_lineCache.back().second);
+    const auto &v = m_lineCache.back().second;
+    return col < static_cast<int>(v.size()) ? &v[size_t(col)] : nullptr;
+}
+
+QString Terminal::searchText(int absLine, std::vector<int> *colOfChar) const
+{
+    const int sb = scrollbackLines();
+    if (absLine < 0 || absLine >= totalLines()) {
+        return {};
+    }
+    if (absLine < sb) {
+        return m_history.lineText(absLine, colOfChar);
+    }
+    QString s;
+    qsizetype keep = 0;
+    size_t keepCols = 0;
+    VTermScreenCell c;
+    for (int col = 0; col < m_cols; ++col) {
+        std::memset(&c, 0, sizeof c);
+        vterm_screen_get_cell(m_screen, VTermPos{absLine - sb, col}, &c);
+        if (c.chars[0] == kWideGap) {
+            continue;
+        }
+        if (c.chars[0] == 0) {
+            s.append(QLatin1Char(' '));
+            if (colOfChar) {
+                colOfChar->push_back(col);
+            }
+            continue;
+        }
+        for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && c.chars[i]; ++i) {
+            const char32_t cp = c.chars[i];
+            const QString u = QString::fromUcs4(&cp, 1);
+            s += u;
+            if (colOfChar) {
+                for (qsizetype k = 0; k < u.size(); ++k) {
+                    colOfChar->push_back(col);
+                }
+            }
+        }
+        keep = s.size();
+        keepCols = colOfChar ? colOfChar->size() : 0;
+    }
+    s.truncate(keep);
+    if (colOfChar) {
+        colOfChar->resize(keepCols);
+    }
+    return s;
+}
+
 void Terminal::clearScrollback()
 {
-    m_scrollback.clear();
+    m_history.clear();
+    m_lineCache.clear();
     emit scrollbackCleared();
     emit damaged();
 }
@@ -192,9 +272,8 @@ Cell Terminal::cell(int absLine, int col) const
         return blank;
     }
     if (absLine < sb) {
-        const auto &line = m_scrollback[static_cast<size_t>(absLine)];
-        if (col < static_cast<int>(line.size())) {
-            return convert(line[static_cast<size_t>(col)]);
+        if (const VTermScreenCell *hc = historyCell(absLine, col)) {
+            return convert(*hc);
         }
         Cell blank;
         blank.fg = m_scheme.foreground;
@@ -354,26 +433,23 @@ int Terminal::cbBell(void *user)
 int Terminal::cbPushLine(int cols, const VTermScreenCell *cells, void *user)
 {
     auto *t = static_cast<Terminal *>(user);
-    if (t->m_scrollbackLimit <= 0) {
+    if (t->m_scrollbackLimit == 0) {
         return 1;
     }
-    t->m_scrollback.emplace_back(cells, cells + cols);
+    t->m_history.push(cells, cols);
     ++t->m_pushed;
-    while (static_cast<int>(t->m_scrollback.size()) > t->m_scrollbackLimit) {
-        t->m_scrollback.pop_front();
-        ++t->m_dropped;
-    }
+    t->trimHistory();
     return 1;
 }
 
 int Terminal::cbPopLine(int cols, VTermScreenCell *cells, void *user)
 {
     auto *t = static_cast<Terminal *>(user);
-    if (t->m_scrollback.empty()) {
+    std::vector<VTermScreenCell> line;
+    if (!t->m_history.popBack(&line)) {
         return 0;
     }
-    const std::vector<VTermScreenCell> line = std::move(t->m_scrollback.back());
-    t->m_scrollback.pop_back();
+    t->m_lineCache.clear();
     VTermColor fg;
     VTermColor bg;
     vterm_state_get_default_colors(t->m_state, &fg, &bg);
@@ -394,7 +470,8 @@ int Terminal::cbPopLine(int cols, VTermScreenCell *cells, void *user)
 int Terminal::cbSbClear(void *user)
 {
     auto *t = static_cast<Terminal *>(user);
-    t->m_scrollback.clear();
+    t->m_history.clear();
+    t->m_lineCache.clear();
     emit t->scrollbackCleared();
     t->m_dirty = true;
     return 1;

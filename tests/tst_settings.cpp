@@ -15,6 +15,7 @@
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QFontComboBox>
+#include <QLabel>
 #include <QFontDatabase>
 #include <QKeyEvent>
 #include <QMenu>
@@ -91,7 +92,7 @@ private slots:
         const AppSettings a = AppSettings::load(s);
         QCOMPARE(a.fontSize, AppSettings::kDefaultFontSize);
         QCOMPARE(a.colorScheme, QStringLiteral("xterm"));
-        QCOMPARE(a.scrollbackLines, 10000);
+        QCOMPARE(a.scrollbackLines, 100000);
         QVERIFY(a.checkForUpdatesOnStartup);
         QVERIFY(a.mouse.copyOnSelectToClipboard);
         QCOMPARE(a.mouse.middleClick, MiddleClickAction::PastePrimary);
@@ -172,6 +173,19 @@ private slots:
         QCOMPARE(r.fontSize, 19);
         QCOMPARE(r.colorScheme, ColorScheme::builtIn().last().id);
         QCOMPARE(r.scrollbackLines, 2500);
+        // Unlimited: the spin box is disabled and a memory warning shows.
+        auto *unlimited = d.findChild<QCheckBox *>(QStringLiteral("unlimitedScrollback"));
+        auto *warning = d.findChild<QLabel *>(QStringLiteral("unlimitedScrollbackWarning"));
+        QVERIFY(unlimited && warning);
+        QVERIFY(!unlimited->isChecked());
+        QVERIFY(warning->isHidden());
+        unlimited->setChecked(true);
+        QVERIFY(!scroll->isEnabled());
+        QVERIFY(!warning->isHidden());
+        QVERIFY(warning->text().contains(QStringLiteral("memory")));
+        QCOMPARE(d.result().scrollbackLines, AppSettings::kUnlimitedScrollback);
+        unlimited->setChecked(false);
+        QCOMPARE(d.result().scrollbackLines, 2500);
         QCOMPARE(r.checkForUpdatesOnStartup, false);
         if (!other.isEmpty()) {
             QCOMPARE(r.fontFamily, font->currentFont().family());
