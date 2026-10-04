@@ -27,7 +27,6 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QProcess>
 #include <QSet>
 #include <QTabBar>
 #include <QTabWidget>
@@ -46,9 +45,10 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     : QMainWindow(parent)
     , m_settings(AppSettings::load())
 {
-    m_launcher = [](const QString &program, const QStringList &args) {
-        return QProcess::startDetached(program, args);
-    };
+    // New windows open in this process, so they share its one unlocked vault
+    // (until 0.7.0 File > New Window started a new process with its own,
+    // locked vault and asked for the master password again).
+    m_launcher = [](const QString &, const QStringList &args) { return openWindow(args) != nullptr; };
     m_tabs = new QTabWidget(this);
     m_tabs->setObjectName(QStringLiteral("tabs"));
     m_tabs->setDocumentMode(true);
@@ -271,8 +271,8 @@ void MainWindow::buildMenus()
     QMenu *vaultMenu = settings->addMenu(QStringLiteral("Password &Vault"));
     connect(addAct(vaultMenu, QStringLiteral("unlockVault"), QStringLiteral("&Unlock Vault\u2026")),
             &QAction::triggered, this, [this]() {
-                VaultManager &vm = VaultManager::instance();
-                vm.exists() ? vm.unlockInteractive(this) : vm.createInteractive(this);
+                // Already unlocked (in any window or tab): no prompt.
+                VaultManager::instance().ensureUnlocked(this, {}, /*allowCreate=*/true);
             });
     connect(addAct(vaultMenu, QStringLiteral("lockVault"), QStringLiteral("&Lock Vault"), QKS(QStringLiteral("Ctrl+Shift+L"))),
             &QAction::triggered, &VaultManager::instance(), &VaultManager::lock);
@@ -593,8 +593,8 @@ void MainWindow::reloadSettings()
 
 void MainWindow::watchSettingsFile()
 {
-    // Each window is its own process, so changes made in one window reach the
-    // others through the settings file. QSettings replaces the file atomically,
+    // Changes made in one window reach the others (in this process and in
+    // separately started zterminals) through the settings file. QSettings replaces the file atomically,
     // so watch the directory too and re-add the file after every change.
     if (!m_settingsWatcher) {
         m_settingsWatcher = new QFileSystemWatcher(this);
@@ -638,6 +638,44 @@ void MainWindow::updateVaultActions()
     if (QAction *a = action(QStringLiteral("changeMasterPassword"))) {
         a->setEnabled(vm.exists());
     }
+}
+
+MainWindow *MainWindow::openWindow(const QStringList &args, QString *error)
+{
+    const LaunchRequest r = parseCommandLine(args);
+    QString why;
+    switch (r.kind) {
+    case LaunchRequest::Kind::Error:
+        why = r.error;
+        break;
+    case LaunchRequest::Kind::Version:
+    case LaunchRequest::Kind::Help:
+    case LaunchRequest::Kind::ListSessions:
+    case LaunchRequest::Kind::CheckSession:
+        why = QStringLiteral("not a session");
+        break;
+    case LaunchRequest::Kind::SavedSession:
+        if (const SessionStore store; !store.contains(r.sessionName)) {
+            why = store.unknownSessionMessage(r.sessionName);
+        }
+        break;
+    default:
+        break;
+    }
+    if (!why.isEmpty()) {
+        if (error) {
+            *error = why;
+        }
+        return nullptr;
+    }
+    auto *w = new MainWindow(r, args);
+    w->setAttribute(Qt::WA_DeleteOnClose);
+    w->show();
+    // Now, while its only tab is the current one (as main() does). A deferred
+    // start would hit whatever tab is current by then: a tab opened meanwhile
+    // would be started twice and lose its one-shot askpass socket.
+    w->startSession();
+    return w;
 }
 
 void MainWindow::duplicateSession()

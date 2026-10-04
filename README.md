@@ -112,6 +112,12 @@ forget the master password, the stored passwords are lost.**
   If the vault is locked you're asked to unlock it (Cancel = type the password yourself).
 - Serial: set **Login user** and **Login password**, then use Session > Send Stored Login. The
   password is sent only when the device shows a password prompt.
+- **One unlock per app (0.7.1).** All tabs and windows opened from inside zterminal (New Tab,
+  Open Saved Session, Duplicate, File > New Window) run in one process and share the unlocked
+  vault: you're asked for the master password only the first time, after Lock Vault
+  (Ctrl+Shift+L, locks every window), or after the idle auto-lock. Using a stored password
+  counts as activity. A zterminal started separately (e.g. `zt name` from a shell) is its own
+  process and unlocks on its own.
 
 **Threat model.** The vault protects the passwords **at rest**: in the file, in backups and
 against casual access to your disk. It does **not** protect against malware running as your

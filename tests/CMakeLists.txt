@@ -43,6 +43,12 @@ add_dependencies(tst_vaultui zterminal-askpass)
 set_tests_properties(tst_vaultui PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_vaultui;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
   TIMEOUT 120)
+# Regression (0.7.1): one unlock serves every window and tab; Lock and idle re-prompt.
+zterminal_add_test(tst_vaultshared zterminal_ui)
+add_dependencies(tst_vaultshared zterminal-askpass)
+set_tests_properties(tst_vaultshared PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_vaultshared;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
+  TIMEOUT 120)
 
 # The binary and the zt launcher answer --version/--help without a display.
 add_test(NAME zterminal_version COMMAND zterminal --version)
