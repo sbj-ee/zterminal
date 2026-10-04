@@ -5,6 +5,7 @@
 #include <QDialog>
 
 class QCheckBox;
+class QLabel;
 class QComboBox;
 class QFontComboBox;
 class QLineEdit;
@@ -39,6 +40,8 @@ private:
     QLineEdit *m_logDir = nullptr;
     QCheckBox *m_logTimestamps = nullptr;
     QCheckBox *m_trimCopy = nullptr;
+    QCheckBox *m_unlimitedScrollback = nullptr;
+    QLabel *m_scrollbackWarning = nullptr;
     QCheckBox *m_confirmPaste = nullptr;
     QString m_initialComboFamily; // what the font combo showed before any edit
 };

@@ -14,7 +14,9 @@ and milestones.
 - xterm-style emulation via libvterm: 16, 256 and 24-bit colour, bold, italic, underline,
   reverse, strike, alternate screen, wide characters, bracketed paste, and the 1000/1002/1003/1006
   mouse modes
-- Scrollback (10,000 lines by default): wheel, scroll bar, Shift+PgUp/PgDn/Home/End
+- Scrollback (0.8.0): 100,000 lines per tab by default, or Unlimited (Preferences), stored
+  compactly and zlib-compressed (about 3 MB per 100,000 lines of colourful log output);
+  wheel, scroll bar, Shift+PgUp/PgDn/Home/End
 - Mouse, PuTTY/X11 style:
   - left-drag selects, and releasing **copies to PRIMARY and CLIPBOARD**
   - double-click selects a word, triple-click a line
@@ -54,7 +56,13 @@ and milestones.
   paste with more than one line asks first (line count, preview, "don't ask again for this
   session"). Both are on by default in Preferences. See [Copy and paste](#copy-and-paste).
 
-Planned next: Find and update checks (see the plan).
+- Find (0.8.0): Edit > Find… (Ctrl+Shift+F) opens a find bar under the current tab and searches
+  that tab's whole scrollback plus the screen. Enter = next (older) match, Shift+Enter =
+  previous (newer), Esc closes. Options: Match case, Regex, Wrap. All matches are highlighted
+  (the current one in orange) with a count like "3 of 120"; 100,000 lines search in about 0.15 s.
+  Matches that run across a wrapped line are found and highlighted on both lines.
+
+Planned next: update checks (see the plan).
 
 ## Usage
 
