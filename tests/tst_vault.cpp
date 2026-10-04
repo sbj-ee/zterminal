@@ -1,0 +1,333 @@
+// core/Vault: file format, Argon2id/XChaCha20-Poly1305 round trip, tamper and
+// truncation detection, password change, permissions, atomic writes, and the
+// production KDF defaults. Uses cheap KDF parameters via the test hook except
+// in productionDefaults*.
+#include "SecureBuffer.hpp"
+#include "Vault.hpp"
+
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
+#include <QTest>
+
+#include <sodium.h>
+
+#include <sys/stat.h>
+
+using namespace zterminal;
+
+namespace {
+
+SecureBuffer pw(const char *s)
+{
+    return SecureBuffer::fromQString(QString::fromUtf8(s));
+}
+
+QString str(const SecureBuffer *b)
+{
+    return b ? QString::fromUtf8(reinterpret_cast<const char *>(b->data()), qsizetype(b->size())) : QStringLiteral("<null>");
+}
+
+QByteArray readAll(const QString &p)
+{
+    QFile f(p);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+void writeAll(const QString &p, const QByteArray &d)
+{
+    QFile f(p);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    f.write(d);
+}
+
+std::uint64_t le64(const QByteArray &d, int off)
+{
+    std::uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) {
+        v |= std::uint64_t(static_cast<unsigned char>(d[off + i])) << (8 * i);
+    }
+    return v;
+}
+
+} // namespace
+
+class TstVault : public QObject
+{
+    Q_OBJECT
+    QTemporaryDir tmp;
+    int n = 0;
+
+    QString freshPath() { return tmp.filePath(QStringLiteral("v%1/vault.bin").arg(++n)); }
+
+    // A vault with two secrets, locked again.
+    QString makeVault()
+    {
+        const QString p = freshPath();
+        Vault v(p);
+        if (!v.create(pw("correct horse")) || !v.setSecret(QStringLiteral("ssh-password/core-sw1"), pw("s3cret-ssh"))
+            || !v.setSecret(QStringLiteral("serial-password/console"), pw("ciscö🔑"))) {
+            qFatal("makeVault: %s", qPrintable(v.lastError()));
+        }
+        return p;
+    }
+
+private slots:
+    void initTestCase()
+    {
+        QVERIFY(SecureBuffer::ensureSodium());
+        Vault::setKdfOverrideForTests(1, 8192); // crypto_pwhash minimums: fast tests
+    }
+
+    void productionDefaults()
+    {
+        // The parameters real vaults get (the hook only lowers them in tests).
+        QCOMPARE(Vault::kProductionMemLimit, std::uint64_t(256) * 1024 * 1024);
+        QCOMPARE(Vault::kMinOps, std::uint64_t(2));
+        QCOMPARE(Vault::kMaxOps, std::uint64_t(10));
+        QVERIFY(Vault::kTargetSeconds >= 0.5 && Vault::kTargetSeconds <= 1.0);
+        QCOMPARE(int(crypto_pwhash_ALG_ARGON2ID13), crypto_pwhash_alg_argon2id13());
+        // Calibration: ops = round(target / seconds-per-pass), clamped to [2, 10].
+        QCOMPARE(Vault::opsForTiming(0.25), std::uint64_t(3));
+        QCOMPARE(Vault::opsForTiming(0.15), std::uint64_t(5));
+        QCOMPARE(Vault::opsForTiming(2.0), std::uint64_t(2));   // slow machine: floor
+        QCOMPARE(Vault::opsForTiming(0.001), std::uint64_t(10)); // fast machine: cap
+        QCOMPARE(Vault::opsForTiming(0.0), std::uint64_t(2));
+        const Vault::KdfParams p = Vault::productionParams();
+        QCOMPARE(p.memLimit, Vault::kProductionMemLimit);
+        QVERIFY(p.opsLimit >= 2 && p.opsLimit <= 10);
+        // With the hook set, new vaults are cheap; without it they get production params.
+        QCOMPARE(Vault::paramsForNewVault().memLimit, std::uint64_t(8192));
+        Vault::clearKdfOverrideForTests();
+        QCOMPARE(Vault::paramsForNewVault().memLimit, Vault::kProductionMemLimit);
+        Vault::setKdfOverrideForTests(1, 8192);
+    }
+
+    void productionDefaultsRealVault()
+    {
+        // One real 256 MiB derivation: the header records the production params.
+        Vault::clearKdfOverrideForTests();
+        const QString p = freshPath();
+        {
+            Vault v(p);
+            QElapsedTimer t;
+            t.start();
+            QVERIFY2(v.create(pw("correct horse")), qPrintable(v.lastError()));
+            qInfo("production KDF: opslimit=%s memlimit=%s MiB, create took %s ms",
+                  qPrintable(QString::number(v.kdfParams().opsLimit)),
+                  qPrintable(QString::number(v.kdfParams().memLimit >> 20)), qPrintable(QString::number(t.elapsed())));
+        }
+        const QByteArray d = readAll(p);
+        QCOMPARE(le64(d, 20), Vault::kProductionMemLimit);
+        QCOMPARE(le64(d, 12), Vault::productionParams().opsLimit);
+        Vault v(p);
+        QVERIFY(v.unlock(pw("correct horse")));
+        Vault::setKdfOverrideForTests(1, 8192);
+    }
+
+    void headerLayout()
+    {
+        const QString p = makeVault();
+        const QByteArray d = readAll(p);
+        QVERIFY(d.size() >= Vault::kHeaderSize + 16);
+        QCOMPARE(d.left(8), QByteArray("ZTVAULT\0", 8));
+        QCOMPARE(int(uchar(d[8])) | (int(uchar(d[9])) << 8), 1); // format version
+        QCOMPARE(int(uchar(d[10])), 1); // KDF: argon2id13
+        QCOMPARE(int(uchar(d[11])), 1); // AEAD: xchacha20poly1305-ietf
+        QCOMPARE(le64(d, 12), std::uint64_t(1));
+        QCOMPARE(le64(d, 20), std::uint64_t(8192));
+        // Nothing readable in the file.
+        QVERIFY(!d.contains("s3cret"));
+        QVERIFY(!d.contains("core-sw1"));
+    }
+
+    void roundTrip()
+    {
+        const QString p = makeVault();
+        Vault v(p);
+        QVERIFY(v.exists());
+        QVERIFY(!v.isUnlocked());
+        QVERIFY(!v.secret(QStringLiteral("ssh-password/core-sw1")));
+        QVERIFY2(v.unlock(pw("correct horse")), qPrintable(v.lastError()));
+        QCOMPARE(str(v.secret(QStringLiteral("ssh-password/core-sw1"))), QStringLiteral("s3cret-ssh"));
+        QCOMPARE(str(v.secret(QStringLiteral("serial-password/console"))), QString::fromUtf8("ciscö🔑"));
+        QCOMPARE(v.keys().size(), 2);
+        QVERIFY(v.removeSecret(QStringLiteral("serial-password/console")));
+        v.lock();
+        QVERIFY(v.unlock(pw("correct horse")));
+        QCOMPARE(v.keys(), QStringList{QStringLiteral("ssh-password/core-sw1")});
+    }
+
+    void wrongPasswordFails()
+    {
+        const QString p = makeVault();
+        Vault v(p);
+        QVERIFY(!v.unlock(pw("correct horsf")));
+        QVERIFY(!v.isUnlocked());
+        QVERIFY(v.lastError().contains(QStringLiteral("Wrong master password")));
+        QVERIFY(!v.unlock(pw("")));
+        QVERIFY(v.unlock(pw("correct horse")));
+    }
+
+    void createRefusesExistingAndEmpty()
+    {
+        const QString p = makeVault();
+        Vault v(p);
+        QVERIFY(!v.create(pw("other")));
+        Vault e(freshPath());
+        QVERIFY(!e.create(pw("")));
+        QVERIFY(!e.exists());
+    }
+
+    void everyTamperedHeaderByteIsDetected()
+    {
+        const QString p = makeVault();
+        const QByteArray good = readAll(p);
+        for (int i = 0; i < Vault::kHeaderSize; ++i) {
+            QByteArray bad = good;
+            bad[i] = char(bad[i] ^ 0x01);
+            writeAll(p, bad);
+            Vault v(p);
+            QVERIFY2(!v.unlock(pw("correct horse")), qPrintable(QStringLiteral("header byte %1 not detected").arg(i)));
+            QVERIFY(!v.isUnlocked());
+        }
+        writeAll(p, good);
+        Vault v(p);
+        QVERIFY(v.unlock(pw("correct horse")));
+    }
+
+    void tamperedCiphertextIsDetected()
+    {
+        const QString p = makeVault();
+        const QByteArray good = readAll(p);
+        // First / middle ciphertext byte and the last (tag) byte.
+        for (qsizetype i : {qsizetype(Vault::kHeaderSize), (Vault::kHeaderSize + good.size()) / 2, good.size() - 1}) {
+            QByteArray bad = good;
+            bad[i] = char(bad[i] ^ 0x80);
+            writeAll(p, bad);
+            Vault v(p);
+            QVERIFY2(!v.unlock(pw("correct horse")), qPrintable(QStringLiteral("byte %1 not detected").arg(i)));
+            QVERIFY(v.lastError().contains(QStringLiteral("modified or damaged")));
+        }
+    }
+
+    void truncatedFileIsDetected()
+    {
+        const QString p = makeVault();
+        const QByteArray good = readAll(p);
+        for (qsizetype len : {qsizetype(0), qsizetype(7), qsizetype(Vault::kHeaderSize - 1), qsizetype(Vault::kHeaderSize),
+                              qsizetype(Vault::kHeaderSize + 15), good.size() - 1}) {
+            writeAll(p, good.left(len));
+            Vault v(p);
+            QVERIFY2(!v.unlock(pw("correct horse")), qPrintable(QStringLiteral("truncation to %1 not detected").arg(len)));
+        }
+        // Appended garbage is detected as well.
+        writeAll(p, good + "x");
+        Vault v(p);
+        QVERIFY(!v.unlock(pw("correct horse")));
+    }
+
+    void changePasswordReencrypts()
+    {
+        const QString p = makeVault();
+        const QByteArray before = readAll(p);
+        Vault v(p);
+        QVERIFY(v.unlock(pw("correct horse")));
+        QVERIFY(!v.changePassword(pw("not it"), pw("battery staple")));
+        QVERIFY(v.isUnlocked()); // a failed change doesn't lock or alter anything
+        QCOMPARE(readAll(p), before);
+        QVERIFY2(v.changePassword(pw("correct horse"), pw("battery staple")), qPrintable(v.lastError()));
+        const QByteArray after = readAll(p);
+        QVERIFY(after.mid(28, 16) != before.mid(28, 16)); // new salt
+        QVERIFY(after.mid(44, 24) != before.mid(44, 24)); // new nonce
+        QCOMPARE(str(v.secret(QStringLiteral("ssh-password/core-sw1"))), QStringLiteral("s3cret-ssh"));
+        v.lock();
+        QVERIFY(!v.unlock(pw("correct horse"))); // old password no longer works
+        QVERIFY(v.unlock(pw("battery staple")));
+        QCOMPARE(str(v.secret(QStringLiteral("serial-password/console"))), QString::fromUtf8("ciscö🔑"));
+        // Another window holding the old key notices and locks instead of clobbering.
+        Vault other(p);
+        QVERIFY(other.unlock(pw("battery staple")));
+        QVERIFY(v.changePassword(pw("battery staple"), pw("third one!")));
+        QVERIFY(!other.setSecret(QStringLiteral("x"), pw("y")));
+        QVERIFY(!other.isUnlocked());
+        QVERIFY(other.lastError().contains(QStringLiteral("another window")));
+    }
+
+    void twoWindowsDontLoseUpdates()
+    {
+        const QString p = makeVault();
+        Vault a(p), b(p);
+        QVERIFY(a.unlock(pw("correct horse")));
+        QVERIFY(b.unlock(pw("correct horse")));
+        QVERIFY(a.setSecret(QStringLiteral("ssh-password/a"), pw("A")));
+        QVERIFY(b.setSecret(QStringLiteral("ssh-password/b"), pw("B"))); // b re-reads first
+        Vault c(p);
+        QVERIFY(c.unlock(pw("correct horse")));
+        QCOMPARE(str(c.secret(QStringLiteral("ssh-password/a"))), QStringLiteral("A"));
+        QCOMPARE(str(c.secret(QStringLiteral("ssh-password/b"))), QStringLiteral("B"));
+    }
+
+    void fileIsPrivateAndWrittenAtomically()
+    {
+        const QString p = makeVault();
+        struct stat st {};
+        QCOMPARE(::stat(QFile::encodeName(p).constData(), &st), 0);
+        QCOMPARE(st.st_mode & 0777, mode_t(0600));
+        Vault v(p);
+        QVERIFY(v.unlock(pw("correct horse")));
+        const ino_t inodeBefore = st.st_ino;
+        QVERIFY(v.setSecret(QStringLiteral("k"), pw("v")));
+        QCOMPARE(::stat(QFile::encodeName(p).constData(), &st), 0);
+        QVERIFY(st.st_ino != inodeBefore); // replaced by rename(), not rewritten in place
+        QCOMPARE(st.st_mode & 0777, mode_t(0600));
+        // No temp files left behind.
+        const QStringList left = QFileInfo(p).dir().entryList(QDir::Files | QDir::Hidden);
+        QCOMPARE(left, (QStringList{QStringLiteral("vault.bin"), QStringLiteral("vault.bin.lock")}));
+        // A failed write (read-only dir) leaves the old file intact.
+        const QByteArray good = readAll(p);
+        QFile::setPermissions(QFileInfo(p).absolutePath(), QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+        if (::access(QFile::encodeName(QFileInfo(p).absolutePath()).constData(), W_OK) != 0) { // not root
+            QVERIFY(!v.setSecret(QStringLiteral("k2"), pw("v2")));
+            QCOMPARE(readAll(p), good);
+        }
+        QFile::setPermissions(QFileInfo(p).absolutePath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    }
+
+    void lockWipesEverything()
+    {
+        const QString p = makeVault();
+        Vault v(p);
+        QVERIFY(v.unlock(pw("correct horse")));
+        QVERIFY(v.secret(QStringLiteral("ssh-password/core-sw1")));
+        v.lock();
+        QVERIFY(!v.isUnlocked());
+        QVERIFY(!v.secret(QStringLiteral("ssh-password/core-sw1")));
+        QVERIFY(v.keys().isEmpty());
+        QVERIFY(!v.setSecret(QStringLiteral("k"), pw("v"))); // locked: refuses
+    }
+
+    void secureBuffer()
+    {
+        const QString s = QString::fromUtf8("pässwörd 🔑 \xe2\x82\xac");
+        SecureBuffer b = SecureBuffer::fromQString(s);
+        QCOMPARE(QByteArray(reinterpret_cast<const char *>(b.data()), qsizetype(b.size())), s.toUtf8());
+        SecureBuffer c = b.clone();
+        QVERIFY(b.equals(c));
+        c.wipe();
+        QCOMPARE(c.size(), b.size());
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            QCOMPARE(int(c.data()[i]), 0);
+        }
+        SecureBuffer moved = std::move(b);
+        QVERIFY(b.isEmpty());
+        QVERIFY(!moved.isEmpty());
+        moved.reset();
+        QVERIFY(moved.isEmpty() && moved.data() == nullptr);
+    }
+};
+
+QTEST_GUILESS_MAIN(TstVault)
+#include "tst_vault.moc"

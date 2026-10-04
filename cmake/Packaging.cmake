@@ -2,6 +2,8 @@
 include(GNUInstallDirs)
 
 install(TARGETS zterminal RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# ssh's SSH_ASKPASS helper for vault-stored passwords (not for direct use).
+install(TARGETS zterminal-askpass RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/zterminal)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/zt DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES ${CMAKE_SOURCE_DIR}/packaging/zterminal.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
@@ -22,8 +24,9 @@ set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # Qt's Wayland platform plugin is what gives PRIMARY selection on GNOME Wayland;
-# libqt6serialport6 is the serial backend (shlibdeps finds it too; listed explicitly).
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-wayland, libqt6serialport6")
+# libqt6serialport6 is the serial backend and libsodium23 the vault crypto
+# (shlibdeps finds both too; listed explicitly).
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-wayland, libqt6serialport6, libsodium23")
 # zterminal_<ver>_amd64.deb (the name the updater expects).
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 include(CPack)

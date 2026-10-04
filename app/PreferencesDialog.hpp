@@ -33,6 +33,7 @@ private:
     QSpinBox *m_fontSize = nullptr;
     QComboBox *m_scheme = nullptr;
     QSpinBox *m_scrollback = nullptr;
+    QSpinBox *m_vaultAutoLock = nullptr;
     QCheckBox *m_checkUpdates = nullptr;
     QString m_initialComboFamily; // what the font combo showed before any edit
 };

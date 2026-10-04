@@ -1,5 +1,9 @@
 #include "MainWindow.hpp"
 
+#include "AskpassServer.hpp"
+#include "SecureBuffer.hpp"
+#include "Vault.hpp"
+#include "VaultManager.hpp"
 #include "ColorScheme.hpp"
 #include "PreferencesDialog.hpp"
 #include "SessionDialog.hpp"
@@ -28,6 +32,8 @@
 #include <QProcess>
 #include <QSet>
 #include <QTimer>
+
+#include <sodium.h>
 
 namespace zterminal {
 
@@ -107,6 +113,7 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
         }
     });
     connect(m_serial, &SerialBackend::dataReceived, m_term, &Terminal::feed);
+    connect(m_serial, &SerialBackend::dataReceived, this, &MainWindow::onSerialData);
     connect(m_serial, &SerialBackend::disconnected, this, &MainWindow::onSerialDisconnected);
     connect(m_serial, &SerialBackend::pendingChanged, this, &MainWindow::updatePasteBar);
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
@@ -117,6 +124,8 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     connect(m_view, &TerminalView::contextMenuRequested, this, &MainWindow::showContextMenu);
 
     buildMenus();
+    connect(&VaultManager::instance(), &VaultManager::lockedChanged, this, &MainWindow::updateVaultActions);
+    updateVaultActions();
     applySettings();
     watchSettingsFile();
     updateTitle();
@@ -266,6 +275,12 @@ void MainWindow::buildMenus()
             showSerialBanner(QStringLiteral("Not connected: Send Break needs an open serial port."));
         }
     });
+    QAction *login = addAct(session, QStringLiteral("sendStoredLogin"), QStringLiteral("Send Stored &Login"), {},
+                            isSerialSession() && m_saved);
+    login->setToolTip(isSerialSession() && m_saved
+                          ? QStringLiteral("Sends the login user, then the vault password when the device asks for it")
+                          : QStringLiteral("Saved serial sessions only"));
+    connect(login, &QAction::triggered, this, &MainWindow::sendStoredLogin);
     QAction *cancelPasteAct = addAct(session, QStringLiteral("cancelPaste"), QStringLiteral("Cancel &Paste"), {}, false);
     connect(cancelPasteAct, &QAction::triggered, m_serial, &SerialBackend::cancelPending);
     session->addSeparator();
@@ -287,6 +302,17 @@ void MainWindow::buildMenus()
     // Ctrl+Shift+, (Qt reports Shift+comma as '<' on US layouts, so register both).
     prefs->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Comma), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Less)});
     connect(prefs, &QAction::triggered, this, &MainWindow::showPreferences);
+    settings->addSeparator();
+    QMenu *vaultMenu = settings->addMenu(QStringLiteral("Password &Vault"));
+    connect(addAct(vaultMenu, QStringLiteral("unlockVault"), QStringLiteral("&Unlock Vault\u2026")),
+            &QAction::triggered, this, [this]() {
+                VaultManager &vm = VaultManager::instance();
+                vm.exists() ? vm.unlockInteractive(this) : vm.createInteractive(this);
+            });
+    connect(addAct(vaultMenu, QStringLiteral("lockVault"), QStringLiteral("&Lock Vault"), QKS(QStringLiteral("Ctrl+Shift+L"))),
+            &QAction::triggered, &VaultManager::instance(), &VaultManager::lock);
+    connect(addAct(vaultMenu, QStringLiteral("changeMasterPassword"), QStringLiteral("&Change Master Password\u2026")),
+            &QAction::triggered, this, [this]() { VaultManager::instance().changePasswordInteractive(this); });
 
     // Help
     QMenu *help = menuBar()->addMenu(QStringLiteral("&Help"));
@@ -340,6 +366,7 @@ void MainWindow::applySettings()
     m_view->setMouseSettings(m_settings.mouse);
     m_term->setScrollbackLimit(m_settings.scrollbackLines);
     m_term->setColorScheme(ColorScheme::byId(eff.colorScheme));
+    VaultManager::instance().setAutoLockMinutes(m_settings.vaultAutoLockMinutes);
     for (QAction *a : m_schemeGroup->actions()) {
         a->setChecked(a->data().toString() == m_term->colorScheme().id);
     }
@@ -501,11 +528,162 @@ void MainWindow::startSession()
         return;
     }
     const QSize grid(m_view->gridCols(), m_view->gridRows());
-    if (!m_pty->start(l.program, l.args, grid.height(), grid.width())) {
+    const QStringList env = prepareStoredPassword();
+    if (!m_pty->start(l.program, l.args, grid.height(), grid.width(), env)) {
         m_term->feed(QStringLiteral("\x1b[31mzterminal: could not start %1: %2\x1b[0m\r\n")
                          .arg(l.program.isEmpty() ? Pty::defaultShell() : l.program, m_pty->errorString())
                          .toUtf8());
+        delete m_askpass;
+        m_askpass = nullptr;
+        return;
     }
+    if (m_askpass) {
+        m_askpass->setAllowedAncestor(m_pty->pid());
+    }
+}
+
+QStringList MainWindow::prepareStoredPassword()
+{
+    delete m_askpass; // a restart gets a fresh one-shot server
+    m_askpass = nullptr;
+    if (!m_saved || m_saved->type != SessionConfig::Type::Ssh || !m_saved->useStoredPassword) {
+        return {};
+    }
+    auto note = [this](const QString &m) {
+        m_term->feed(QStringLiteral("\x1b[2m[zterminal: %1]\x1b[0m\r\n").arg(m).toUtf8());
+    };
+    const QString helper = AskpassServer::findHelper();
+    if (helper.isEmpty()) {
+        note(QStringLiteral("zterminal-askpass not found; ssh will ask for the password"));
+        return {};
+    }
+    VaultManager &vm = VaultManager::instance();
+    if (!vm.exists()) {
+        note(QStringLiteral("no password vault yet; ssh will ask for the password"));
+        return {};
+    }
+    if (!vm.ensureUnlocked(this, QStringLiteral("Session \"%1\" uses a stored password.").arg(m_saved->name.toHtmlEscaped()))) {
+        note(QStringLiteral("vault locked; ssh will ask for the password"));
+        return {};
+    }
+    vm.vault().refresh();
+    const SecureBuffer *secret =
+        vm.vault().secret(Vault::secretKeyFor(QStringLiteral("ssh-password"), m_saved->name));
+    if (!secret) {
+        note(QStringLiteral("no stored password for this session; ssh will ask for it"));
+        return {};
+    }
+    m_askpass = new AskpassServer(secret->clone(), this);
+    QString err;
+    if (!m_askpass->listen(&err)) {
+        delete m_askpass;
+        m_askpass = nullptr;
+        note(QStringLiteral("can't offer the stored password (%1); ssh will ask for it").arg(err));
+        return {};
+    }
+    connect(m_askpass, &AskpassServer::served, this, [note]() {
+        note(QStringLiteral("stored password sent once; if it is rejected, ssh asks here"));
+    });
+    return m_askpass->sshEnvironment(helper);
+}
+
+void MainWindow::updateVaultActions()
+{
+    VaultManager &vm = VaultManager::instance();
+    const bool open = vm.isUnlocked();
+    if (QAction *a = action(QStringLiteral("unlockVault"))) {
+        a->setText(vm.exists() ? QStringLiteral("&Unlock Vault\u2026") : QStringLiteral("&Create Vault\u2026"));
+        a->setEnabled(!open);
+    }
+    if (QAction *a = action(QStringLiteral("lockVault"))) {
+        a->setEnabled(open);
+    }
+    if (QAction *a = action(QStringLiteral("changeMasterPassword"))) {
+        a->setEnabled(vm.exists());
+    }
+}
+
+namespace {
+// The device is *currently* asking for a password: the last line received
+// (no newline after it yet) mentions "password" and ends with ':'.
+bool endsWithPasswordPrompt(const QByteArray &tail)
+{
+    const QByteArray t = tail.trimmed();
+    const qsizetype nl = std::max(t.lastIndexOf('\n'), t.lastIndexOf('\r'));
+    const QByteArray last = t.mid(nl + 1).toLower();
+    return last.contains("assword") && last.endsWith(':');
+}
+} // namespace
+
+void MainWindow::onSerialData(const QByteArray &d)
+{
+    m_serialTail.append(d);
+    if (m_serialTail.size() > 512) {
+        m_serialTail.remove(0, m_serialTail.size() - 512);
+    }
+    if (m_loginWait && endsWithPasswordPrompt(m_serialTail)) {
+        finishLogin(true);
+    }
+}
+
+bool MainWindow::sendStoredLogin()
+{
+    if (!m_saved || m_saved->type != SessionConfig::Type::Serial || !m_serial->isOpen() || m_loginWait) {
+        return false;
+    }
+    VaultManager &vm = VaultManager::instance();
+    if (!vm.exists()) {
+        QMessageBox::information(this, QStringLiteral("Send Stored Login"),
+                                 QStringLiteral("There is no password vault yet. Store a login password in File > New Session (Save)."));
+        return false;
+    }
+    if (!vm.ensureUnlocked(this, QStringLiteral("Send Stored Login for \"%1\".").arg(m_saved->name.toHtmlEscaped()))) {
+        return false;
+    }
+    vm.vault().refresh();
+    if (!vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))) {
+        QMessageBox::information(this, QStringLiteral("Send Stored Login"),
+                                 QStringLiteral("No login password is stored for \"%1\".").arg(m_saved->name));
+        return false;
+    }
+    m_loginWait = new QTimer(this);
+    m_loginWait->setSingleShot(true);
+    m_loginWait->setInterval(10000);
+    connect(m_loginWait, &QTimer::timeout, this, [this]() { finishLogin(false); });
+    const bool promptShowing = endsWithPasswordPrompt(m_serialTail);
+    m_serialTail.clear();
+    if (promptShowing) {
+        finishLogin(true);
+        return true;
+    }
+    if (!m_saved->loginUser.isEmpty()) {
+        m_serial->write(m_saved->loginUser.toUtf8() + '\r'); // write() maps CR to the session's Enter
+    }
+    m_loginWait->start();
+    return true;
+}
+
+void MainWindow::finishLogin(bool sendPassword)
+{
+    delete m_loginWait;
+    m_loginWait = nullptr;
+    if (!sendPassword) {
+        m_term->feed(QByteArrayLiteral("\r\n\x1b[2m[zterminal: no password prompt within 10 s; stored password NOT sent]\x1b[0m\r\n"));
+        return;
+    }
+    VaultManager &vm = VaultManager::instance();
+    const SecureBuffer *pw = vm.isUnlocked() && m_saved
+        ? vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))
+        : nullptr;
+    if (!pw) {
+        return;
+    }
+    // QSerialPort keeps its own write buffer (not locked memory); wipe our copy.
+    QByteArray bytes(reinterpret_cast<const char *>(pw->data()), qsizetype(pw->size()));
+    bytes += '\r';
+    m_serial->write(bytes, /*echo=*/false);
+    sodium_memzero(bytes.data(), std::size_t(bytes.size()));
+    m_serialTail.clear(); // that prompt has been answered
 }
 
 void MainWindow::onSessionFinished(int exitCode, bool crashed)

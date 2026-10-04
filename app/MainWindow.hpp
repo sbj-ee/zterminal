@@ -21,6 +21,7 @@ class QMenu;
 
 namespace zterminal {
 
+class AskpassServer;
 class Pty;
 class SerialBackend;
 class Terminal;
@@ -86,6 +87,13 @@ public:
     // Open Settings > Preferences (modal).
     void showPreferences();
 
+    // Vault-backed SSH password for this session's next start (tests).
+    AskpassServer *askpassServer() const { return m_askpass; }
+    // Session > Send Stored Login (serial): user + Enter, then the password once
+    // a "password" prompt arrives (never typed blind). False if not started.
+    bool sendStoredLogin();
+    bool loginPending() const { return m_loginWait != nullptr; }
+
 protected:
     void closeEvent(QCloseEvent *e) override;
 
@@ -110,6 +118,10 @@ private:
     void onSerialDisconnected(const QString &reason);
     void updatePasteBar(qint64 remaining);
     bool launch(const QStringList &args);
+    QStringList prepareStoredPassword();
+    void updateVaultActions();
+    void onSerialData(const QByteArray &d);
+    void finishLogin(bool sendPassword);
 
     LaunchRequest m_request;
     std::optional<SessionConfig> m_saved;
@@ -130,6 +142,9 @@ private:
     QFileSystemWatcher *m_settingsWatcher = nullptr;
     QTimer *m_reloadTimer = nullptr;
     QList<QAction *> m_actions;
+    AskpassServer *m_askpass = nullptr;
+    QByteArray m_serialTail; // last bytes received (prompt detection for Send Stored Login)
+    QTimer *m_loginWait = nullptr;
 };
 
 } // namespace zterminal

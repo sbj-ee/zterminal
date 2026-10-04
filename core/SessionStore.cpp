@@ -34,6 +34,7 @@ std::optional<SessionConfig> readFile(const QString &path)
     s.keyFile = f.value(QStringLiteral("ssh/keyFile")).toString();
     s.jumpHost = f.value(QStringLiteral("ssh/jumpHost")).toString();
     s.extraArgs = f.value(QStringLiteral("ssh/extraArgs")).toString();
+    s.useStoredPassword = f.value(QStringLiteral("ssh/authFromVault"), false).toBool();
     const SessionConfig d;
     s.serialDevice = f.value(QStringLiteral("serial/device")).toString();
     s.baudRate = f.value(QStringLiteral("serial/baudRate"), d.baudRate).toInt();
@@ -46,10 +47,12 @@ std::optional<SessionConfig> readFile(const QString &path)
     s.charDelayMs = f.value(QStringLiteral("serial/charDelayMs"), d.charDelayMs).toInt();
     s.lineDelayMs = f.value(QStringLiteral("serial/lineDelayMs"), d.lineDelayMs).toInt();
     s.breakMs = f.value(QStringLiteral("serial/breakMs"), d.breakMs).toInt();
+    s.loginUser = f.value(QStringLiteral("serial/loginUser")).toString();
     s.fontFamily = f.value(QStringLiteral("appearance/fontFamily")).toString();
     s.fontSize = f.value(QStringLiteral("appearance/fontSize"), 0).toInt();
     s.colorScheme = f.value(QStringLiteral("appearance/colorScheme")).toString();
-    // Any password-like key someone adds by hand is ignored: there is no field for it.
+    // Any password-like key someone adds by hand is ignored: there is no field for it
+    // (stored passwords live only in the encrypted vault).
     return s;
 }
 } // namespace
@@ -143,6 +146,8 @@ bool SessionStore::save(const SessionConfig &s, QString *error) const
             f.setValue(QStringLiteral("ssh/keyFile"), s.keyFile);
             f.setValue(QStringLiteral("ssh/jumpHost"), s.jumpHost);
             f.setValue(QStringLiteral("ssh/extraArgs"), s.extraArgs);
+            // Only a flag: the password itself is in the encrypted vault.
+            f.setValue(QStringLiteral("ssh/authFromVault"), s.useStoredPassword);
         }
         if (s.type == SessionConfig::Type::Serial) {
             f.setValue(QStringLiteral("serial/device"), s.serialDevice);
@@ -156,6 +161,9 @@ bool SessionStore::save(const SessionConfig &s, QString *error) const
             f.setValue(QStringLiteral("serial/charDelayMs"), s.charDelayMs);
             f.setValue(QStringLiteral("serial/lineDelayMs"), s.lineDelayMs);
             f.setValue(QStringLiteral("serial/breakMs"), s.breakMs);
+            if (!s.loginUser.isEmpty()) {
+                f.setValue(QStringLiteral("serial/loginUser"), s.loginUser); // a user name, not a secret
+            }
         }
         if (!s.fontFamily.isEmpty()) {
             f.setValue(QStringLiteral("appearance/fontFamily"), s.fontFamily);

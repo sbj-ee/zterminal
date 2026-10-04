@@ -13,7 +13,8 @@ namespace zterminal {
 // $XDG_CONFIG_HOME/zterminal/sessions/ (default ~/.config/zterminal/sessions/).
 // The file name is the session name, percent-encoded (so "core sw/1" becomes
 // "core%20sw%2F1.ini"), and the real name is also stored inside as session/name.
-// Files are plain, human-editable INI. No password is ever written.
+// Files are plain, human-editable INI. No password is ever written; stored
+// passwords live only in the encrypted vault (Vault.hpp).
 class SessionStore
 {
 public:

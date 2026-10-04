@@ -30,13 +30,18 @@ and milestones.
 - `zt` launcher: starts zterminal detached from your shell
 - Saved sessions (0.2.0): local shell or SSH, via a PuTTY-style dialog (File > New Session,
   Open Saved Session, Save Session). SSH runs the system `ssh` with a validated argv
-  (no shell). Passwords are never stored: use keys, the agent, or ssh's own prompt.
+  (no shell). Session files never contain passwords.
 
 - Serial consoles (0.3.0): QSerialPort, 9600 8N1 by default (Cisco console), any baud,
   data/parity/stop bits, flow control, local echo, CR / CR+LF / LF on Enter, paste pacing
   (ms per character and per line, queued, with Cancel), Session > Send Break (300 ms by
   default), a clear `dialout` explanation on permission errors, and a Reconnect banner
   when the adapter is unplugged.
+- Password vault (0.4.0): optional, encrypted (Argon2id + XChaCha20-Poly1305, libsodium) in
+  `~/.config/zterminal/vault.bin`. Per SSH session, "Use stored password" answers ssh's first
+  password prompt through an `SSH_ASKPASS` helper; per serial session, Session > Send Stored
+  Login. Settings > Password Vault: Create/Unlock, Lock (Ctrl+Shift+L), Change Master Password;
+  auto-lock after 15 idle minutes (Preferences). See [Password vault](#password-vault).
 
 Planned next: Find and update checks (see the plan).
 
@@ -73,7 +78,8 @@ extraArgs=-o ServerAliveInterval=30
 A serial session (`type=serial`) has a `[serial]` group: `device`, `baudRate` (9600),
 `dataBits` (8), `parity` (none|even|odd|mark|space), `stopBits` (1|2), `flowControl`
 (none|rtscts|xonxoff), `localEcho`, `enterSends` (cr|crlf|lf), `charDelayMs`, `lineDelayMs`
-and `breakMs` (300).
+and `breakMs` (300), plus optional `loginUser`. An SSH session may have `authFromVault=true`
+("Use stored password"); that flag is all the INI ever says about a password.
 
 Serial devices belong to the `dialout` group. If opening one says "Permission denied", run
 `sudo usermod -aG dialout $USER` and log out and back in.
@@ -82,12 +88,34 @@ The SSH example above runs `ssh -o ServerAliveInterval=30 -l admin -i /home/you/
 Host, user and jump host are validated (no leading `-`, no spaces or shell characters),
 extra arguments must be ssh options, and the host always follows `--`.
 
+## Password vault
+
+Prefer SSH keys with `ssh-agent`; the vault is for devices and hosts where you must use a
+password. Creating the vault asks for a master password twice. **There is no recovery: if you
+forget the master password, the stored passwords are lost.**
+
+- SSH: in the session dialog tick **Use stored password**, type the password, press **Save**.
+  It goes to the vault, never to the session file. When the session starts, ssh calls
+  `zterminal-askpass` (`SSH_ASKPASS_REQUIRE=force`), which fetches the password once over a
+  private one-shot Unix socket; if the server rejects it, ssh asks you in the terminal as usual.
+  If the vault is locked you're asked to unlock it (Cancel = type the password yourself).
+- Serial: set **Login user** and **Login password**, then use Session > Send Stored Login. The
+  password is sent only when the device shows a password prompt.
+
+**Threat model.** The vault protects the passwords **at rest**: in the file, in backups and
+against casual access to your disk. It does **not** protect against malware running as your
+user, root, keyloggers, or anyone who can read zterminal's memory while the vault is unlocked
+(the key and secrets are in locked, zeroed-on-free memory, but Qt's password fields keep their
+own copy while you type). Lock it when you step away, or let auto-lock do it.
+
+Later: unlock via the Secret Service / GNOME Keyring.
+
 ## Building
 
-Requires CMake 3.21+, a C++20 compiler, Ninja, and Qt 6.4+ (Widgets, Test).
+Requires CMake 3.21+, a C++20 compiler, Ninja, Qt 6.4+ (Widgets, SerialPort, Test) and libsodium (via pkg-config).
 
 ```sh
-sudo apt-get install -y qt6-base-dev libgl1-mesa-dev cmake ninja-build g++
+sudo apt-get install -y qt6-base-dev qt6-serialport-dev libsodium-dev pkg-config libgl1-mesa-dev cmake ninja-build g++
 cmake -B build -G Ninja
 cmake --build build
 ./build/app/zterminal
@@ -103,7 +131,7 @@ ctest --test-dir build --output-on-failure      # headless (QT_QPA_PLATFORM=offs
 ## Packaging
 
 ```sh
-cd build && cpack -G DEB      # -> zterminal_<version>_amd64.deb (installs zterminal and zt)
+cd build && cpack -G DEB      # -> zterminal_<version>_amd64.deb (zterminal, zt, /usr/libexec/zterminal/zterminal-askpass)
 ```
 
 ## Version bumps
@@ -118,6 +146,7 @@ from it.
 - `app/`: Qt Widgets UI (`MainWindow`, `TerminalView`, Preferences)
 - `tests/`: Qt Test suites plus the `colortest.sh` script
 - `third_party/libvterm/`: bundled, unmodified libvterm 0.3.3 (MIT)
+- `askpass/`: `zterminal-askpass`, the plain-C `SSH_ASKPASS` helper
 - `packaging/`: `zt` launcher and `.desktop` file
 
 ## License
