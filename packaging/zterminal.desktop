@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=zterminal
+GenericName=Terminal
+Comment=PuTTY-like terminal emulator
+Exec=zterminal
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;Qt;
+Keywords=terminal;shell;ssh;serial;putty;
+StartupWMClass=zterminal

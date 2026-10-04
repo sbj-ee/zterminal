@@ -1,0 +1,37 @@
+#!/bin/sh
+# zt: start zterminal detached from the calling shell, so the prompt comes back at once.
+#   zt                      local shell
+#   zt <saved-session>      open a saved session
+#   zt ssh user@host [...]  ad-hoc SSH session through the system ssh
+#   zt --version | --help
+# ZTERMINAL_BIN overrides the binary (used by the test suite).
+ZT_BIN=${ZTERMINAL_BIN:-zterminal}
+
+case "$1" in
+  -h|--help)
+    cat <<'USAGE'
+Usage: zt [SESSION | ssh [user@]host [ssh-args...] | -e command [args...]]
+       zt --version | --help
+
+Starts zterminal in the background (detached from this shell).
+  zt                       open a local shell
+  zt <saved-session>       open a saved session by name
+  zt ssh user@host [args]  open an ad-hoc SSH session using the system ssh
+  zt -e prog [args]        run prog in a new zterminal window
+USAGE
+    exit 0 ;;
+  -v|--version)
+    exec "$ZT_BIN" --version ;;
+esac
+
+if ! command -v "$ZT_BIN" >/dev/null 2>&1; then
+  echo "zt: '$ZT_BIN' not found on PATH" >&2
+  exit 127
+fi
+
+if command -v setsid >/dev/null 2>&1; then
+  setsid -f "$ZT_BIN" "$@" </dev/null >/dev/null 2>&1
+else
+  nohup "$ZT_BIN" "$@" </dev/null >/dev/null 2>&1 &
+fi
+exit 0
