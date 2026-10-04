@@ -33,7 +33,8 @@ public:
     QString device() const { return m_cfg.serialDevice; }
     const SessionConfig &config() const { return m_cfg; }
 
-    void write(const QByteArray &data);
+    // echo=false: never local-echo (used for stored passwords).
+    void write(const QByteArray &data, bool echo = true);
     // Bytes still queued by the pacer.
     qint64 pending() const { return m_queue.size(); }
     bool pacingEnabled() const { return m_cfg.charDelayMs > 0 || m_cfg.lineDelayMs > 0; }

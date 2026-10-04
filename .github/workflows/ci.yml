@@ -23,7 +23,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             qt6-base-dev qt6-qpa-plugins libgl1-mesa-dev cmake ninja-build g++ dpkg-dev fonts-dejavu-core \
-            xvfb xauth dbus qt6-serialport-dev socat
+            xvfb xauth dbus qt6-serialport-dev socat libsodium-dev pkg-config
 
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -40,6 +40,9 @@ jobs:
           # The serial tests need socat: they must run, not skip.
           ctest --test-dir build -R 'tst_serial' -V | tee serial.log | grep -E 'PASS|SKIP|FAIL|Totals'
           ! grep -q 'SKIP ' serial.log
+          # Vault + askpass suites (Send Stored Login also needs socat): must run, not skip.
+          ctest --test-dir build -R 'tst_vault|tst_askpass' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF'
+          ! grep -q 'SKIP ' vault.log
 
       - name: Package .deb
         run: |
@@ -51,6 +54,8 @@ jobs:
           dpkg-deb -c zterminal_*_amd64.deb | grep -q './usr/bin/zt$'
           dpkg-deb -c zterminal_*_amd64.deb | grep -q './usr/bin/zterminal$'
           dpkg-deb -f zterminal_*_amd64.deb Depends | grep -q 'libqt6serialport6'
+          dpkg-deb -f zterminal_*_amd64.deb Depends | grep -q 'libsodium23'
+          dpkg-deb -c zterminal_*_amd64.deb | grep -q './usr/libexec/zterminal/zterminal-askpass$'
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v7

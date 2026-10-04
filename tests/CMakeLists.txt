@@ -21,6 +21,15 @@ zterminal_add_test(tst_sessions zterminal_core)
 zterminal_add_test(tst_sessionui zterminal_ui)
 zterminal_add_test(tst_serial zterminal_core)
 zterminal_add_test(tst_serialui zterminal_ui)
+zterminal_add_test(tst_vault zterminal_core)
+zterminal_add_test(tst_askpass zterminal_core)
+target_compile_definitions(tst_askpass PRIVATE ZTERMINAL_ASKPASS_BIN="$<TARGET_FILE:zterminal-askpass>")
+add_dependencies(tst_askpass zterminal-askpass)
+zterminal_add_test(tst_vaultui zterminal_ui)
+add_dependencies(tst_vaultui zterminal-askpass)
+set_tests_properties(tst_vaultui PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_vaultui;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
+  TIMEOUT 120)
 
 # The binary and the zt launcher answer --version/--help without a display.
 add_test(NAME zterminal_version COMMAND zterminal --version)

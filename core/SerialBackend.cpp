@@ -143,7 +143,7 @@ bool SerialBackend::isOpen() const
     return m_port->isOpen();
 }
 
-void SerialBackend::write(const QByteArray &data)
+void SerialBackend::write(const QByteArray &data, bool echo)
 {
     if (!m_port->isOpen() || data.isEmpty()) {
         return;
@@ -154,12 +154,12 @@ void SerialBackend::write(const QByteArray &data)
     if (enter != "\r") {
         out.replace('\r', enter);
     }
-    if (m_cfg.localEcho) {
-        QByteArray echo = out;
-        echo.replace("\r\n", "\n");
-        echo.replace('\r', '\n');
-        echo.replace("\n", "\r\n");
-        emit dataReceived(echo);
+    if (m_cfg.localEcho && echo) {
+        QByteArray shown = out;
+        shown.replace("\r\n", "\n");
+        shown.replace('\r', '\n');
+        shown.replace("\n", "\r\n");
+        emit dataReceived(shown);
     }
     m_queue += out;
     if (!m_pacer->isActive()) {

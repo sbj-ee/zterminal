@@ -8,8 +8,9 @@
 
 namespace zterminal {
 
-// A saved session (docs/PLAN.md §4.7). Passwords are never stored: SSH auth is
-// left to ssh itself (keys, agent, or its own password prompt in the terminal).
+// A saved session (docs/PLAN.md §4.7). The INI file never holds a password.
+// Optionally a password lives in the encrypted vault (core/Vault), keyed by
+// session name; the INI only records *whether* to use it.
 struct SessionConfig {
     enum class Type { LocalShell, Ssh, Serial };
 
@@ -23,6 +24,7 @@ struct SessionConfig {
     QString keyFile;   // -i; a leading "~/" is expanded (no shell involved)
     QString jumpHost;  // -J; [user@]host[:port][,...]
     QString extraArgs; // further ssh *options*, split like a command line, never run by a shell
+    bool useStoredPassword = false; // answer ssh's first password prompt from the vault
 
     // Serial (QSerialPort). Defaults: 9600 8N1, no flow control (Cisco console).
     QString serialDevice;            // e.g. /dev/ttyUSB0, /dev/ttyACM0
@@ -36,6 +38,7 @@ struct SessionConfig {
     int charDelayMs = 0;             // paste pacing: after every character
     int lineDelayMs = 0;             // paste pacing: after every line end
     int breakMs = 300;               // Session > Send Break duration
+    QString loginUser;               // Session > Send Stored Login (password in the vault)
 
     // Optional per-session appearance overrides (empty / 0: use Preferences).
     QString fontFamily;

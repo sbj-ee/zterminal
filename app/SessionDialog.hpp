@@ -45,6 +45,9 @@ private:
     void updatePreview();
     void setError(const QString &e);
     void refreshPorts();
+    // Writes the typed password(s) to the vault (unlocking/creating it if
+    // needed) and clears the fields. Never touches the session file.
+    bool storeSecrets(const SessionConfig &c);
 
     SessionStore m_store;
     QLineEdit *m_name = nullptr;
@@ -60,6 +63,10 @@ private:
     QLineEdit *m_key = nullptr;
     QLineEdit *m_jump = nullptr;
     QLineEdit *m_extra = nullptr;
+    QCheckBox *m_useStored = nullptr;
+    QLineEdit *m_sshPassword = nullptr;
+    QLineEdit *m_loginUser = nullptr;
+    QLineEdit *m_loginPassword = nullptr;
     QLineEdit *m_preview = nullptr;
     QWidget *m_serialBox = nullptr;
     QComboBox *m_device = nullptr;

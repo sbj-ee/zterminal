@@ -19,6 +19,9 @@ struct AppSettings {
     MouseSettings mouse;
     // Stored now; the startup update checker itself lands in a later release.
     bool checkForUpdatesOnStartup = true;
+    // Lock the password vault after this many idle minutes (0 = never).
+    int vaultAutoLockMinutes = 15;
+    static constexpr int kDefaultVaultAutoLockMinutes = 15;
 
     static constexpr int kDefaultFontSize = 11;
     static QString defaultFontFamily();

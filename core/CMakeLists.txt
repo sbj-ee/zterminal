@@ -11,9 +11,12 @@ add_library(zterminal_core STATIC
   Session.cpp Session.hpp
   SessionStore.cpp SessionStore.hpp
   SerialBackend.cpp SerialBackend.hpp
+  SecureBuffer.cpp SecureBuffer.hpp
+  Vault.cpp Vault.hpp
+  AskpassServer.cpp AskpassServer.hpp
 )
 target_include_directories(zterminal_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${ZTERMINAL_GENERATED_DIR})
-target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui Qt6::SerialPort vterm PRIVATE util)
+target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui Qt6::SerialPort vterm PkgConfig::SODIUM PRIVATE util)
 zterminal_set_warnings(zterminal_core)

@@ -73,6 +73,14 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     m_scrollback->setSingleStep(1000);
     m_scrollback->setValue(current.scrollbackLines);
     termForm->addRow(QStringLiteral("Scrollback lines:"), m_scrollback);
+    m_vaultAutoLock = new QSpinBox;
+    m_vaultAutoLock->setObjectName(QStringLiteral("vaultAutoLockMinutes"));
+    m_vaultAutoLock->setRange(0, 24 * 60);
+    m_vaultAutoLock->setSuffix(QStringLiteral(" min"));
+    m_vaultAutoLock->setSpecialValueText(QStringLiteral("Never"));
+    m_vaultAutoLock->setValue(current.vaultAutoLockMinutes);
+    m_vaultAutoLock->setToolTip(QStringLiteral("Lock the password vault after this long without keyboard or mouse input"));
+    termForm->addRow(QStringLiteral("Lock vault when idle:"), m_vaultAutoLock);
 
     auto *updBox = new QGroupBox(QStringLiteral("Updates"));
     auto *updLayout = new QVBoxLayout(updBox);
@@ -113,6 +121,7 @@ AppSettings PreferencesDialog::result() const
     a.fontSize = m_fontSize->value();
     a.colorScheme = m_scheme->currentData().toString();
     a.scrollbackLines = m_scrollback->value();
+    a.vaultAutoLockMinutes = m_vaultAutoLock->value();
     a.checkForUpdatesOnStartup = m_checkUpdates->isChecked();
     return a;
 }

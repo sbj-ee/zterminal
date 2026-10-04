@@ -2,7 +2,10 @@
 
 #include "AppSettings.hpp"
 #include "ColorScheme.hpp"
+#include "SecureBuffer.hpp"
 #include "SerialBackend.hpp"
+#include "Vault.hpp"
+#include "VaultManager.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -35,6 +38,16 @@ QLineEdit *lineEdit(const char *name, const QString &placeholder)
     e->setPlaceholderText(placeholder);
     return e;
 }
+
+QLineEdit *secretEdit(const char *name)
+{
+    QLineEdit *e = lineEdit(name, QStringLiteral("(unchanged)"));
+    e->setEchoMode(QLineEdit::Password);
+    e->setContextMenuPolicy(Qt::NoContextMenu);
+    e->setToolTip(QStringLiteral("Saved to the encrypted vault when you press Save, never to the session file. "
+                                 "Leave empty to keep the stored one."));
+    return e;
+}
 } // namespace
 
 SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &initial, QWidget *parent)
@@ -65,7 +78,7 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
         savedButtons->addWidget(b);
     }
     savedLayout->addLayout(savedButtons);
-    auto *where = new QLabel(QStringLiteral("<small>Stored in %1 (no passwords)</small>")
+    auto *where = new QLabel(QStringLiteral("<small>Stored in %1 (no passwords; stored passwords live only in the encrypted vault)</small>")
                                  .arg(QDir::toNativeSeparators(m_store.directory()).replace(QDir::homePath(), QStringLiteral("~"))));
     where->setWordWrap(true);
     savedLayout->addWidget(where);
@@ -113,6 +126,13 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_extra->setToolTip(QStringLiteral("ssh options only. Split like a command line (use double quotes for spaces); "
                                        "never passed to a shell."));
     sshForm->addRow(QStringLiteral("Extra options:"), m_extra);
+    m_useStored = new QCheckBox(QStringLiteral("Use stored password"));
+    m_useStored->setObjectName(QStringLiteral("useStoredPassword"));
+    m_useStored->setToolTip(QStringLiteral("Answer ssh's first password prompt from the encrypted vault (via SSH_ASKPASS). "
+                                           "If it is rejected, ssh asks you in the terminal."));
+    sshForm->addRow(m_useStored);
+    m_sshPassword = secretEdit("sshPassword");
+    sshForm->addRow(QStringLiteral("Password:"), m_sshPassword);
     // Read-only line edit: long commands scroll instead of being clipped.
     m_preview = new QLineEdit;
     m_preview->setObjectName(QStringLiteral("commandPreview"));
@@ -208,6 +228,11 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_breakMs->setSingleStep(50);
     m_breakMs->setSuffix(QStringLiteral(" ms"));
     serForm->addRow(QStringLiteral("Send Break:"), m_breakMs);
+    m_loginUser = lineEdit("loginUser", QStringLiteral("(none)"));
+    m_loginUser->setToolTip(QStringLiteral("For Session > Send Stored Login"));
+    serForm->addRow(QStringLiteral("Login user:"), m_loginUser);
+    m_loginPassword = secretEdit("loginPassword");
+    serForm->addRow(QStringLiteral("Login password:"), m_loginPassword);
     auto *paceNote = new QLabel(QStringLiteral(
         "<small>Pacing slows pastes for consoles that drop characters (e.g. Cisco: 5 ms/char, 100 ms/line).</small>"));
     serForm->addRow(paceNote);
@@ -280,6 +305,7 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
         updatePreview();
     });
     connect(m_overrideFont, &QCheckBox::toggled, this, &SessionDialog::updateEnabled);
+    connect(m_useStored, &QCheckBox::toggled, this, &SessionDialog::updateEnabled);
     for (QLineEdit *e : {m_host, m_user, m_key, m_jump, m_extra}) {
         connect(e, &QLineEdit::textChanged, this, &SessionDialog::updatePreview);
     }
@@ -311,6 +337,7 @@ void SessionDialog::updateEnabled()
     m_serialBox->setEnabled(serial);
     m_serialBox->setVisible(serial);
     m_font->setEnabled(m_overrideFont->isChecked());
+    m_sshPassword->setEnabled(m_useStored->isChecked());
     m_load->setEnabled(m_list->currentItem() != nullptr);
     m_delete->setEnabled(m_list->currentItem() != nullptr);
 }
@@ -355,6 +382,7 @@ SessionConfig SessionDialog::config() const
         c.keyFile = m_key->text().trimmed();
         c.jumpHost = m_jump->text().trimmed();
         c.extraArgs = m_extra->text().trimmed();
+        c.useStoredPassword = m_useStored->isChecked();
     }
     if (c.type == SessionConfig::Type::Serial) {
         c.serialDevice = m_device->currentText().trimmed();
@@ -368,6 +396,7 @@ SessionConfig SessionDialog::config() const
         c.charDelayMs = m_charDelay->value();
         c.lineDelayMs = m_lineDelay->value();
         c.breakMs = m_breakMs->value();
+        c.loginUser = m_loginUser->text().trimmed();
     }
     if (m_overrideFont->isChecked()) {
         c.fontFamily = m_font->currentFont().family();
@@ -387,6 +416,10 @@ void SessionDialog::setConfig(const SessionConfig &s)
     m_key->setText(s.keyFile);
     m_jump->setText(s.jumpHost);
     m_extra->setText(s.extraArgs);
+    m_useStored->setChecked(s.useStoredPassword);
+    m_sshPassword->clear();
+    m_loginUser->setText(s.loginUser);
+    m_loginPassword->clear();
     m_device->setCurrentText(s.serialDevice);
     m_baud->setCurrentText(QString::number(s.baudRate));
     m_dataBits->setCurrentIndex(std::max(0, m_dataBits->findData(s.dataBits)));
@@ -468,6 +501,45 @@ bool SessionDialog::saveCurrent()
     }
     setError({});
     refreshList(c.name);
+    return storeSecrets(c);
+}
+
+bool SessionDialog::storeSecrets(const SessionConfig &c)
+{
+    QLineEdit *field = nullptr;
+    QString key;
+    if (c.type == SessionConfig::Type::Ssh) {
+        field = m_sshPassword;
+        key = Vault::secretKeyFor(QStringLiteral("ssh-password"), c.name);
+    } else if (c.type == SessionConfig::Type::Serial) {
+        field = m_loginPassword;
+        key = Vault::secretKeyFor(QStringLiteral("serial-password"), c.name);
+    } else {
+        return true;
+    }
+    VaultManager &vm = VaultManager::instance();
+    if (c.type == SessionConfig::Type::Ssh && !c.useStoredPassword) {
+        // Unticked: forget a stored password if the vault is open (don't prompt just for this).
+        if (vm.isUnlocked() && vm.vault().secret(key)) {
+            vm.vault().removeSecret(key);
+        }
+        field->clear();
+        return true;
+    }
+    if (field->text().isEmpty()) {
+        return true; // "(unchanged)"
+    }
+    if (!vm.ensureUnlocked(this, QStringLiteral("Saving the password for \"%1\".").arg(c.name.toHtmlEscaped()), true)) {
+        field->clear();
+        setError(QStringLiteral("Session saved, but its password was NOT stored: the vault is locked."));
+        return false;
+    }
+    SecureBuffer secret = SecureBuffer::fromQString(field->text());
+    field->clear();
+    if (!vm.vault().setSecret(key, std::move(secret))) {
+        setError(QStringLiteral("Session saved, but storing its password failed: %1").arg(vm.vault().lastError()));
+        return false;
+    }
     return true;
 }
 
@@ -482,6 +554,12 @@ bool SessionDialog::deleteSelected()
         setError(QStringLiteral("Can't delete \"%1\".").arg(name));
         return false;
     }
+    // Forget its stored passwords too when the vault is open.
+    VaultManager &vm = VaultManager::instance();
+    if (vm.isUnlocked()) {
+        vm.vault().removeSecret(Vault::secretKeyFor(QStringLiteral("ssh-password"), name));
+        vm.vault().removeSecret(Vault::secretKeyFor(QStringLiteral("serial-password"), name));
+    }
     setError({});
     refreshList();
     return true;
@@ -490,6 +568,10 @@ bool SessionDialog::deleteSelected()
 bool SessionDialog::openSession()
 {
     const SessionConfig c = config();
+    if (!m_sshPassword->text().isEmpty() || !m_loginPassword->text().isEmpty()) {
+        setError(QStringLiteral("Press Save to store the password in the vault first (Open never stores it)."));
+        return false;
+    }
     if (c.type == SessionConfig::Type::Serial) {
         if (const QString e = validateSerial(c); !e.isEmpty()) {
             setError(e);
