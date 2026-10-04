@@ -17,7 +17,17 @@ int main(int argc, char *argv[])
         for (int i = 1; i < argc; ++i) {
             early << QString::fromLocal8Bit(argv[i]);
         }
+        // `zterminal --check ARGS...`: validate ARGS as zt would launch them
+        // (used by zt before detaching, so mistakes are reported in the terminal).
+        const bool checkOnly = early.front() == QLatin1String("--check");
+        if (checkOnly) {
+            early.removeFirst();
+        }
         const zterminal::LaunchRequest r = zterminal::parseCommandLine(early);
+        if (checkOnly && r.kind == zterminal::LaunchRequest::Kind::Error) {
+            std::fprintf(stderr, "zterminal: %s\n", r.error.toLocal8Bit().constData());
+            return 2;
+        }
         if (r.kind == zterminal::LaunchRequest::Kind::Version) {
             std::printf("zterminal %s\n", zterminal::kVersionString);
             return 0;
@@ -43,6 +53,9 @@ int main(int argc, char *argv[])
             if (r.kind == zterminal::LaunchRequest::Kind::CheckSession) {
                 return 0;
             }
+        }
+        if (checkOnly) {
+            return 0;
         }
     }
 

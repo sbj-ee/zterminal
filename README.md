@@ -32,7 +32,13 @@ and milestones.
   Open Saved Session, Save Session). SSH runs the system `ssh` with a validated argv
   (no shell). Passwords are never stored: use keys, the agent, or ssh's own prompt.
 
-Planned next: serial console, Find, and update checks (see the plan).
+- Serial consoles (0.3.0): QSerialPort, 9600 8N1 by default (Cisco console), any baud,
+  data/parity/stop bits, flow control, local echo, CR / CR+LF / LF on Enter, paste pacing
+  (ms per character and per line, queued, with Cancel), Session > Send Break (300 ms by
+  default), a clear `dialout` explanation on permission errors, and a Reconnect banner
+  when the adapter is unplugged.
+
+Planned next: Find and update checks (see the plan).
 
 ## Usage
 
@@ -41,6 +47,7 @@ zt                      # local shell, returns to your prompt immediately
 zt core-sw1             # open a saved session (quote names with spaces: zt "lab box")
 zt --list-sessions      # list saved sessions
 zt ssh user@host        # ad-hoc SSH through the system ssh (all ssh args pass through)
+zt serial /dev/ttyUSB0  # ad-hoc serial console at 9600 8N1 (or: zt serial /dev/ttyACM0 115200)
 zt -e htop              # run a program
 zt --version
 ```
@@ -63,7 +70,15 @@ jumpHost=sbj@vertex
 extraArgs=-o ServerAliveInterval=30
 ```
 
-That session runs `ssh -o ServerAliveInterval=30 -l admin -i /home/you/.ssh/id_lab -J sbj@vertex -- 10.0.0.1`.
+A serial session (`type=serial`) has a `[serial]` group: `device`, `baudRate` (9600),
+`dataBits` (8), `parity` (none|even|odd|mark|space), `stopBits` (1|2), `flowControl`
+(none|rtscts|xonxoff), `localEcho`, `enterSends` (cr|crlf|lf), `charDelayMs`, `lineDelayMs`
+and `breakMs` (300).
+
+Serial devices belong to the `dialout` group. If opening one says "Permission denied", run
+`sudo usermod -aG dialout $USER` and log out and back in.
+
+The SSH example above runs `ssh -o ServerAliveInterval=30 -l admin -i /home/you/.ssh/id_lab -J sbj@vertex -- 10.0.0.1`.
 Host, user and jump host are validated (no leading `-`, no spaces or shell characters),
 extra arguments must be ssh options, and the host always follows `--`.
 

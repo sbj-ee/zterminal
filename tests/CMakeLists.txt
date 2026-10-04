@@ -19,6 +19,8 @@ zterminal_add_test(tst_view zterminal_ui)
 zterminal_add_test(tst_settings zterminal_ui)
 zterminal_add_test(tst_sessions zterminal_core)
 zterminal_add_test(tst_sessionui zterminal_ui)
+zterminal_add_test(tst_serial zterminal_core)
+zterminal_add_test(tst_serialui zterminal_ui)
 
 # The binary and the zt launcher answer --version/--help without a display.
 add_test(NAME zterminal_version COMMAND zterminal --version)
@@ -55,6 +57,14 @@ add_test(NAME zt_list_sessions COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt --list-s
 set_tests_properties(zt_list_sessions PROPERTIES
   ENVIRONMENT "${ZT_FIXTURE_ENV};ZTERMINAL_BIN=$<TARGET_FILE:zterminal>"
   PASS_REGULAR_EXPRESSION "^core-sw1\nlab box\n$")
+add_test(NAME zt_serial_needs_device COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt serial)
+set_tests_properties(zt_serial_needs_device PROPERTIES
+  ENVIRONMENT "ZTERMINAL_BIN=$<TARGET_FILE:zterminal>"
+  PASS_REGULAR_EXPRESSION "usage: zt serial <device> \\[baud\\]")
+add_test(NAME zt_serial_bad_baud COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt serial /dev/ttyUSB0 fast)
+set_tests_properties(zt_serial_bad_baud PROPERTIES WILL_FAIL ON
+  ENVIRONMENT "ZTERMINAL_BIN=$<TARGET_FILE:zterminal>")
+add_test(NAME zterminal_check_serial_ok COMMAND zterminal --check serial /dev/ttyUSB0 115200)
 add_test(NAME zterminal_bad_option COMMAND zterminal --bogus)
 set_tests_properties(zterminal_bad_option PROPERTIES WILL_FAIL ON
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

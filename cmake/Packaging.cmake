@@ -21,8 +21,9 @@ set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-# Qt's Wayland platform plugin is what gives PRIMARY selection on GNOME Wayland.
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-wayland")
+# Qt's Wayland platform plugin is what gives PRIMARY selection on GNOME Wayland;
+# libqt6serialport6 is the serial backend (shlibdeps finds it too; listed explicitly).
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-wayland, libqt6serialport6")
 # zterminal_<ver>_amd64.deb (the name the updater expects).
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 include(CPack)

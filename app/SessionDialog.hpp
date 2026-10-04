@@ -44,6 +44,7 @@ private:
     void updateEnabled();
     void updatePreview();
     void setError(const QString &e);
+    void refreshPorts();
 
     SessionStore m_store;
     QLineEdit *m_name = nullptr;
@@ -60,6 +61,18 @@ private:
     QLineEdit *m_jump = nullptr;
     QLineEdit *m_extra = nullptr;
     QLineEdit *m_preview = nullptr;
+    QWidget *m_serialBox = nullptr;
+    QComboBox *m_device = nullptr;
+    QComboBox *m_baud = nullptr;
+    QComboBox *m_dataBits = nullptr;
+    QComboBox *m_parity = nullptr;
+    QComboBox *m_stopBits = nullptr;
+    QComboBox *m_flow = nullptr;
+    QCheckBox *m_localEcho = nullptr;
+    QComboBox *m_enter = nullptr;
+    QSpinBox *m_charDelay = nullptr;
+    QSpinBox *m_lineDelay = nullptr;
+    QSpinBox *m_breakMs = nullptr;
     QCheckBox *m_overrideFont = nullptr;
     QFontComboBox *m_font = nullptr;
     QSpinBox *m_fontSize = nullptr;

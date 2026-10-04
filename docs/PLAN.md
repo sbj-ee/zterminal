@@ -143,7 +143,7 @@ build: project(VERSION) → configure_file(version.hpp.in) → zterminal::kVersi
 - **M2 Selection & clipboard:** the full §4.6 spec, mouse reporting with Shift bypass, bracketed paste. Copy/paste checklist passes on dragon.
 - **M3 Scrollback, appearance & menus:** ring buffer, reflow, fonts, schemes, cursor. Menu bar and Actions registry with the Ctrl+Shift shortcut policy, show/hide menu bar, fullscreen, Find bar, versioned title, About.
 - **M4 Sessions + SSH:** SessionStore, PuTTY-style dialog, SshBackend.
-- **M5 Serial:** SerialBackend, pacing, break. Verified on the SG250 console.
+- **M5 Serial:** SerialBackend, pacing, break. Verified on the SG250 console. **Implemented in 0.3.0:** `core/SerialBackend` (QSerialPort): line settings from the session (default 9600 8N1, no flow control); outgoing CR mapped to the Enter setting (CR / CR+LF / LF); optional local echo; a pacer that queues output and sends one character per `charDelayMs` and/or waits `lineDelayMs` after each line end, asynchronously, with Cancel (paste bar + Session > Cancel Paste); Send Break = `setBreakEnabled(true)` for `breakMs` (default 300). Errors: PermissionError explains the `dialout` group (`sudo usermod -aG dialout $USER`, then log out and in); missing device lists the detected ports; ResourceError/read/write errors and a 500 ms watchdog on the device node (a USB unplug removes it; a pty hangup doesn't always wake the read notifier) show a red "Disconnected" banner with Reconnect. `zt serial DEVICE [BAUD]` opens an ad-hoc console (8N1); Save Session turns it into a saved one. zt now runs `zterminal --check ARGS` before detaching, so any argument error is printed in the terminal. Tests use a `socat pty,link=A pty,link=B` pair as the virtual cable (CI installs socat and fails if the serial tests skip).
 - **M6 Conformance & polish:** vttest/esctest baseline, settings tree (Preferences and per-session Change Settings), OSC 52 option. **Updates:** startup and manual check, the Install/Later/Skip dialog, the verified download plus pkexec apt install with fallbacks and restart, and `release.yml` publishing the `.deb` + `SHA256SUMS` on tag.
 - **M7 Release v1.0.0:** `.deb` + `SHA256SUMS` on GitHub Releases, README with screenshots.
 
@@ -161,7 +161,7 @@ build: project(VERSION) → configure_file(version.hpp.in) → zterminal::kVersi
 3. **No tabs**: one window per session.
 4. Multi-line paste confirm: off by default, with a per-session option (recommended for serial). *Default, changeable.*
 5. Session files: INI via QSettings. *Default, changeable.*
-6. SG250 console device and baud: settings per session, default 115200 8N1. To verify on the hardware in M5.
+6. SG250 console device and baud: settings per session, default **9600 8N1** (Cisco console default, per Stephen 2026-10-03). To verify on the hardware in M5.
 7. License: **MIT**.
 8. Session logging: later (not v1). *Default, changeable.*
 9. Packaging: **.deb only**.

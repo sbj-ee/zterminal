@@ -125,6 +125,7 @@ private slots:
         QTest::newRow("dash") << QStringLiteral("-oProxyCommand=x") << false;
         QTest::newRow("newline") << QStringLiteral("a\nb") << false;
         QTest::newRow("ssh") << QStringLiteral("ssh") << false;
+        QTest::newRow("serial") << QStringLiteral("serial") << false;
     }
     void sessionNamesAreValidated()
     {
@@ -288,6 +289,15 @@ private slots:
                                << int(K::CheckSession) << QStringLiteral("lab box");
         QTest::newRow("check missing") << QStringList{QStringLiteral("--check-session")} << int(K::Error) << QString();
         QTest::newRow("dash name") << QStringList{QStringLiteral("-oProxyCommand=x")} << int(K::Error) << QString();
+        QTest::newRow("serial") << QStringList{QStringLiteral("serial"), QStringLiteral("/dev/ttyUSB0")} << int(K::Serial) << QString();
+        QTest::newRow("serial baud") << QStringList{QStringLiteral("serial"), QStringLiteral("/dev/ttyACM0"), QStringLiteral("115200")}
+                                     << int(K::Serial) << QString();
+        QTest::newRow("serial none") << QStringList{QStringLiteral("serial")} << int(K::Error) << QString();
+        QTest::newRow("serial relative") << QStringList{QStringLiteral("serial"), QStringLiteral("ttyUSB0")} << int(K::Error) << QString();
+        QTest::newRow("serial bad baud") << QStringList{QStringLiteral("serial"), QStringLiteral("/dev/ttyUSB0"), QStringLiteral("fast")}
+                                         << int(K::Error) << QString();
+        QTest::newRow("serial extra") << QStringList{QStringLiteral("serial"), QStringLiteral("/dev/ttyUSB0"), QStringLiteral("9600"), QStringLiteral("x")}
+                                      << int(K::Error) << QString();
         QTest::newRow("two words") << QStringList{QStringLiteral("lab"), QStringLiteral("box")} << int(K::Error) << QString();
     }
     void commandLineForSessions()
@@ -300,6 +310,11 @@ private slots:
         QCOMPARE(r.sessionName, name);
         if (r.kind == LaunchRequest::Kind::SavedSession) {
             QCOMPARE(r.displayName(), name);
+        }
+        if (r.kind == LaunchRequest::Kind::Serial) {
+            QCOMPARE(r.program, args.at(1));
+            QCOMPARE(r.baudRate, args.size() == 3 ? args.at(2).toInt() : 9600);
+            QCOMPARE(r.displayName(), QStringLiteral("serial ") + args.at(1));
         }
     }
 };
