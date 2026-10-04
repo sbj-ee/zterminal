@@ -16,6 +16,7 @@ zterminal_add_test(tst_selection zterminal_core)
 zterminal_add_test(tst_pty zterminal_core)
 zterminal_add_test(tst_misc zterminal_core)
 zterminal_add_test(tst_view zterminal_ui)
+zterminal_add_test(tst_settings zterminal_ui)
 
 # The binary and the zt launcher answer --version/--help without a display.
 add_test(NAME zterminal_version COMMAND zterminal --version)
@@ -30,3 +31,20 @@ set_tests_properties(zt_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage: zt ")
 add_test(NAME zterminal_bad_option COMMAND zterminal --bogus)
 set_tests_properties(zterminal_bad_option PROPERTIES WILL_FAIL ON
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Global-menu regression test: needs an X server and a private session bus.
+find_package(Qt6 COMPONENTS DBus QUIET)
+find_program(ZTERMINAL_XVFB_RUN xvfb-run)
+find_program(ZTERMINAL_DBUS_RUN_SESSION dbus-run-session)
+if(TARGET Qt6::DBus AND ZTERMINAL_XVFB_RUN AND ZTERMINAL_DBUS_RUN_SESSION)
+  add_executable(tst_globalmenu tst_globalmenu.cpp)
+  target_link_libraries(tst_globalmenu PRIVATE zterminal_ui Qt6::DBus Qt6::Test)
+  zterminal_set_warnings(tst_globalmenu)
+  add_test(NAME tst_globalmenu
+    COMMAND ${ZTERMINAL_DBUS_RUN_SESSION} -- ${ZTERMINAL_XVFB_RUN} -a $<TARGET_FILE:tst_globalmenu>)
+  set_tests_properties(tst_globalmenu PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=xcb;QT_QPA_PLATFORMTHEME=;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_globalmenu"
+    TIMEOUT 60)
+else()
+  message(STATUS "zterminal: tst_globalmenu skipped (needs Qt6::DBus, xvfb-run, dbus-run-session)")
+endif()

@@ -12,11 +12,15 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDir>
+#include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProcess>
 #include <QSet>
+#include <QTimer>
 
 namespace zterminal {
 
@@ -35,6 +39,12 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     m_view = new TerminalView(m_term, this);
     setCentralWidget(m_view);
 
+    // Always draw the menu bar inside the window. Without this, Qt hands the
+    // menus to a global-menu service whenever com.canonical.AppMenu.Registrar
+    // is on the session bus (e.g. the Fildem GNOME extension), hides the
+    // in-window bar, and on GNOME nothing may show the exported menus.
+    menuBar()->setNativeMenuBar(false);
+
     connect(m_term, &Terminal::output, m_pty, &Pty::write);
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
     connect(m_pty, &Pty::finished, this, &MainWindow::onSessionFinished);
@@ -45,6 +55,7 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
 
     buildMenus();
     applySettings();
+    watchSettingsFile();
     updateTitle();
     resize(m_view->sizeHint() + QSize(0, menuBar()->sizeHint().height()));
     m_view->setFocus();
@@ -146,19 +157,22 @@ void MainWindow::buildMenus()
         m_actions << a;
     }
     connect(m_schemeGroup, &QActionGroup::triggered, this, [this](QAction *a) {
-        m_settings.colorScheme = a->data().toString();
-        m_settings.save();
-        applySettings();
+        AppSettings s = m_settings;
+        s.colorScheme = a->data().toString();
+        setSettings(s);
     });
     view->addSeparator();
     QAction *full = addAct(view, QStringLiteral("fullScreen"), QStringLiteral("&Full Screen"), QKS(Qt::Key_F11));
     full->setCheckable(true);
     connect(full, &QAction::toggled, this, [this](bool on) {
+        // Full screen changes only the window state; the menu bar keeps whatever
+        // visibility the user chose (shown by default).
         on ? showFullScreen() : showNormal();
     });
     QAction *showMenu = addAct(view, QStringLiteral("showMenuBar"), QStringLiteral("Show &Menu Bar"),
                                QKS(QStringLiteral("Ctrl+Shift+M")));
     showMenu->setCheckable(true);
+    showMenu->setChecked(true);
     connect(showMenu, &QAction::toggled, this, &MainWindow::setMenuBarShown);
 
     // Session
@@ -178,12 +192,18 @@ void MainWindow::buildMenus()
     connect(addAct(session, QStringLiteral("resetTerminal"), QStringLiteral("Reset &Terminal")),
             &QAction::triggered, m_term, &Terminal::reset);
     session->addSeparator();
-    addAct(session, QStringLiteral("changeSettings"), QStringLiteral("Change &Settings\u2026"), {}, false, later);
+    // Per-session settings are planned (M6); until then this opens Preferences.
+    QAction *changeSettings = addAct(session, QStringLiteral("changeSettings"), QStringLiteral("Change &Settings\u2026"));
+    changeSettings->setToolTip(QStringLiteral("Opens Preferences (per-session settings are planned)"));
+    changeSettings->setStatusTip(changeSettings->toolTip());
+    connect(changeSettings, &QAction::triggered, this, &MainWindow::showPreferences);
 
     // Settings
     QMenu *settings = menuBar()->addMenu(QStringLiteral("Se&ttings"));
-    connect(addAct(settings, QStringLiteral("preferences"), QStringLiteral("&Preferences\u2026")),
-            &QAction::triggered, this, &MainWindow::showPreferences);
+    QAction *prefs = addAct(settings, QStringLiteral("preferences"), QStringLiteral("&Preferences\u2026"));
+    // Ctrl+Shift+, (Qt reports Shift+comma as '<' on US layouts, so register both).
+    prefs->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Comma), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Less)});
+    connect(prefs, &QAction::triggered, this, &MainWindow::showPreferences);
 
     // Help
     QMenu *help = menuBar()->addMenu(QStringLiteral("&Help"));
@@ -200,9 +220,11 @@ void MainWindow::buildMenus()
     m_contextMenu->addAction(showMenu);
     m_contextMenu->addAction(full);
     m_contextMenu->addSeparator();
-    for (const char *n : {"duplicateSession", "restartSession", "clearScrollback", "resetTerminal", "changeSettings"}) {
+    for (const char *n : {"duplicateSession", "restartSession", "clearScrollback", "resetTerminal"}) {
         m_contextMenu->addAction(action(QString::fromLatin1(n)));
     }
+    m_contextMenu->addSeparator();
+    m_contextMenu->addAction(prefs); // reachable even when the menu bar is hidden
 
     // Only these key combinations are taken from the session.
     QSet<int> reserved;
@@ -225,10 +247,6 @@ void MainWindow::applySettings()
     for (QAction *a : m_schemeGroup->actions()) {
         a->setChecked(a->data().toString() == m_term->colorScheme().id);
     }
-    if (QAction *a = action(QStringLiteral("showMenuBar"))) {
-        a->setChecked(m_settings.menuBarVisible);
-    }
-    menuBar()->setVisible(m_settings.menuBarVisible);
 }
 
 void MainWindow::updateTitle()
@@ -238,18 +256,60 @@ void MainWindow::updateTitle()
 
 void MainWindow::setFontSize(int points)
 {
-    m_settings.fontSize = std::clamp(points, 6, 48);
+    AppSettings s = m_settings;
+    s.fontSize = std::clamp(points, 6, 48);
+    setSettings(s);
+}
+
+void MainWindow::setSettings(const AppSettings &s)
+{
+    m_settings = s;
     m_settings.save();
-    m_view->setTerminalFont(m_settings.font());
+    applySettings();
+    watchSettingsFile(); // the file may have just been created or replaced
+}
+
+void MainWindow::reloadSettings()
+{
+    watchSettingsFile();
+    const AppSettings fresh = AppSettings::load();
+    if (fresh != m_settings) {
+        m_settings = fresh;
+        applySettings();
+    }
+}
+
+void MainWindow::watchSettingsFile()
+{
+    // Each window is its own process, so changes made in one window reach the
+    // others through the settings file. QSettings replaces the file atomically,
+    // so watch the directory too and re-add the file after every change.
+    if (!m_settingsWatcher) {
+        m_settingsWatcher = new QFileSystemWatcher(this);
+        m_reloadTimer = new QTimer(this);
+        m_reloadTimer->setSingleShot(true);
+        m_reloadTimer->setInterval(150);
+        connect(m_reloadTimer, &QTimer::timeout, this, &MainWindow::reloadSettings);
+        auto kick = [this]() { m_reloadTimer->start(); };
+        connect(m_settingsWatcher, &QFileSystemWatcher::fileChanged, this, kick);
+        connect(m_settingsWatcher, &QFileSystemWatcher::directoryChanged, this, kick);
+    }
+    const QString file = AppSettings::filePath();
+    const QString dir = QFileInfo(file).absolutePath();
+    QDir().mkpath(dir);
+    if (!m_settingsWatcher->directories().contains(dir)) {
+        m_settingsWatcher->addPath(dir);
+    }
+    if (QFileInfo::exists(file) && !m_settingsWatcher->files().contains(file)) {
+        m_settingsWatcher->addPath(file);
+    }
 }
 
 void MainWindow::setMenuBarShown(bool shown)
 {
+    // Hiding lasts for this window only: every new window starts with the menu
+    // bar visible, so a hidden bar can never be "stuck" across runs.
     menuBar()->setVisible(shown);
-    if (m_settings.menuBarVisible != shown) {
-        m_settings.menuBarVisible = shown;
-        m_settings.save();
-    }
 }
 
 void MainWindow::showContextMenu(const QPoint &globalPos)
@@ -320,10 +380,9 @@ void MainWindow::duplicateSession()
 void MainWindow::showPreferences()
 {
     PreferencesDialog dlg(m_settings, this);
+    connect(&dlg, &PreferencesDialog::applied, this, &MainWindow::setSettings);
     if (dlg.exec() == QDialog::Accepted) {
-        m_settings = dlg.result();
-        m_settings.save();
-        applySettings();
+        setSettings(dlg.result());
     }
 }
 

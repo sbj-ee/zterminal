@@ -7,6 +7,8 @@
 
 class QAction;
 class QActionGroup;
+class QFileSystemWatcher;
+class QTimer;
 class QMenu;
 
 namespace zterminal {
@@ -34,6 +36,15 @@ public:
     QAction *action(const QString &name) const;
     QMenu *contextMenu() const { return m_contextMenu; }
 
+    const AppSettings &settings() const { return m_settings; }
+    // Save as the new global defaults and apply to this window now; other open
+    // windows (and other zterminal processes) follow via the settings-file watcher.
+    void setSettings(const AppSettings &s);
+    // Re-read the settings file and apply it if it changed.
+    void reloadSettings();
+    // Open Settings > Preferences (modal).
+    void showPreferences();
+
 protected:
     void closeEvent(QCloseEvent *e) override;
 
@@ -49,8 +60,8 @@ private:
     void restartSession();
     void duplicateSession();
     void newSession();
-    void showPreferences();
     void showAbout();
+    void watchSettingsFile();
     void setMenuBarShown(bool shown);
     void showContextMenu(const QPoint &globalPos);
 
@@ -62,6 +73,8 @@ private:
     TerminalView *m_view = nullptr;
     QMenu *m_contextMenu = nullptr;
     QActionGroup *m_schemeGroup = nullptr;
+    QFileSystemWatcher *m_settingsWatcher = nullptr;
+    QTimer *m_reloadTimer = nullptr;
     QList<QAction *> m_actions;
 };
 
