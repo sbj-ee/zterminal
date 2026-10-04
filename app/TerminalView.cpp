@@ -153,6 +153,7 @@ TerminalView::TerminalView(Terminal *term, QWidget *parent)
     connect(m_term, &Terminal::scrolledIntoHistory, this, &TerminalView::onScrolledIntoHistory);
     connect(m_term, &Terminal::scrollbackCleared, this, [this]() {
         m_scrollOffset = 0;
+        clearFindMatches();
         m_selection.clear();
         updateScrollBar();
         viewport()->update();
@@ -263,6 +264,60 @@ void TerminalView::onScrolledIntoHistory(int count, int dropped)
     updateScrollBar();
 }
 
+void TerminalView::setFindMatches(std::vector<FindMatch> matches, int current)
+{
+    m_findMatches = std::move(matches);
+    m_findCurrent = (current >= 0 && current < int(m_findMatches.size())) ? current : -1;
+    viewport()->update();
+}
+
+bool TerminalView::isCurrentFindSegment(int i) const
+{
+    if (m_findCurrent < 0 || i < m_findCurrent) {
+        return false;
+    }
+    // The current match plus its continuation segments (soft-wrapped lines).
+    for (int k = m_findCurrent + 1; k <= i; ++k) {
+        if (!m_findMatches[std::size_t(k)].continued) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void TerminalView::setCurrentFindMatch(int current)
+{
+    current = (current >= 0 && current < int(m_findMatches.size())) ? current : -1;
+    if (current != m_findCurrent) {
+        m_findCurrent = current;
+        viewport()->update();
+    }
+}
+
+void TerminalView::clearFindMatches()
+{
+    if (m_findMatches.empty() && m_findCurrent < 0) {
+        return;
+    }
+    m_findMatches.clear();
+    m_findCurrent = -1;
+    viewport()->update();
+}
+
+void TerminalView::scrollToLine(int absLine)
+{
+    const int sb = m_term->scrollbackLines();
+    const int first = firstVisibleLine();
+    const int rows = m_term->rows();
+    if (absLine >= first && absLine < first + rows) {
+        return;
+    }
+    const int wantFirst = std::clamp(absLine - rows / 2, 0, sb);
+    m_scrollOffset = std::clamp(sb - wantFirst, 0, sb);
+    updateScrollBar();
+    viewport()->update();
+}
+
 int TerminalView::firstVisibleLine() const
 {
     return m_term->scrollbackLines() - m_scrollOffset;
@@ -290,9 +345,17 @@ void TerminalView::paintEvent(QPaintEvent *)
     const QPoint cur = m_term->cursorPos();
     const int cursorLine = m_term->scrollbackLines() + cur.y();
 
+    // Find matches on the visible lines: binary search to the first one.
+    auto matchIt = std::lower_bound(m_findMatches.begin(), m_findMatches.end(), first,
+                                    [](const FindMatch &m, int line) { return m.line < line; });
     for (int row = 0; row < rows; ++row) {
         const int line = first + row;
         const int y = kMargin + row * m_cellH;
+        const auto rowBegin = matchIt;
+        while (matchIt != m_findMatches.end() && matchIt->line == line) {
+            ++matchIt;
+        }
+        const auto rowEnd = matchIt;
         for (int col = 0; col < cols; ++col) {
             const Cell c = m_term->cell(line, col);
             if (c.width == 0) {
@@ -306,6 +369,17 @@ void TerminalView::paintEvent(QPaintEvent *)
             QRgb fg = c.fg;
             QRgb bg = c.bg;
             bool fillBg = !c.defaultBg;
+            for (auto it = rowBegin; it != rowEnd; ++it) {
+                if (col >= it->col && col < it->col + it->cols) {
+                    const bool current = isCurrentFindSegment(int(it - m_findMatches.begin()));
+                    fg = kFindForeground;
+                    bg = current ? kFindCurrentBackground : kFindMatchBackground;
+                    fillBg = true;
+                    if (current) {
+                        break;
+                    }
+                }
+            }
             if (selected) {
                 fg = scheme.selectionForeground;
                 bg = scheme.selectionBackground;

@@ -1,5 +1,7 @@
 #include "SessionWidget.hpp"
 
+#include "FindBar.hpp"
+
 #include "AskpassServer.hpp"
 #include "PasteConfirmDialog.hpp"
 #include "PasteGuard.hpp"
@@ -81,6 +83,9 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
     col->addWidget(m_banner);
     col->addWidget(m_pasteBar);
     col->addWidget(m_view, 1);
+    m_findBar = new FindBar(m_term, m_view, this);
+    col->addWidget(m_findBar);
+    connect(m_findBar, &FindBar::closed, this, [this]() { m_view->setFocus(); });
     setFocusProxy(m_view);
 
     // Keys/pastes go to whichever backend this tab runs.
@@ -595,6 +600,15 @@ std::optional<SessionConfig> SessionWidget::currentSessionConfig(QString *why) c
         }
         return std::nullopt;
     }
+}
+
+} // namespace zterminal
+
+namespace zterminal {
+
+void SessionWidget::openFind()
+{
+    m_findBar->open();
 }
 
 } // namespace zterminal

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ColorScheme.hpp"
+#include "Scrollback.hpp"
 
 #include <QByteArray>
 #include <QObject>
@@ -52,9 +53,14 @@ public:
     int rows() const { return m_rows; }
     int cols() const { return m_cols; }
 
+    // History lines kept; 0 = none, kUnlimitedScrollback (< 0) = no limit.
+    static constexpr int kUnlimitedScrollback = -1;
     void setScrollbackLimit(int lines);
     int scrollbackLimit() const { return m_scrollbackLimit; }
-    int scrollbackLines() const { return static_cast<int>(m_scrollback.size()); }
+    int scrollbackLines() const { return m_history.size(); }
+    // Compact/compressed history storage (Scrollback) in bytes.
+    qsizetype scrollbackMemoryBytes() const { return m_history.memoryBytes(); }
+    const Scrollback &history() const { return m_history; }
     int totalLines() const { return scrollbackLines() + m_rows; }
     void clearScrollback();
     void reset(); // RIS-like hard reset of the screen state (scrollback kept)
@@ -65,6 +71,10 @@ public:
     // ever written to (or that were erased) are trimmed; spaces the program
     // actually printed stay.
     QString lineText(int absLine, int startCol = 0, int endCol = -1, bool keepPrintedSpaces = false) const;
+    // Text of a whole line for Find: one character per cell (blank = space),
+    // never-written trailing cells dropped; colOfChar gets each UTF-16 unit's
+    // cell column. Fast for history lines (no cell decoding).
+    QString searchText(int absLine, std::vector<int> *colOfChar = nullptr) const;
     // Whether the program turned on bracketed paste (DECSET 2004). libvterm keeps
     // the mode private, so this asks it to start a paste and sees whether it
     // emits ESC[200~ (captured, never sent).
@@ -123,7 +133,13 @@ private:
     int m_rows;
     int m_cols;
     int m_scrollbackLimit = 10000;
-    std::deque<std::vector<VTermScreenCell>> m_scrollback;
+    Scrollback m_history;
+    quint64 m_historyBase = 0; // lines ever dropped from the front (cache keys)
+    // Decoded history lines for cell() (the renderer asks cell by cell).
+    mutable std::vector<std::pair<quint64, std::vector<VTermScreenCell>>> m_lineCache;
+    const VTermScreenCell *historyCell(int absLine, int col) const;
+    void dropHistoryFront(int n);
+    void trimHistory();
     ColorScheme m_scheme;
     VTermPos m_cursor{0, 0};
     bool m_cursorVisible = true;

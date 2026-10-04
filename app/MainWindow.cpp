@@ -176,7 +176,12 @@ void MainWindow::buildMenus()
                    QKS(QStringLiteral("Ctrl+Shift+A"))),
             &QAction::triggered, this, [this]() { view()->selectAll(); });
     edit->addSeparator();
-    addAct(edit, QStringLiteral("find"), QStringLiteral("&Find\u2026"), QKS(QStringLiteral("Ctrl+Shift+F")), false, later);
+    connect(addAct(edit, QStringLiteral("find"), QStringLiteral("&Find\u2026"), QKS(QStringLiteral("Ctrl+Shift+F"))),
+            &QAction::triggered, this, [this]() {
+                if (SessionWidget *s = currentSession()) {
+                    s->openFind();
+                }
+            });
 
     // View
     QMenu *view = menuBar()->addMenu(QStringLiteral("&View"));

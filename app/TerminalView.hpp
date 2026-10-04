@@ -4,6 +4,9 @@
 
 #include "MouseSettings.hpp"
 #include "Selection.hpp"
+#include "TerminalSearch.hpp"
+
+#include <vector>
 
 #include <QAbstractScrollArea>
 #include <QElapsedTimer>
@@ -50,6 +53,19 @@ public:
     const Selection &selection() const { return m_selection; }
     QString selectedText() const;
     int scrollOffset() const { return m_scrollOffset; } // lines above the live screen
+    int firstVisibleLine() const;
+    // Find highlights (docs/PLAN.md §4.17): every match painted in the match
+    // colour, `current` (index into matches, -1 = none) in the current-match colour.
+    void setFindMatches(std::vector<FindMatch> matches, int current);
+    void clearFindMatches();
+    void setCurrentFindMatch(int current);
+    const std::vector<FindMatch> &findMatches() const { return m_findMatches; }
+    int currentFindMatch() const { return m_findCurrent; }
+    // Scroll so the absolute line is visible (centred when it was off-screen).
+    void scrollToLine(int absLine);
+    static constexpr QRgb kFindMatchBackground = 0xfff0c040;
+    static constexpr QRgb kFindCurrentBackground = 0xffff7a00;
+    static constexpr QRgb kFindForeground = 0xff000000;
 
 public slots:
     void copySelection();   // Edit > Copy: PRIMARY (if supported) + CLIPBOARD
@@ -84,12 +100,12 @@ private:
     void updateScrollBar();
     void onScrolledIntoHistory(int count, int dropped);
     CellPos cellAt(const QPoint &pos, bool roundToBoundary) const;
-    int firstVisibleLine() const;
     bool forwardsMouse(const QMouseEvent *e) const;
     void pasteText(const QString &text);
     void copyToClipboards(bool toClipboard);
     void copyOnSelect(); // after a mouse selection: PRIMARY, + CLIPBOARD if configured
     void scrollBy(int lines);
+    bool isCurrentFindSegment(int i) const;
 
     Terminal *m_term;
     QFont m_font;
@@ -116,6 +132,8 @@ private:
     Qt::MouseButtons m_forwardedButtons;
     QSet<int> m_appShortcuts;
     bool m_focused = false;
+    std::vector<FindMatch> m_findMatches; // sorted by (line, col)
+    int m_findCurrent = -1;
 };
 
 } // namespace zterminal

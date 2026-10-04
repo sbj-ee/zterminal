@@ -17,6 +17,7 @@ class QTimer;
 namespace zterminal {
 
 class AskpassServer;
+class FindBar;
 class Pty;
 class SerialBackend;
 class SessionLog;
@@ -63,6 +64,9 @@ public:
     void showBanner(const QString &text);
     void hideBanner();
     QWidget *pasteBar() const { return m_pasteBar; }
+    // Edit > Find (Ctrl+Shift+F): this tab's find bar under the view.
+    FindBar *findBar() const { return m_findBar; }
+    void openFind();
 
     struct Launch {
         QString program;
@@ -117,6 +121,7 @@ private:
     QWidget *m_pasteBar = nullptr;
     QLabel *m_pasteText = nullptr;
     TerminalView *m_view = nullptr;
+    FindBar *m_findBar = nullptr;
     AskpassServer *m_askpass = nullptr;
     QByteArray m_serialTail; // last bytes received (prompt detection for Send Stored Login)
     QTimer *m_loginWait = nullptr;

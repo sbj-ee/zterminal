@@ -42,8 +42,8 @@ jobs:
           ! grep -q 'SKIP ' serial.log
           # The shared-vault regression test (0.7.1) must be built and run.
           ctest --test-dir build -N | grep -q tst_vaultshared
-          # Vault, askpass and logging suites (Send Stored Login also needs socat): must run, not skip.
-          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui|tst_pasteguard|tst_safepaste|tst_tabs' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF'
+          # Vault (incl. tst_vaultshared), askpass, logging, tabs and Find/scrollback suites (Send Stored Login also needs socat): must run, not skip.
+          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui|tst_pasteguard|tst_safepaste|tst_tabs|tst_scrollback|tst_find|tst_scrollbench' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF|BENCH'
           ! grep -q 'SKIP ' vault.log
 
       - name: Package .deb
