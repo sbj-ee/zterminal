@@ -20,7 +20,7 @@ struct AppSettings {
     static constexpr int kDefaultScrollbackLines = 100000;
     static constexpr int kUnlimitedScrollback = -1;
     MouseSettings mouse;
-    // Stored now; the startup update checker itself lands in a later release.
+    // Automatic update check at startup (at most once a day; UpdateManager).
     bool checkForUpdatesOnStartup = true;
     // Lock the password vault after this many idle minutes (0 = never).
     int vaultAutoLockMinutes = 15;

@@ -27,6 +27,9 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # libqt6serialport6 is the serial backend and libsodium23 the vault crypto
 # (shlibdeps finds both too; listed explicitly).
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-wayland, libqt6serialport6, libsodium23")
+# Help > Check for Updates installs through `pkexec apt install` (falls back
+# to the release page without it). shlibdeps adds libqt6network6 itself.
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "pkexec | policykit-1")
 # zterminal_<ver>_amd64.deb (the name the updater expects).
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 include(CPack)

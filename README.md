@@ -71,7 +71,17 @@ and milestones.
   default) it reconnects by itself after 2, 4, 8 … 60 s, with Cancel; a stored password is
   reused without asking while the vault is unlocked. A clean `exit` never reconnects.
 
-Planned next: update checks (see the plan).
+- Updates (0.10.0): Help > Check for Updates, plus a quiet check at startup at most once a
+  day (Settings > Preferences > "Check for updates at startup"). It asks the public GitHub
+  Releases API for sbj-ee/zterminal. A newer release shows its notes with Install, Later and
+  Skip This Version. Install downloads the `.deb` and `SHA256SUMS`, refuses on a checksum
+  mismatch, runs `pkexec apt install -y ./zterminal_X_amd64.deb` (polkit asks for your
+  password) and offers a restart, warning first if sessions are still live. Without pkexec,
+  or when running from a build tree, it opens the release page and leaves the verified
+  `.deb` in place.
+
+Releases are published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed:
+`zterminal_X.Y.Z_amd64.deb` and `SHA256SUMS` (check with `sha256sum -c SHA256SUMS`).
 
 ## Usage
 

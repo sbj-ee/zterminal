@@ -20,9 +20,11 @@ add_library(zterminal_core STATIC
   Reconnect.cpp Reconnect.hpp
   Scrollback.cpp Scrollback.hpp
   PasteGuard.cpp PasteGuard.hpp
+  Update.cpp Update.hpp
+  UpdateChecker.cpp UpdateChecker.hpp
 )
 target_include_directories(zterminal_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${ZTERMINAL_GENERATED_DIR})
-target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui Qt6::SerialPort vterm PkgConfig::SODIUM PRIVATE util)
+target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui Qt6::SerialPort Qt6::Network vterm PkgConfig::SODIUM PRIVATE util)
 zterminal_set_warnings(zterminal_core)
