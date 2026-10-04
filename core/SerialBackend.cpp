@@ -1,5 +1,6 @@
 #include "SerialBackend.hpp"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QSerialPortInfo>
 #include <QTimer>
@@ -84,6 +85,36 @@ QStringList SerialBackend::availablePorts()
     std::sort(out.begin(), out.end());
     out.erase(std::unique(out.begin(), out.end()), out.end());
     return out;
+}
+
+QString SerialBackend::byIdDirectory()
+{
+    const QString env = qEnvironmentVariable("ZTERMINAL_SERIAL_BY_ID_DIR");
+    return env.isEmpty() ? QStringLiteral("/dev/serial/by-id") : QDir::cleanPath(env);
+}
+
+bool SerialBackend::isByIdPath(const QString &device)
+{
+    return QDir::cleanPath(device).startsWith(byIdDirectory() + QLatin1Char('/'));
+}
+
+QString SerialBackend::byIdAlias(const QString &device)
+{
+    if (isByIdPath(device)) {
+        return QDir::cleanPath(device);
+    }
+    const QString target = QFileInfo(device).canonicalFilePath();
+    if (target.isEmpty()) {
+        return {};
+    }
+    const QDir dir(byIdDirectory());
+    const QFileInfoList links = dir.entryInfoList(QDir::System | QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &l : links) {
+        if (l.isSymLink() && l.canonicalFilePath() == target) {
+            return l.absoluteFilePath();
+        }
+    }
+    return {};
 }
 
 bool SerialBackend::open(const SessionConfig &cfg)

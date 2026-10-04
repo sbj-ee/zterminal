@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 # Single source of truth for the version: bump ONLY the VERSION here.
 # configure_file() turns it into generated/version.hpp (window title, About,
 # --version, update checks); CPack names the .deb from PROJECT_VERSION.
-project(zterminal VERSION 0.8.1 LANGUAGES C CXX)
+project(zterminal VERSION 0.10.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,7 +17,7 @@ endif()
 
 option(ZTERMINAL_BUILD_TESTS "Build the Qt Test suite" ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets SerialPort)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets SerialPort Network)
 # libsodium (Argon2id + XChaCha20-Poly1305) for the password vault.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)

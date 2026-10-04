@@ -46,6 +46,11 @@ public:
     void suspend(const QString &reason);
     void resume(const QString &reason);
     bool isSuspended() const { return !m_pauses.isEmpty(); }
+    // Connection events (docs/PLAN.md §4.18), written even while paused:
+    //   --- disconnected 2026-10-03 21:58:12 (Timeout, server not responding.) ---
+    //   --- reconnected 2026-10-03 21:58:40 (attempt 3) ---
+    // The line model restarts, so a half line before the drop stays on its own.
+    void marker(const QString &event, const QString &detail = {});
 
     void setClockForTests(Clock c) { m_clock = std::move(c); }
 

@@ -1,6 +1,7 @@
 #include "CommandLine.hpp"
 #include "MainWindow.hpp"
 #include "SessionStore.hpp"
+#include "UpdateManager.hpp"
 #include "version.hpp"
 
 #include <QApplication>
@@ -77,5 +78,7 @@ int main(int argc, char *argv[])
     zterminal::MainWindow w(request, args);
     w.show();
     w.startSession();
+    // Quietly, a few seconds in, if enabled in Preferences and a day has passed.
+    zterminal::UpdateManager::instance().scheduleStartupCheck(&w);
     return QApplication::exec();
 }

@@ -189,6 +189,8 @@ private slots:
         f.write("#!/bin/sh\n"
                 "o=\"$ZT_FAKE_OUT\"\n"
                 "\"$SSH_ASKPASS\" \"stevebj@core-sw1's password: \" > \"$o/answer\"; echo $? > \"$o/rc\"\n"
+                // With $o/drop present: the connection then drops (ssh exit 255).
+                "if [ -e \"$o/drop\" ]; then echo 'Connection to core-sw1.example closed by remote host.' >&2; exit 255; fi\n"
                 "echo fake-ssh-finished\n"
                 "exec sleep 30\n");
         f.close();
@@ -272,6 +274,47 @@ private slots:
         QVERIFY(t->askpassServer());
         expectAskpassAnswered();
         QCOMPARE(prompts, 0);
+    }
+
+    // 0.10.0 (keepalive/reconnect on top of the shared vault): a session in a
+    // File > New Window window drops and is reconnected; the stored password
+    // comes from the one unlocked vault again, without a prompt. After Lock
+    // Vault in the *other* window, Reconnect asks (once) - the lock is shared too.
+    void reconnectInNewWindowDoesNotPrompt()
+    {
+        MainWindow a(LaunchRequest{}, {});
+        a.show();
+        unlockOnceViaMenu(a);
+        MainWindow *b = newWindow(a);
+        QVERIFY2(b, "File > New Window did not open in this process");
+        QFile drop(out(QStringLiteral("drop")));
+        QVERIFY(drop.open(QIODevice::WriteOnly));
+        drop.close();
+        SessionWidget *t = openTab(*b, sshSession());
+        QVERIFY(t);
+        expectAskpassAnswered();
+        QTRY_VERIFY_WITH_TIMEOUT(t->isDisconnected(), 10000);
+        QVERIFY2(t->bannerText().contains(QStringLiteral("Disconnected")), qPrintable(t->bannerText()));
+        QCOMPARE(prompts, 0);
+
+        t->findChild<QPushButton *>(QStringLiteral("reconnect"))->click();
+        expectAskpassAnswered(); // a fresh one-shot askpass with the same stored password
+        QTRY_VERIFY_WITH_TIMEOUT(t->isDisconnected(), 10000); // (drops again: $o/drop is still there)
+        QCOMPARE(prompts, 0);
+        QVERIFY(vm().isUnlocked());
+
+        // Lock from the first window: the reconnect in the second one now asks.
+        a.action(QStringLiteral("lockVault"))->trigger();
+        QVERIFY(!vm().isUnlocked());
+        QVERIFY(b->action(QStringLiteral("unlockVault"))->isEnabled());
+        QFile::remove(out(QStringLiteral("drop")));
+        answer = QString::fromUtf8(kMaster);
+        t->findChild<QPushButton *>(QStringLiteral("reconnect"))->click();
+        QTRY_COMPARE(prompts, 1);
+        expectAskpassAnswered();
+        QVERIFY(vm().isUnlocked());
+        QTRY_VERIFY_WITH_TIMEOUT(!t->isDisconnected(), 10000);
+        QCOMPARE(prompts, 1);
     }
 
     void duplicateAfterUnlockDoesNotPrompt()

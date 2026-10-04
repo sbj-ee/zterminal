@@ -10,6 +10,7 @@
 #include "TerminalView.hpp"
 #include "VaultManager.hpp"
 #include "WindowTitle.hpp"
+#include "UpdateManager.hpp"
 #include "version.hpp"
 
 #include <vterm.h>
@@ -126,7 +127,6 @@ QAction *MainWindow::action(const QString &name) const
 void MainWindow::buildMenus()
 {
     using QKS = QKeySequence;
-    const QString later = QStringLiteral("Planned for a later release (see docs/PLAN.md)");
 
     // File
     QMenu *file = menuBar()->addMenu(QStringLiteral("&File"));
@@ -288,7 +288,8 @@ void MainWindow::buildMenus()
     QMenu *help = menuBar()->addMenu(QStringLiteral("&Help"));
     connect(addAct(help, QStringLiteral("about"), QStringLiteral("&About zterminal")),
             &QAction::triggered, this, &MainWindow::showAbout);
-    addAct(help, QStringLiteral("checkForUpdates"), QStringLiteral("Check for &Updates\u2026"), {}, false, later);
+    connect(addAct(help, QStringLiteral("checkForUpdates"), QStringLiteral("Check for &Updates\u2026")),
+            &QAction::triggered, this, [this]() { UpdateManager::instance().checkNow(this); });
 
     // Ctrl+right-click menu (no context menu on plain right-click: that pastes).
     m_contextMenu = new QMenu(this);

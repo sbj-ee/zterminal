@@ -51,6 +51,14 @@ public:
                                  const QString &systemText = {});
     // Detected ports (/dev/ttyUSB0, /dev/ttyACM0, ...), sorted.
     static QStringList availablePorts();
+    // Stable names (docs/PLAN.md §4.18): /dev/serial/by-id holds one symlink
+    // per USB adapter named after its vendor/model/serial number, which stays
+    // the same when the kernel name changes (ttyUSB0 -> ttyUSB1 on replug).
+    // ZTERMINAL_SERIAL_BY_ID_DIR overrides the directory (tests).
+    static QString byIdDirectory();
+    static bool isByIdPath(const QString &device);
+    // The by-id symlink that currently points at `device`, or empty.
+    static QString byIdAlias(const QString &device);
 
 signals:
     void dataReceived(const QByteArray &data);

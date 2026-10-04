@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 
+#include <QDateTime>
 #include <QWidget>
 
 class QLabel;
@@ -17,6 +18,7 @@ class QTimer;
 namespace zterminal {
 
 class AskpassServer;
+class ReconnectScheduler;
 class FindBar;
 class Pty;
 class SerialBackend;
@@ -64,6 +66,26 @@ public:
     void showBanner(const QString &text);
     void hideBanner();
     QWidget *pasteBar() const { return m_pasteBar; }
+
+    // Keepalive / reconnect (docs/PLAN.md §4.18). A drop = ssh exiting 255 with
+    // a network error, or the serial device going away. The tab keeps its
+    // scrollback and log, shows "Disconnected at HH:mm:ss" with Reconnect, and
+    // (per saved session) retries with backoff; a serial port reopens when its
+    // device (by-id path preferred) comes back. A clean exit never reconnects.
+    bool isSshSession() const;
+    bool isDisconnected() const { return m_disconnected; }
+    QDateTime droppedAt() const { return m_droppedAt; }
+    QString dropReason() const { return m_dropReason; }
+    bool autoReconnectEnabled() const;
+    ReconnectScheduler *reconnectScheduler() const { return m_reconnect; }
+    int reconnectCount() const { return m_reconnects; }
+    // Serial: the path watched for the device to come back.
+    QString serialWatchPath() const { return m_serialWatchPath; }
+    bool isWaitingForDevice() const;
+    void reconnectNow();
+    void cancelReconnect();
+    // An ssh connection counts as back once it has stayed up this long.
+    static void setReconnectStableMsForTests(int ms);
     // Edit > Find (Ctrl+Shift+F): this tab's find bar under the view.
     FindBar *findBar() const { return m_findBar; }
     void openFind();
@@ -101,6 +123,13 @@ signals:
 
 private:
     void onSessionFinished(int exitCode, bool crashed);
+    void markDisconnected(const QString &reason);
+    void markReconnected();
+    void updateDisconnectBanner(const QString &note = {});
+    void onAttemptDue(int attempt);
+    void checkDeviceBack();
+    void resetModesForReconnect();
+    QStringList prepareStoredPasswordFor(bool mayPrompt);
     void onSerialDisconnected(const QString &reason);
     void updatePasteBar(qint64 remaining);
     QStringList prepareStoredPassword();
@@ -118,6 +147,19 @@ private:
     SerialBackend *m_serial = nullptr;
     QWidget *m_banner = nullptr;
     QLabel *m_bannerText = nullptr;
+    QPushButton *m_reconnectButton = nullptr;
+    QPushButton *m_cancelReconnectButton = nullptr;
+    ReconnectScheduler *m_reconnect = nullptr;
+    QTimer *m_stable = nullptr;      // ssh: up long enough = reconnected
+    QTimer *m_deviceWatch = nullptr; // serial: poll for the device node
+    QByteArray m_ptyTail;            // last output, to classify an ssh exit
+    bool m_disconnected = false;
+    bool m_userStop = false;         // Restart Session terminated the process
+    bool m_autoAttempt = false;      // the running attempt was started by the scheduler
+    QDateTime m_droppedAt;
+    QString m_dropReason;
+    QString m_serialWatchPath;
+    int m_reconnects = 0;
     QWidget *m_pasteBar = nullptr;
     QLabel *m_pasteText = nullptr;
     TerminalView *m_view = nullptr;

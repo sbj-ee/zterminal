@@ -1,6 +1,7 @@
 #include "PreferencesDialog.hpp"
 
 #include "ColorScheme.hpp"
+#include "Update.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -143,9 +144,26 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     m_checkUpdates->setChecked(current.checkForUpdatesOnStartup);
     updLayout->addWidget(m_checkUpdates);
     auto *updNote = new QLabel(QStringLiteral(
-        "<small>Your choice is saved now. The update checker itself arrives in a later release.</small>"));
+        "<small>At most once a day, zterminal asks GitHub for the latest release (no account, nothing sent "
+        "but the request). Help &gt; Check for Updates works either way.</small>"));
     updNote->setWordWrap(true);
     updLayout->addWidget(updNote);
+    // "Skip this version" is remembered in update-state.ini; this forgets it.
+    if (const QString skipped = UpdateState::load().skippedVersion; !skipped.isEmpty()) {
+        auto *forget = new QPushButton(QStringLiteral("Stop Skipping %1").arg(skipped));
+        forget->setObjectName(QStringLiteral("clearSkippedVersion"));
+        connect(forget, &QPushButton::clicked, forget, [forget]() {
+            UpdateState st = UpdateState::load();
+            st.skippedVersion.clear();
+            st.save();
+            forget->setText(QStringLiteral("No version skipped"));
+            forget->setEnabled(false);
+        });
+        auto *row = new QHBoxLayout;
+        row->addWidget(forget);
+        row->addStretch();
+        updLayout->addLayout(row);
+    }
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel);
     buttons->setObjectName(QStringLiteral("buttons"));

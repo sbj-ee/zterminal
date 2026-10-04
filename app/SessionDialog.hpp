@@ -65,6 +65,9 @@ private:
     QLineEdit *m_extra = nullptr;
     QCheckBox *m_useStored = nullptr;
     QCheckBox *m_autoLog = nullptr;
+    QCheckBox *m_autoReconnect = nullptr;
+    QSpinBox *m_keepInterval = nullptr;
+    QSpinBox *m_keepCount = nullptr;
     QLineEdit *m_sshPassword = nullptr;
     QLineEdit *m_loginUser = nullptr;
     QLineEdit *m_loginPassword = nullptr;

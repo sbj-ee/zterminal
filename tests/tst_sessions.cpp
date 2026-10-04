@@ -164,13 +164,19 @@ private slots:
         SshCommand c = buildSshCommand(s);
         QVERIFY(c.ok());
         QCOMPARE(c.program, QStringLiteral("ssh"));
-        QCOMPARE(c.args, (QStringList{QStringLiteral("--"), QStringLiteral("sw1.example.net")}));
+        // Keepalive (0.9.0) is on by default: 30 s x 3.
+        QCOMPARE(c.args, (QStringList{QStringLiteral("-o"), QStringLiteral("ServerAliveInterval=30"), QStringLiteral("-o"),
+                                      QStringLiteral("ServerAliveCountMax=3"), QStringLiteral("--"),
+                                      QStringLiteral("sw1.example.net")}));
+        s.keepaliveInterval = 0;
+        QCOMPARE(buildSshCommand(s).args, (QStringList{QStringLiteral("--"), QStringLiteral("sw1.example.net")}));
 
         s = sshSession();
         c = buildSshCommand(s);
         QVERIFY2(c.ok(), qPrintable(c.error));
         QCOMPARE(c.args, (QStringList{QStringLiteral("-o"), QStringLiteral("ServerAliveInterval=30"), QStringLiteral("-4"),
-                                      QStringLiteral("-p"), QStringLiteral("2222"), QStringLiteral("-l"), QStringLiteral("admin"),
+                                      QStringLiteral("-o"), QStringLiteral("ServerAliveInterval=30"), QStringLiteral("-o"),
+                                      QStringLiteral("ServerAliveCountMax=3"), QStringLiteral("-p"), QStringLiteral("2222"), QStringLiteral("-l"), QStringLiteral("admin"),
                                       QStringLiteral("-i"), QDir::homePath() + QStringLiteral("/.ssh/id_lab"),
                                       QStringLiteral("-J"), QStringLiteral("sbj@vertex:22"),
                                       QStringLiteral("--"), QStringLiteral("10.0.0.1")}));

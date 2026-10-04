@@ -162,6 +162,21 @@ void SessionLog::feed(const QByteArray &output)
     m_filter->feed(output);
 }
 
+void SessionLog::marker(const QString &event, const QString &detail)
+{
+    if (!m_file.isOpen()) {
+        return;
+    }
+    m_filter->flush();
+    QString line = QStringLiteral("--- %1 %2").arg(event, m_clock().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    if (!detail.isEmpty()) {
+        line += QStringLiteral(" (%1)").arg(QString(detail).replace(QLatin1Char('\n'), QLatin1Char(' ')));
+    }
+    writeRaw(line + QStringLiteral(" ---\n"));
+    m_filter = std::make_unique<LogTextFilter>([this](const QString &l) { writeLine(l); });
+    m_filter->setColumns(m_columns);
+}
+
 void SessionLog::suspend(const QString &reason)
 {
     if (!m_file.isOpen() || m_pauses.contains(reason)) {

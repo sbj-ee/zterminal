@@ -25,6 +25,11 @@ struct SessionConfig {
     QString jumpHost;  // -J; [user@]host[:port][,...]
     QString extraArgs; // further ssh *options*, split like a command line, never run by a shell
     bool useStoredPassword = false; // answer ssh's first password prompt from the vault
+    // Keepalive (docs/PLAN.md §4.18): -o ServerAliveInterval / ServerAliveCountMax.
+    // ssh gives up after interval x count seconds without an answer (default 30 s x 3).
+    // 0 = no keepalive options (ssh's own default: off).
+    int keepaliveInterval = 30;
+    int keepaliveCountMax = 3;
 
     // Serial (QSerialPort). Defaults: 9600 8N1, no flow control (Cisco console).
     QString serialDevice;            // e.g. /dev/ttyUSB0, /dev/ttyACM0
@@ -41,6 +46,10 @@ struct SessionConfig {
     QString loginUser;               // Session > Send Stored Login (password in the vault)
 
     bool autoLog = false; // start Session > Logging when the session opens
+    // After a drop (SSH network error), reconnect by itself with backoff
+    // 2, 4, 8 ... 60 s. Off by default; serial ports always reopen when the
+    // device comes back.
+    bool autoReconnect = false;
 
     // Optional per-session appearance overrides (empty / 0: use Preferences).
     QString fontFamily;
@@ -76,7 +85,9 @@ struct SshCommand {
     bool ok() const { return error.isEmpty(); }
 };
 
-// ssh [extra options] [-p port] [-l user] [-i key] [-J jump] -- host
+// ssh [extra options] [-o ServerAliveInterval=N -o ServerAliveCountMax=M]
+//     [-p port] [-l user] [-i key] [-J jump] -- host
+// (ssh takes the first value of an option, so -o in the extra options wins.)
 // No shell is involved and every user-supplied value is either validated or
 // passed as the separate value of an option, so nothing can become an option.
 SshCommand buildSshCommand(const SessionConfig &s);
