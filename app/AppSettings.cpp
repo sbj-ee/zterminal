@@ -68,6 +68,7 @@ bool AppSettings::operator==(const AppSettings &o) const
         && scrollbackLines == o.scrollbackLines && checkForUpdatesOnStartup == o.checkForUpdatesOnStartup
         && vaultAutoLockMinutes == o.vaultAutoLockMinutes
         && logDirectory == o.logDirectory && logTimestamps == o.logTimestamps
+        && trimCopiedWhitespace == o.trimCopiedWhitespace && confirmMultilinePaste == o.confirmMultilinePaste
         && mouse.middleClick == o.mouse.middleClick
         && mouse.copyOnSelectToClipboard == o.mouse.copyOnSelectToClipboard
         && mouse.wordDelimiters == o.mouse.wordDelimiters;
@@ -84,6 +85,8 @@ AppSettings AppSettings::load(const QSettings &s)
         s.value(QStringLiteral("vault/autoLockMinutes"), a.vaultAutoLockMinutes).toInt(), 0, 24 * 60);
     a.logDirectory = s.value(QStringLiteral("logging/directory")).toString();
     a.logTimestamps = s.value(QStringLiteral("logging/timestamps"), a.logTimestamps).toBool();
+    a.trimCopiedWhitespace = s.value(QStringLiteral("clipboard/trimTrailingWhitespace"), a.trimCopiedWhitespace).toBool();
+    a.confirmMultilinePaste = s.value(QStringLiteral("clipboard/confirmMultilinePaste"), a.confirmMultilinePaste).toBool();
     a.checkForUpdatesOnStartup =
         s.value(QStringLiteral("updates/checkOnStartup"), a.checkForUpdatesOnStartup).toBool();
     a.mouse.load(s);
@@ -99,6 +102,8 @@ void AppSettings::save(QSettings &s) const
     s.setValue(QStringLiteral("vault/autoLockMinutes"), vaultAutoLockMinutes);
     s.setValue(QStringLiteral("logging/directory"), logDirectory);
     s.setValue(QStringLiteral("logging/timestamps"), logTimestamps);
+    s.setValue(QStringLiteral("clipboard/trimTrailingWhitespace"), trimCopiedWhitespace);
+    s.setValue(QStringLiteral("clipboard/confirmMultilinePaste"), confirmMultilinePaste);
     s.setValue(QStringLiteral("updates/checkOnStartup"), checkForUpdatesOnStartup);
     // Menu-bar visibility is deliberately NOT persisted (see MainWindow::setMenuBarShown);
     // drop the key 0.1.0 wrote so an old "hidden" value can never come back.

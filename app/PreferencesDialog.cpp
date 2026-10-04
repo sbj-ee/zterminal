@@ -47,6 +47,14 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     m_middle->addItem(QStringLiteral("Do nothing"), MouseSettings::toString(MiddleClickAction::Off));
     m_middle->setCurrentIndex(m_middle->findData(MouseSettings::toString(current.mouse.middleClick)));
     mouseForm->addRow(QStringLiteral("Middle-click:"), m_middle);
+    m_trimCopy = new QCheckBox(QStringLiteral("Trim trailing whitespace from copied lines"));
+    m_trimCopy->setObjectName(QStringLiteral("trimCopiedWhitespace"));
+    m_trimCopy->setChecked(current.trimCopiedWhitespace);
+    mouseForm->addRow(m_trimCopy);
+    m_confirmPaste = new QCheckBox(QStringLiteral("Ask before pasting text with more than one line"));
+    m_confirmPaste->setObjectName(QStringLiteral("confirmMultilinePaste"));
+    m_confirmPaste->setChecked(current.confirmMultilinePaste);
+    mouseForm->addRow(m_confirmPaste);
 
     auto *lookBox = new QGroupBox(QStringLiteral("Appearance"));
     auto *lookForm = new QFormLayout(lookBox);
@@ -151,6 +159,8 @@ AppSettings PreferencesDialog::result() const
     a.vaultAutoLockMinutes = m_vaultAutoLock->value();
     a.logDirectory = m_logDir->text().trimmed();
     a.logTimestamps = m_logTimestamps->isChecked();
+    a.trimCopiedWhitespace = m_trimCopy->isChecked();
+    a.confirmMultilinePaste = m_confirmPaste->isChecked();
     a.checkForUpdatesOnStartup = m_checkUpdates->isChecked();
     return a;
 }

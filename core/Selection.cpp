@@ -142,7 +142,7 @@ void Selection::linesDropped(int count)
     }
 }
 
-QString Selection::text(const Terminal &term) const
+QString Selection::text(const Terminal &term, bool trimTrailingWhitespace) const
 {
     if (isEmpty()) {
         return {};
@@ -152,11 +152,16 @@ QString Selection::text(const Terminal &term) const
     for (int line = std::max(m_start.line, 0); line <= last; ++line) {
         const int from = line == m_start.line ? m_start.col : 0;
         const bool toEnd = line != m_end.line || m_end.col >= term.cols();
-        if (toEnd) {
-            lines << term.lineText(line, from, -1);
-        } else {
-            lines << term.lineText(line, from, m_end.col);
+        QString t = toEnd ? term.lineText(line, from, -1, !trimTrailingWhitespace)
+                          : term.lineText(line, from, m_end.col);
+        if (trimTrailingWhitespace) {
+            qsizetype n = t.size();
+            while (n > 0 && t.at(n - 1).isSpace()) {
+                --n;
+            }
+            t.truncate(n);
         }
+        lines << t;
     }
     return lines.join(QLatin1Char('\n'));
 }

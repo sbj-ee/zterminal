@@ -592,7 +592,7 @@ void TerminalView::wheelEvent(QWheelEvent *e)
 
 QString TerminalView::selectedText() const
 {
-    return m_selection.text(*m_term);
+    return m_selection.text(*m_term, m_trimCopy);
 }
 
 void TerminalView::copyToClipboards(bool toClipboard)
@@ -602,6 +602,7 @@ void TerminalView::copyToClipboards(bool toClipboard)
         return;
     }
     m_lastSelectionText = text;
+    // QClipboard::setText offers text/plain only: no HTML or colours.
     QClipboard *cb = QGuiApplication::clipboard();
     if (cb->supportsSelection()) {
         cb->setText(text, QClipboard::Selection);
@@ -624,6 +625,9 @@ void TerminalView::copyOnSelect()
 void TerminalView::pasteText(const QString &text)
 {
     if (text.isEmpty()) {
+        return;
+    }
+    if (m_pasteGuard && !m_pasteGuard(text)) {
         return;
     }
     scrollToBottom();

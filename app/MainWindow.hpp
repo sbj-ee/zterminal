@@ -102,11 +102,16 @@ public:
     void stopLogging();
     SessionLog *sessionLog() const { return m_log.get(); }
     QLabel *recIndicator() const { return m_recLabel; }
+    // Multi-line paste confirmation: true = go ahead. "Don't ask again" lasts
+    // for this window's session.
+    bool confirmPaste(const QString &text);
+    bool pasteConfirmSkipped() const { return m_skipPasteConfirm; }
 
 protected:
     void closeEvent(QCloseEvent *e) override;
 
 private:
+    bool m_skipPasteConfirm = false;
     void buildMenus();
     QAction *addAct(QMenu *menu, const QString &name, const QString &text,
                     const QKeySequence &shortcut = {}, bool enabled = true,

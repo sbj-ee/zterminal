@@ -207,23 +207,31 @@ Cell Terminal::cell(int absLine, int col) const
     return convert(c);
 }
 
-QString Terminal::lineText(int absLine, int startCol, int endCol) const
+QString Terminal::lineText(int absLine, int startCol, int endCol, bool keepPrintedSpaces) const
 {
     const bool toEnd = endCol < 0;
     if (toEnd || endCol > m_cols) {
         endCol = m_cols;
     }
     QString s;
+    qsizetype keep = 0; // length up to the last printed cell
     for (int col = std::max(startCol, 0); col < endCol; ++col) {
         const Cell c = cell(absLine, col);
         if (c.width == 0) {
             continue;
         }
         s += c.text.isEmpty() ? QStringLiteral(" ") : c.text;
+        if (!c.text.isEmpty()) {
+            keep = s.size();
+        }
     }
     if (toEnd) {
-        while (s.endsWith(QLatin1Char(' '))) {
-            s.chop(1);
+        if (keepPrintedSpaces) {
+            s.truncate(keep);
+        } else {
+            while (s.endsWith(QLatin1Char(' '))) {
+                s.chop(1);
+            }
         }
     }
     return s;
@@ -262,6 +270,18 @@ QByteArray Terminal::preparePasteBytes(const QString &text)
     // Never let pasted text end a bracketed paste early.
     t.remove(QStringLiteral("\x1b[201~"));
     return t.toUtf8();
+}
+
+bool Terminal::bracketedPasteEnabled() const
+{
+    m_probing = true;
+    m_probeOut.clear();
+    // Only emits (CSI 200~); keyboard.c changes no state here.
+    vterm_keyboard_start_paste(m_vt);
+    m_probing = false;
+    const bool on = !m_probeOut.isEmpty();
+    m_probeOut.clear();
+    return on;
 }
 
 void Terminal::paste(const QString &text)
@@ -382,7 +402,12 @@ int Terminal::cbSbClear(void *user)
 
 void Terminal::cbOutput(const char *s, size_t len, void *user)
 {
-    emit static_cast<Terminal *>(user)->output(QByteArray(s, static_cast<qsizetype>(len)));
+    auto *t = static_cast<Terminal *>(user);
+    if (t->m_probing) {
+        t->m_probeOut.append(s, static_cast<qsizetype>(len));
+        return;
+    }
+    emit t->output(QByteArray(s, static_cast<qsizetype>(len)));
 }
 
 } // namespace zterminal
