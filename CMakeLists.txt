@@ -1,0 +1,39 @@
+cmake_minimum_required(VERSION 3.21)
+
+# Single source of truth for the version: bump ONLY the VERSION here.
+# configure_file() turns it into generated/version.hpp (window title, About,
+# --version, update checks); CPack names the .deb from PROJECT_VERSION.
+project(zterminal VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
+option(ZTERMINAL_BUILD_TESTS "Build the Qt Test suite" ON)
+
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
+
+include(cmake/CompilerWarnings.cmake)
+
+set(ZTERMINAL_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/version.hpp.in"
+  "${ZTERMINAL_GENERATED_DIR}/version.hpp"
+  @ONLY)
+
+add_subdirectory(third_party/libvterm)
+add_subdirectory(core)
+add_subdirectory(app)
+
+if(ZTERMINAL_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
+
+include(cmake/Packaging.cmake)
