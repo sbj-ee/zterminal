@@ -4,9 +4,9 @@
 #include "CommandLine.hpp"
 #include "Session.hpp"
 #include "SessionStore.hpp"
+#include "SessionWidget.hpp"
 
 #include <functional>
-#include <memory>
 #include <optional>
 
 #include <QMainWindow>
@@ -15,8 +15,7 @@ class QAction;
 class QActionGroup;
 class QFileSystemWatcher;
 class QLabel;
-class QPushButton;
-class QWidget;
+class QTabWidget;
 class QTimer;
 class QMenu;
 
@@ -29,8 +28,9 @@ class SerialBackend;
 class Terminal;
 class TerminalView;
 
-// One window = one session (approved: no tabs). Owns the PTY, the emulator and
-// the view, plus the classic menu bar (docs/PLAN.md §3).
+// A window with one or more tabs; each tab is an independent SessionWidget
+// (local shell, SSH or serial). Owns the classic menu bar (docs/PLAN.md §3);
+// menu actions act on the current tab. No split panes.
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -39,130 +39,104 @@ public:
                         QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    void startSession();
-    TerminalView *view() const { return m_view; }
-    Terminal *terminal() const { return m_term; }
-    Pty *pty() const { return m_pty; }
-    SerialBackend *serial() const { return m_serial; }
-    bool isSerialSession() const;
-    // The red "disconnected / could not open" bar with Reconnect (tests).
-    QWidget *serialBanner() const { return m_banner; }
-    QString serialBannerText() const;
-    // "Sending paste... [Cancel]" bar shown while paced output is queued.
-    QWidget *pasteBar() const { return m_pasteBar; }
-    QString sessionName() const { return m_saved ? m_saved->name : m_request.displayName(); }
-    // The saved session this window runs (empty for local/ad-hoc windows).
-    const std::optional<SessionConfig> &savedSession() const { return m_saved; }
+    // ---- tabs ----
+    QTabWidget *tabs() const { return m_tabs; }
+    int tabCount() const;
+    SessionWidget *currentSession() const;
+    SessionWidget *sessionAt(int index) const;
+    // Adds a tab for `request` (args = what Duplicate re-opens), makes it current
+    // and, with start, starts its session.
+    SessionWidget *addTab(const LaunchRequest &request, const QStringList &args, bool start = true);
+    // Closes a tab; a live session asks first (unless force). The window closes
+    // with its last tab. False if the user kept it.
+    bool closeTab(int index, bool force = false);
+    void nextTab();
+    void previousTab();
+    // Tabs whose process is running / serial port is open.
+    int liveTabCount() const;
 
-    // What startSession() runs: program "" means the user's login shell.
-    struct Launch {
-        QString program;
-        QStringList args;
-        QString error;
-        std::optional<SessionConfig> serial; // set: open this serial port instead of a PTY
-    };
+    // ---- the current tab (kept for callers and tests) ----
+    void startSession();
+    TerminalView *view() const;
+    Terminal *terminal() const;
+    Pty *pty() const;
+    SerialBackend *serial() const;
+    bool isSerialSession() const;
+    QWidget *sessionBanner() const;
+    QWidget *serialBanner() const { return sessionBanner(); }
+    QString serialBannerText() const;
+    QWidget *pasteBar() const;
+    QString sessionName() const;
+    const std::optional<SessionConfig> &savedSession() const;
+    using Launch = SessionWidget::Launch;
     Launch launchCommand() const;
 
-    // File > New Session / Open Saved Session: opens the session dialog.
+    // File > New Session / Open Saved Session: opens the session dialog; the
+    // chosen session opens in a new tab.
     void showSessionDialog(bool focusSaved);
-    // Start `cfg` in a new window (by name when it matches the saved copy).
-    bool openInNewWindow(const SessionConfig &cfg, QString *error = nullptr);
-    // File > Save Session without the name prompt; the window then *is* that session.
+    bool openInNewTab(const SessionConfig &cfg, QString *error = nullptr);
     bool saveCurrentSessionAs(const QString &name, QString *error = nullptr);
-    // Current window's session as a SessionConfig (nullopt if it can't be saved).
     std::optional<SessionConfig> currentSessionConfig(QString *why = nullptr) const;
 
-    // How new windows are started (tests replace it). Default: QProcess::startDetached.
+    // File > New Window starts another zterminal process (tests replace it).
     using Launcher = std::function<bool(const QString &program, const QStringList &args)>;
     void setLauncher(Launcher l) { m_launcher = std::move(l); }
-    QStringList relaunchArgs() const { return m_originalArgs; }
-    // Every QAction by objectName (used by tests and the context menu).
     QAction *action(const QString &name) const;
     QMenu *contextMenu() const { return m_contextMenu; }
 
     const AppSettings &settings() const { return m_settings; }
-    // Save as the new global defaults and apply to this window now; other open
-    // windows (and other zterminal processes) follow via the settings-file watcher.
     void setSettings(const AppSettings &s);
-    // Re-read the settings file and apply it if it changed.
     void reloadSettings();
-    // Open Settings > Preferences (modal).
     void showPreferences();
 
-    // Vault-backed SSH password for this session's next start (tests).
-    AskpassServer *askpassServer() const { return m_askpass; }
-    // Session > Send Stored Login (serial): user + Enter, then the password once
-    // a "password" prompt arrives (never typed blind). False if not started.
+    AskpassServer *askpassServer() const;
     bool sendStoredLogin();
-    bool loginPending() const { return m_loginWait != nullptr; }
-
-    // Session > Start/Stop Logging (Ctrl+Shift+G); also automatic for saved
-    // sessions with "Log this session automatically".
+    bool loginPending() const;
     bool startLogging(QString *error = nullptr);
     void stopLogging();
-    SessionLog *sessionLog() const { return m_log.get(); }
+    SessionLog *sessionLog() const;
+    // Window-level "● REC" marker: shows the *current* tab's logging state
+    // (other logging tabs carry "● " in their tab text).
     QLabel *recIndicator() const { return m_recLabel; }
-    // Multi-line paste confirmation: true = go ahead. "Don't ask again" lasts
-    // for this window's session.
     bool confirmPaste(const QString &text);
-    bool pasteConfirmSkipped() const { return m_skipPasteConfirm; }
+    bool pasteConfirmSkipped() const;
 
 protected:
     void closeEvent(QCloseEvent *e) override;
 
 private:
-    bool m_skipPasteConfirm = false;
     void buildMenus();
     QAction *addAct(QMenu *menu, const QString &name, const QString &text,
                     const QKeySequence &shortcut = {}, bool enabled = true,
                     const QString &plannedNote = {});
     void applySettings();
     void updateTitle();
+    void updateTabText(SessionWidget *s);
+    void onCurrentTabChanged();
+    void updateSessionActions();
     void setFontSize(int points);
-    void onSessionFinished(int exitCode, bool crashed);
-    void restartSession();
+    void setSchemeFor(const QString &id);
+    void updateSavedEverywhere(const SessionConfig &cfg);
     void duplicateSession();
     void showAbout();
     void watchSettingsFile();
     void setMenuBarShown(bool shown);
-    void showContextMenu(const QPoint &globalPos);
-
     void saveSessionInteractive();
-    void showSerialBanner(const QString &text);
-    void onSerialDisconnected(const QString &reason);
-    void updatePasteBar(qint64 remaining);
-    bool launch(const QStringList &args);
-    QStringList prepareStoredPassword();
     void updateVaultActions();
-    void onSerialData(const QByteArray &d);
-    void finishLogin(bool sendPassword);
-    void logOutput(const QByteArray &d, bool fromPty);
     void updateLoggingUi();
 
-    LaunchRequest m_request;
-    std::optional<SessionConfig> m_saved;
     SessionStore m_store;
     Launcher m_launcher;
-    QStringList m_originalArgs;
     AppSettings m_settings;
-    Terminal *m_term = nullptr;
-    Pty *m_pty = nullptr;
-    SerialBackend *m_serial = nullptr;
-    QWidget *m_banner = nullptr;
-    QLabel *m_bannerText = nullptr;
-    QWidget *m_pasteBar = nullptr;
-    QLabel *m_pasteText = nullptr;
-    TerminalView *m_view = nullptr;
+    QTabWidget *m_tabs = nullptr;
     QMenu *m_contextMenu = nullptr;
     QActionGroup *m_schemeGroup = nullptr;
     QFileSystemWatcher *m_settingsWatcher = nullptr;
     QTimer *m_reloadTimer = nullptr;
     QList<QAction *> m_actions;
-    AskpassServer *m_askpass = nullptr;
-    QByteArray m_serialTail; // last bytes received (prompt detection for Send Stored Login)
-    QTimer *m_loginWait = nullptr;
-    std::unique_ptr<SessionLog> m_log;
+    QSet<int> m_reservedKeys;
     QLabel *m_recLabel = nullptr;
+    bool m_closingConfirmed = false;
 };
 
 } // namespace zterminal

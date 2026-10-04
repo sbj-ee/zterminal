@@ -31,6 +31,11 @@ zterminal_add_test(tst_logui zterminal_ui)
 add_dependencies(tst_logui zterminal-askpass)
 zterminal_add_test(tst_pasteguard zterminal_core)
 zterminal_add_test(tst_safepaste zterminal_ui)
+zterminal_add_test(tst_tabs zterminal_ui)
+add_dependencies(tst_tabs zterminal-askpass)
+set_tests_properties(tst_tabs PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_tabs;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
+  TIMEOUT 120)
 set_tests_properties(tst_logui PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_logui;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
   TIMEOUT 120)

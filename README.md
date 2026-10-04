@@ -26,7 +26,12 @@ and milestones.
   shown greyed out.
 - App shortcuts use Ctrl+Shift+… (Copy Ctrl+Shift+C, Paste Ctrl+Shift+V, …) plus F11 and
   Shift+Insert, so plain Ctrl+C, Ctrl+W and the F-keys still reach the program.
-- Window title `zterminal <version> — <session>`. The version comes from CMake.
+- Window title `zterminal <version> — <session>` (the active tab's). The version comes from CMake.
+- Tabs (0.7.0): each tab is its own local, SSH or serial session. New Tab Ctrl+Shift+T, Close
+  Tab Ctrl+Shift+W, Next/Previous Ctrl+PgDn/Ctrl+PgUp (or Ctrl+Shift+] / [). Opening a session
+  from File > New Session / Open Saved Session (or Duplicate) adds a tab. Closing a tab or
+  window with a running session asks first. Logging, the REC marker, stored passwords and the
+  paste confirmation work per tab. No split panes.
 - `zt` launcher: starts zterminal detached from your shell
 - Saved sessions (0.2.0): local shell or SSH, via a PuTTY-style dialog (File > New Session,
   Open Saved Session, Save Session). SSH runs the system `ssh` with a validated argv

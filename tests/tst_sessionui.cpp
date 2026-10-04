@@ -22,6 +22,7 @@
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QTemporaryDir>
+#include <QTabWidget>
 #include <QTest>
 #include <QTimer>
 
@@ -64,6 +65,24 @@ void whenModal(const std::function<bool(QWidget *)> &fn)
     });
     timer->start();
 }
+
+// A fake `ssh` first on PATH for the lifetime of the object (tabs started
+// by Duplicate / Open must not reach the network).
+struct FakeSsh {
+    QTemporaryDir bin;
+    QByteArray oldPath = qgetenv("PATH");
+    FakeSsh()
+    {
+        QFile f(bin.filePath(QStringLiteral("ssh")));
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write("#!/bin/sh\nprintf 'FAKESSH'; for a in \"$@\"; do printf '[%s]' \"$a\"; done; printf '\\n'\n");
+        }
+        f.close();
+        QFile::setPermissions(f.fileName(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        qputenv("PATH", bin.path().toLocal8Bit() + ':' + oldPath);
+    }
+    ~FakeSsh() { qputenv("PATH", oldPath); }
+};
 
 } // namespace
 
@@ -158,14 +177,14 @@ private slots:
         QCOMPARE(l.args, (QStringList{QStringLiteral("-p"), QStringLiteral("2222"), QStringLiteral("-l"),
                                       QStringLiteral("admin"), QStringLiteral("--"), QStringLiteral("10.0.0.1")}));
 
-        // Duplicate re-opens the saved session by name.
-        QStringList launched;
-        w.setLauncher([&launched](const QString &, const QStringList &args) {
-            launched = args;
-            return true;
-        });
+        // Duplicate re-opens the saved session by name, in a new tab.
+        FakeSsh fake;
         w.action(QStringLiteral("duplicateSession"))->trigger();
-        QCOMPARE(launched, QStringList{QStringLiteral("core-sw1")});
+        QCOMPARE(w.tabCount(), 2);
+        QCOMPARE(w.tabs()->currentIndex(), 1);
+        QCOMPARE(w.currentSession()->originalArgs(), QStringList{QStringLiteral("core-sw1")});
+        QCOMPARE(w.currentSession()->request().kind, LaunchRequest::Kind::SavedSession);
+        QCOMPARE(w.windowTitle(), QStringLiteral("zterminal " ZTERMINAL_EXPECTED_VERSION " \u2014 core-sw1"));
     }
 
     void tamperedSessionFileIsRefusedAtRunTime()
@@ -226,13 +245,9 @@ private slots:
         for (const char *n : {"newSession", "openSavedSession", "saveSession", "duplicateSession", "restartSession"}) {
             QVERIFY2(w.action(QString::fromLatin1(n)) && w.action(QString::fromLatin1(n))->isEnabled(), n);
         }
-        QStringList launched;
-        w.setLauncher([&launched](const QString &, const QStringList &args) {
-            launched = args;
-            return true;
-        });
+        FakeSsh fake;
 
-        // New Session -> dialog -> SSH -> Open: a new window with the built argv.
+        // New Session -> dialog -> SSH -> Open: a new tab running the built argv.
         whenModal([](QWidget *m) {
             auto *d = qobject_cast<SessionDialog *>(m);
             if (!d) {
@@ -245,11 +260,14 @@ private slots:
             return true;
         });
         w.action(QStringLiteral("newSession"))->trigger();
-        QCOMPARE(launched, (QStringList{QStringLiteral("ssh"), QStringLiteral("--"), QStringLiteral("sw9")}));
+        QCOMPARE(w.tabCount(), 2);
+        QCOMPARE(w.currentSession()->originalArgs(),
+                 (QStringList{QStringLiteral("ssh"), QStringLiteral("--"), QStringLiteral("sw9")}));
+        QCOMPARE(w.launchCommand().args, (QStringList{QStringLiteral("--"), QStringLiteral("sw9")}));
+        QCOMPARE(w.tabs()->tabText(1), QStringLiteral("ssh sw9"));
 
-        // Open Saved Session -> pick one -> opens by name.
+        // Open Saved Session -> pick one -> opens by name in a third tab.
         QVERIFY(store.save(ssh(QStringLiteral("core-sw1"), QStringLiteral("10.0.0.1"))));
-        launched.clear();
         whenModal([](QWidget *m) {
             auto *d = qobject_cast<SessionDialog *>(m);
             if (!d) {
@@ -262,15 +280,20 @@ private slots:
             return true;
         });
         w.action(QStringLiteral("openSavedSession"))->trigger();
-        QCOMPARE(launched, QStringList{QStringLiteral("core-sw1")});
+        QCOMPARE(w.tabCount(), 3);
+        QCOMPARE(w.currentSession()->originalArgs(), QStringList{QStringLiteral("core-sw1")});
+        QCOMPARE(w.tabs()->tabText(2), QStringLiteral("core-sw1"));
 
-        // Save Session: this local window becomes saved session "my shell".
+        // Save Session: the first (local) tab becomes saved session "my shell".
+        w.tabs()->setCurrentIndex(0);
         QString err;
         QVERIFY2(w.saveCurrentSessionAs(QStringLiteral("my shell"), &err), qPrintable(err));
         QCOMPARE(store.load(QStringLiteral("my shell"))->type, SessionConfig::Type::LocalShell);
         QCOMPARE(w.windowTitle(), makeWindowTitle(QStringLiteral("my shell")));
+        QCOMPARE(w.tabs()->tabText(0), QStringLiteral("my shell"));
         w.action(QStringLiteral("duplicateSession"))->trigger();
-        QCOMPARE(launched, QStringList{QStringLiteral("my shell")});
+        QCOMPARE(w.tabCount(), 4);
+        QCOMPARE(w.currentSession()->originalArgs(), QStringList{QStringLiteral("my shell")});
     }
 
     void adHocSshWindowCanBeSaved()

@@ -2,6 +2,7 @@
 add_library(zterminal_ui STATIC
   TerminalView.cpp TerminalView.hpp
   MainWindow.cpp MainWindow.hpp
+  SessionWidget.cpp SessionWidget.hpp
   PreferencesDialog.cpp PreferencesDialog.hpp
   AppSettings.cpp AppSettings.hpp
   SessionDialog.cpp SessionDialog.hpp
