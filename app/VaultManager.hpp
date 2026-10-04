@@ -46,8 +46,13 @@ public:
     // Called by the dialogs after a successful create/unlock/change.
     void noteUnlocked();
 
+    bool isDialogOpen() const { return m_dialogs > 0; }
+
 signals:
     void lockedChanged(bool unlocked);
+    // A create/unlock/change dialog opened (true) or closed (false); session
+    // logging pauses while one is up.
+    void dialogOpenChanged(bool open);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -60,6 +65,8 @@ private:
     QTimer *m_idle = nullptr;
     int m_minutes = 15;
     int m_testIntervalMs = 0;
+    int m_dialogs = 0;
+    friend struct DialogScope;
 };
 
 } // namespace zterminal

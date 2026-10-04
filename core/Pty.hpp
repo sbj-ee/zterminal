@@ -33,6 +33,11 @@ public:
 
     static QString defaultShell();
 
+    // The terminal is in "type a secret" mode: canonical input with ECHO off
+    // (what sudo, passwd, ssh's own prompt and zterminal-askpass's manual
+    // fallback set). Raw mode (ssh's interactive session, vim) is *not* this.
+    bool isSecretInputMode() const;
+
 signals:
     void dataReceived(const QByteArray &data);
     void finished(int exitCode, bool crashed);

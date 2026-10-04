@@ -42,6 +42,9 @@ and milestones.
   password prompt through an `SSH_ASKPASS` helper; per serial session, Session > Send Stored
   Login. Settings > Password Vault: Create/Unlock, Lock (Ctrl+Shift+L), Change Master Password;
   auto-lock after 15 idle minutes (Preferences). See [Password vault](#password-vault).
+- Session logging (0.5.0): Session > Start/Stop Logging (Ctrl+Shift+G) or automatically per
+  saved session; a red **● REC** marker and `[REC]` in the title while logging. See
+  [Session logs](#session-logs).
 
 Planned next: Find and update checks (see the plan).
 
@@ -109,6 +112,28 @@ user, root, keyloggers, or anyone who can read zterminal's memory while the vaul
 own copy while you type). Lock it when you step away, or let auto-lock do it.
 
 Later: unlock via the Secret Service / GNOME Keyring.
+
+## Session logs
+
+Start with Session > Start Logging (Ctrl+Shift+G), or tick "Log this session to a file
+automatically" in the session dialog. Logs go to `~/zterminal-logs/<session>-<YYYYMMDD-HHMMSS>.log`
+(folder and per-line ISO timestamps in Preferences > Session logs); the folder is created 0700
+and each log 0600. Logs are plain text: colours and other escape sequences are removed,
+carriage-return/backspace overwrites keep only the final text, and full-screen programs
+(vim, less, htop) are left out.
+
+```text
+=== zterminal 0.5.0 log of "core-sw1" started 2026-10-03T20:55:01.120 ===
+2026-10-03T20:55:01.402 Welcome to core-sw1
+2026-10-03T20:55:01.403 [zterminal: logging paused: password prompt (terminal echo off)]
+2026-10-03T20:55:03.871 [zterminal: logging resumed]
+2026-10-03T20:55:03.990 core-sw1# show clock
+```
+
+Only what the terminal displays is logged, never what you type. Logging also pauses while a
+vault dialog is open, during Send Stored Login, and while the terminal is at a no-echo
+password prompt, so stored and typed passwords stay out of the log. A remote program that
+echoes a password back can't be detected; treat logs as sensitive anyway.
 
 ## Building
 

@@ -234,4 +234,13 @@ void Pty::terminate()
     }
 }
 
+bool Pty::isSecretInputMode() const
+{
+    termios t {};
+    if (m_master < 0 || ::tcgetattr(m_master, &t) != 0) { // on Linux the master reports the slave's modes
+        return false;
+    }
+    return !(t.c_lflag & ECHO) && (t.c_lflag & ICANON);
+}
+
 } // namespace zterminal

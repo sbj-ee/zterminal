@@ -91,8 +91,26 @@ void VaultManager::noteUnlocked()
     emit lockedChanged(true);
 }
 
+struct DialogScope {
+    explicit DialogScope(VaultManager &m)
+        : vm(m)
+    {
+        if (vm.m_dialogs++ == 0) {
+            emit vm.dialogOpenChanged(true);
+        }
+    }
+    ~DialogScope()
+    {
+        if (--vm.m_dialogs == 0) {
+            emit vm.dialogOpenChanged(false);
+        }
+    }
+    VaultManager &vm;
+};
+
 bool VaultManager::createInteractive(QWidget *parent)
 {
+    DialogScope scope(*this);
     CreateVaultDialog dlg(*m_vault, parent);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
@@ -103,6 +121,7 @@ bool VaultManager::createInteractive(QWidget *parent)
 
 bool VaultManager::unlockInteractive(QWidget *parent, const QString &why)
 {
+    DialogScope scope(*this);
     UnlockVaultDialog dlg(*m_vault, why, parent);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
@@ -113,6 +132,7 @@ bool VaultManager::unlockInteractive(QWidget *parent, const QString &why)
 
 bool VaultManager::changePasswordInteractive(QWidget *parent)
 {
+    DialogScope scope(*this);
     ChangeMasterPasswordDialog dlg(*m_vault, parent);
     if (dlg.exec() != QDialog::Accepted) {
         return false;

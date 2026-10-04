@@ -5,6 +5,10 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QLineEdit>
+#include <QHBoxLayout>
+#include <QFileDialog>
 #include <QFontComboBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -82,6 +86,28 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     m_vaultAutoLock->setToolTip(QStringLiteral("Lock the password vault after this long without keyboard or mouse input"));
     termForm->addRow(QStringLiteral("Lock vault when idle:"), m_vaultAutoLock);
 
+    auto *logBox = new QGroupBox(QStringLiteral("Session logs"));
+    auto *logForm = new QFormLayout(logBox);
+    auto *logRow = new QHBoxLayout;
+    m_logDir = new QLineEdit(current.logDirectory);
+    m_logDir->setObjectName(QStringLiteral("logDirectory"));
+    m_logDir->setPlaceholderText(QStringLiteral("~/zterminal-logs"));
+    auto *browseLog = new QPushButton(QStringLiteral("Browse\u2026"));
+    browseLog->setAutoDefault(false);
+    connect(browseLog, &QPushButton::clicked, this, [this]() {
+        const QString d = QFileDialog::getExistingDirectory(this, QStringLiteral("Log folder"), QDir::homePath());
+        if (!d.isEmpty()) {
+            m_logDir->setText(d);
+        }
+    });
+    logRow->addWidget(m_logDir, 1);
+    logRow->addWidget(browseLog);
+    logForm->addRow(QStringLiteral("Folder:"), logRow);
+    m_logTimestamps = new QCheckBox(QStringLiteral("Timestamp every line (ISO 8601, local time)"));
+    m_logTimestamps->setObjectName(QStringLiteral("logTimestamps"));
+    m_logTimestamps->setChecked(current.logTimestamps);
+    logForm->addRow(m_logTimestamps);
+
     auto *updBox = new QGroupBox(QStringLiteral("Updates"));
     auto *updLayout = new QVBoxLayout(updBox);
     m_checkUpdates = new QCheckBox(QStringLiteral("Check for updates at startup"));
@@ -104,6 +130,7 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     layout->addWidget(mouseBox);
     layout->addWidget(lookBox);
     layout->addWidget(termBox);
+    layout->addWidget(logBox);
     layout->addWidget(updBox);
     layout->addWidget(buttons);
 }
@@ -122,6 +149,8 @@ AppSettings PreferencesDialog::result() const
     a.colorScheme = m_scheme->currentData().toString();
     a.scrollbackLines = m_scrollback->value();
     a.vaultAutoLockMinutes = m_vaultAutoLock->value();
+    a.logDirectory = m_logDir->text().trimmed();
+    a.logTimestamps = m_logTimestamps->isChecked();
     a.checkForUpdatesOnStartup = m_checkUpdates->isChecked();
     return a;
 }

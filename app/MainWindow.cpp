@@ -9,6 +9,7 @@
 #include "SessionDialog.hpp"
 #include "Pty.hpp"
 #include "SerialBackend.hpp"
+#include "SessionLog.hpp"
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
 #include "WindowTitle.hpp"
@@ -46,6 +47,7 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     , m_request(request)
     , m_originalArgs(originalArgs)
     , m_settings(AppSettings::load())
+    , m_log(std::make_unique<SessionLog>())
 {
     m_launcher = [](const QString &program, const QStringList &args) {
         return QProcess::startDetached(program, args);
@@ -114,17 +116,30 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     });
     connect(m_serial, &SerialBackend::dataReceived, m_term, &Terminal::feed);
     connect(m_serial, &SerialBackend::dataReceived, this, &MainWindow::onSerialData);
+    connect(m_serial, &SerialBackend::dataReceived, this, [this](const QByteArray &d) { logOutput(d, false); });
     connect(m_serial, &SerialBackend::disconnected, this, &MainWindow::onSerialDisconnected);
     connect(m_serial, &SerialBackend::pendingChanged, this, &MainWindow::updatePasteBar);
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
+    connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) { logOutput(d, true); });
     connect(m_pty, &Pty::finished, this, &MainWindow::onSessionFinished);
     connect(m_view, &TerminalView::gridSizeChanged, m_pty, &Pty::resize);
+    connect(m_view, &TerminalView::gridSizeChanged, this, [this](int, int cols) { m_log->setColumns(cols); });
     connect(m_term, &Terminal::titleChanged, this, &MainWindow::updateTitle);
     connect(m_term, &Terminal::bell, this, []() { QApplication::beep(); });
     connect(m_view, &TerminalView::contextMenuRequested, this, &MainWindow::showContextMenu);
 
+    m_recLabel = new QLabel(QStringLiteral("\u25CF REC"));
+    m_recLabel->setObjectName(QStringLiteral("recIndicator"));
+    m_recLabel->setStyleSheet(QStringLiteral("QLabel { color: white; background: #c0392b; font-weight: bold; "
+                                             "padding: 1px 8px; border-radius: 3px; margin: 2px 6px; }"));
+    m_recLabel->hide();
+
     buildMenus();
+    menuBar()->setCornerWidget(m_recLabel, Qt::TopRightCorner);
     connect(&VaultManager::instance(), &VaultManager::lockedChanged, this, &MainWindow::updateVaultActions);
+    connect(&VaultManager::instance(), &VaultManager::dialogOpenChanged, this, [this](bool open) {
+        open ? m_log->suspend(QStringLiteral("vault dialog open")) : m_log->resume(QStringLiteral("vault dialog open"));
+    });
     updateVaultActions();
     applySettings();
     watchSettingsFile();
@@ -135,6 +150,7 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
 
 MainWindow::~MainWindow()
 {
+    m_log->stop();
     m_serial->close();
     m_pty->terminate();
 }
@@ -284,6 +300,19 @@ void MainWindow::buildMenus()
     QAction *cancelPasteAct = addAct(session, QStringLiteral("cancelPaste"), QStringLiteral("Cancel &Paste"), {}, false);
     connect(cancelPasteAct, &QAction::triggered, m_serial, &SerialBackend::cancelPending);
     session->addSeparator();
+    QAction *logAct = addAct(session, QStringLiteral("toggleLogging"), QStringLiteral("Start &Logging"),
+                             QKS(QStringLiteral("Ctrl+Shift+G")));
+    connect(logAct, &QAction::triggered, this, [this]() {
+        if (m_log->isActive()) {
+            stopLogging();
+            return;
+        }
+        QString err;
+        if (!startLogging(&err)) {
+            QMessageBox::warning(this, QStringLiteral("Start Logging"), err);
+        }
+    });
+    session->addSeparator();
     connect(addAct(session, QStringLiteral("clearScrollback"), QStringLiteral("&Clear Scrollback"),
                    QKS(QStringLiteral("Ctrl+Shift+K"))),
             &QAction::triggered, m_term, &Terminal::clearScrollback);
@@ -374,7 +403,67 @@ void MainWindow::applySettings()
 
 void MainWindow::updateTitle()
 {
-    setWindowTitle(makeWindowTitle(sessionName(), m_term->title()));
+    const QString t = makeWindowTitle(sessionName(), m_term->title());
+    setWindowTitle(m_log && m_log->isActive() ? t + QStringLiteral(" [REC]") : t);
+}
+
+bool MainWindow::startLogging(QString *error)
+{
+    if (m_log->isActive()) {
+        return true;
+    }
+    m_log->setColumns(m_view->gridCols());
+    if (!m_log->start(m_settings.effectiveLogDirectory(), sessionName(), m_settings.logTimestamps)) {
+        if (error) {
+            *error = m_log->errorString();
+        }
+        return false;
+    }
+    if (VaultManager::instance().isDialogOpen()) {
+        m_log->suspend(QStringLiteral("vault dialog open"));
+    }
+    if (m_loginWait) {
+        m_log->suspend(QStringLiteral("Send Stored Login"));
+    }
+    updateLoggingUi();
+    return true;
+}
+
+void MainWindow::stopLogging()
+{
+    m_log->stop();
+    updateLoggingUi();
+}
+
+void MainWindow::updateLoggingUi()
+{
+    const bool on = m_log->isActive();
+    m_recLabel->setVisible(on);
+    m_recLabel->setToolTip(on ? QStringLiteral("Logging to %1").arg(m_log->path()) : QString());
+    if (QAction *a = action(QStringLiteral("toggleLogging"))) {
+        a->setText(on ? QStringLiteral("Stop &Logging") : QStringLiteral("Start &Logging"));
+        a->setStatusTip(on ? m_log->path() : QString());
+    }
+    updateTitle();
+}
+
+void MainWindow::logOutput(const QByteArray &d, bool fromPty)
+{
+    if (!m_log->isActive()) {
+        return;
+    }
+    if (fromPty) {
+        // Canonical + no-echo on our PTY = someone is typing a secret (sudo,
+        // passwd, ssh's own prompt, zterminal-askpass's manual fallback):
+        // keep whatever is printed meanwhile out of the log.
+        static const QString why = QStringLiteral("password prompt (terminal echo off)");
+        if (m_pty->isSecretInputMode()) {
+            m_log->suspend(why);
+            return;
+        }
+        m_log->resume(why);
+    }
+    m_log->feed(d);
 }
 
 void MainWindow::setFontSize(int points)
@@ -500,6 +589,12 @@ MainWindow::Launch MainWindow::launchCommand() const
 
 void MainWindow::startSession()
 {
+    if (m_saved && m_saved->autoLog && !m_log->isActive()) {
+        QString err;
+        if (!startLogging(&err)) {
+            m_term->feed(QStringLiteral("\x1b[31mzterminal: logging not started: %1\x1b[0m\r\n").arg(err).toUtf8());
+        }
+    }
     const Launch l = launchCommand();
     if (!l.error.isEmpty()) {
         m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n").arg(l.error).toUtf8());
@@ -646,6 +741,7 @@ bool MainWindow::sendStoredLogin()
                                  QStringLiteral("No login password is stored for \"%1\".").arg(m_saved->name));
         return false;
     }
+    m_log->suspend(QStringLiteral("Send Stored Login"));
     m_loginWait = new QTimer(this);
     m_loginWait->setSingleShot(true);
     m_loginWait->setInterval(10000);
@@ -667,6 +763,9 @@ void MainWindow::finishLogin(bool sendPassword)
 {
     delete m_loginWait;
     m_loginWait = nullptr;
+    // Resume a moment after the password went out, so a device that echoes it
+    // (or '*'s) back isn't logged either.
+    QTimer::singleShot(sendPassword ? 1500 : 0, this, [this]() { m_log->resume(QStringLiteral("Send Stored Login")); });
     if (!sendPassword) {
         m_term->feed(QByteArrayLiteral("\r\n\x1b[2m[zterminal: no password prompt within 10 s; stored password NOT sent]\x1b[0m\r\n"));
         return;
@@ -934,6 +1033,7 @@ void MainWindow::showAbout()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    m_log->stop();
     m_serial->close();
     m_pty->terminate();
     e->accept();

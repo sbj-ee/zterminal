@@ -22,6 +22,10 @@ struct AppSettings {
     // Lock the password vault after this many idle minutes (0 = never).
     int vaultAutoLockMinutes = 15;
     static constexpr int kDefaultVaultAutoLockMinutes = 15;
+    // Session logs: folder (empty = ~/zterminal-logs) and per-line timestamps.
+    QString logDirectory;
+    bool logTimestamps = false;
+    QString effectiveLogDirectory() const;
 
     static constexpr int kDefaultFontSize = 11;
     static QString defaultFontFamily();
