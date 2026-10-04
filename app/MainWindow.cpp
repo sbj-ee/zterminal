@@ -1,21 +1,18 @@
 #include "MainWindow.hpp"
 
-#include "AskpassServer.hpp"
-#include "SecureBuffer.hpp"
-#include "Vault.hpp"
-#include "VaultManager.hpp"
 #include "ColorScheme.hpp"
-#include "PasteConfirmDialog.hpp"
-#include "PasteGuard.hpp"
 #include "PreferencesDialog.hpp"
-#include "SessionDialog.hpp"
 #include "Pty.hpp"
 #include "SerialBackend.hpp"
+#include "SessionDialog.hpp"
 #include "SessionLog.hpp"
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
+#include "VaultManager.hpp"
 #include "WindowTitle.hpp"
 #include "version.hpp"
+
+#include <vterm.h>
 
 #include <QAction>
 #include <QActionGroup>
@@ -24,112 +21,53 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPushButton>
-#include <QVBoxLayout>
 #include <QInputDialog>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProcess>
 #include <QSet>
+#include <QTabBar>
+#include <QTabWidget>
 #include <QTimer>
 
-#include <sodium.h>
+#include <algorithm>
 
 namespace zterminal {
 
 namespace {
 const char *kPlannedProperty = "zterminalPlanned";
-}
+const std::optional<SessionConfig> kNoSession;
+} // namespace
 
 MainWindow::MainWindow(const LaunchRequest &request, const QStringList &originalArgs, QWidget *parent)
     : QMainWindow(parent)
-    , m_request(request)
-    , m_originalArgs(originalArgs)
     , m_settings(AppSettings::load())
-    , m_log(std::make_unique<SessionLog>())
 {
     m_launcher = [](const QString &program, const QStringList &args) {
         return QProcess::startDetached(program, args);
     };
-    if (m_request.kind == LaunchRequest::Kind::SavedSession) {
-        m_saved = m_store.load(m_request.sessionName);
-    }
-    m_term = new Terminal(24, 80, this);
-    m_pty = new Pty(this);
-    m_serial = new SerialBackend(this);
-    m_view = new TerminalView(m_term, this);
-
-    // Central area: [serial banner] [paste bar] terminal.
-    auto *central = new QWidget(this);
-    auto *col = new QVBoxLayout(central);
-    col->setContentsMargins(0, 0, 0, 0);
-    col->setSpacing(0);
-    m_banner = new QWidget;
-    m_banner->setObjectName(QStringLiteral("serialBanner"));
-    m_banner->setAutoFillBackground(true);
-    m_banner->setStyleSheet(QStringLiteral("#serialBanner { background: #7b1d1d; } #serialBanner QLabel { color: white; }"));
-    auto *bannerRow = new QHBoxLayout(m_banner);
-    bannerRow->setContentsMargins(8, 4, 8, 4);
-    m_bannerText = new QLabel;
-    m_bannerText->setWordWrap(true);
-    m_bannerText->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    auto *reconnect = new QPushButton(QStringLiteral("&Reconnect"));
-    reconnect->setObjectName(QStringLiteral("reconnect"));
-    reconnect->setFocusPolicy(Qt::NoFocus);
-    connect(reconnect, &QPushButton::clicked, this, [this]() { startSession(); });
-    bannerRow->addWidget(m_bannerText, 1);
-    bannerRow->addWidget(reconnect, 0, Qt::AlignTop);
-    m_banner->hide();
-    m_pasteBar = new QWidget;
-    m_pasteBar->setObjectName(QStringLiteral("pasteBar"));
-    m_pasteBar->setAutoFillBackground(true);
-    m_pasteBar->setStyleSheet(QStringLiteral("#pasteBar { background: #5c4a00; } #pasteBar QLabel { color: white; }"));
-    auto *pasteRow = new QHBoxLayout(m_pasteBar);
-    pasteRow->setContentsMargins(8, 2, 8, 2);
-    m_pasteText = new QLabel;
-    auto *cancelPaste = new QPushButton(QStringLiteral("Cancel"));
-    cancelPaste->setObjectName(QStringLiteral("cancelPaste"));
-    cancelPaste->setFocusPolicy(Qt::NoFocus);
-    connect(cancelPaste, &QPushButton::clicked, m_serial, &SerialBackend::cancelPending);
-    pasteRow->addWidget(m_pasteText, 1);
-    pasteRow->addWidget(cancelPaste);
-    m_pasteBar->hide();
-    col->addWidget(m_banner);
-    col->addWidget(m_pasteBar);
-    col->addWidget(m_view, 1);
-    setCentralWidget(central);
+    m_tabs = new QTabWidget(this);
+    m_tabs->setObjectName(QStringLiteral("tabs"));
+    m_tabs->setDocumentMode(true);
+    m_tabs->setTabsClosable(true);
+    m_tabs->setMovable(true);
+    m_tabs->setFocusPolicy(Qt::NoFocus);
+    m_tabs->tabBar()->setFocusPolicy(Qt::NoFocus);
+    // One tab looks exactly like the pre-tabs window; the bar appears with the second.
+    m_tabs->setTabBarAutoHide(true);
+    m_tabs->tabBar()->setExpanding(false);
+    setCentralWidget(m_tabs);
+    connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int i) { closeTab(i); });
+    connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
 
     // Always draw the menu bar inside the window. Without this, Qt hands the
     // menus to a global-menu service whenever com.canonical.AppMenu.Registrar
     // is on the session bus (e.g. the Fildem GNOME extension), hides the
     // in-window bar, and on GNOME nothing may show the exported menus.
     menuBar()->setNativeMenuBar(false);
-
-    // Keys/pastes go to whichever backend this window runs.
-    connect(m_term, &Terminal::output, this, [this](const QByteArray &d) {
-        if (m_serial->isOpen()) {
-            m_serial->write(d);
-        } else {
-            m_pty->write(d);
-        }
-    });
-    connect(m_serial, &SerialBackend::dataReceived, m_term, &Terminal::feed);
-    connect(m_serial, &SerialBackend::dataReceived, this, &MainWindow::onSerialData);
-    connect(m_serial, &SerialBackend::dataReceived, this, [this](const QByteArray &d) { logOutput(d, false); });
-    connect(m_serial, &SerialBackend::disconnected, this, &MainWindow::onSerialDisconnected);
-    connect(m_serial, &SerialBackend::pendingChanged, this, &MainWindow::updatePasteBar);
-    connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
-    connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) { logOutput(d, true); });
-    connect(m_pty, &Pty::finished, this, &MainWindow::onSessionFinished);
-    connect(m_view, &TerminalView::gridSizeChanged, m_pty, &Pty::resize);
-    m_view->setPasteGuard([this](const QString &t) { return confirmPaste(t); });
-    connect(m_view, &TerminalView::gridSizeChanged, this, [this](int, int cols) { m_log->setColumns(cols); });
-    connect(m_term, &Terminal::titleChanged, this, &MainWindow::updateTitle);
-    connect(m_term, &Terminal::bell, this, []() { QApplication::beep(); });
-    connect(m_view, &TerminalView::contextMenuRequested, this, &MainWindow::showContextMenu);
 
     m_recLabel = new QLabel(QStringLiteral("\u25CF REC"));
     m_recLabel->setObjectName(QStringLiteral("recIndicator"));
@@ -140,22 +78,17 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     buildMenus();
     menuBar()->setCornerWidget(m_recLabel, Qt::TopRightCorner);
     connect(&VaultManager::instance(), &VaultManager::lockedChanged, this, &MainWindow::updateVaultActions);
-    connect(&VaultManager::instance(), &VaultManager::dialogOpenChanged, this, [this](bool open) {
-        open ? m_log->suspend(QStringLiteral("vault dialog open")) : m_log->resume(QStringLiteral("vault dialog open"));
-    });
     updateVaultActions();
-    applySettings();
+    VaultManager::instance().setAutoLockMinutes(m_settings.vaultAutoLockMinutes);
     watchSettingsFile();
-    updateTitle();
-    resize(m_view->sizeHint() + QSize(0, menuBar()->sizeHint().height()));
-    m_view->setFocus();
+
+    addTab(request, originalArgs, /*start=*/false); // the caller starts it (after show())
+    resize(view()->sizeHint() + QSize(0, menuBar()->sizeHint().height()));
 }
 
 MainWindow::~MainWindow()
 {
-    m_log->stop();
-    m_serial->close();
-    m_pty->terminate();
+    // Tabs (children) shut their sessions down in their destructors.
 }
 
 QAction *MainWindow::addAct(QMenu *menu, const QString &name, const QString &text,
@@ -189,6 +122,7 @@ QAction *MainWindow::action(const QString &name) const
     return nullptr;
 }
 
+
 void MainWindow::buildMenus()
 {
     using QKS = QKeySequence;
@@ -206,7 +140,24 @@ void MainWindow::buildMenus()
                    QKS(QStringLiteral("Ctrl+Shift+S"))),
             &QAction::triggered, this, &MainWindow::saveSessionInteractive);
     file->addSeparator();
-    connect(addAct(file, QStringLiteral("close"), QStringLiteral("&Close"), QKS(QStringLiteral("Ctrl+Shift+W"))),
+    // Tabs (Ctrl+Shift variants and Ctrl+PgUp/PgDn: plain Ctrl+letter keys stay with the session).
+    connect(addAct(file, QStringLiteral("newTab"), QStringLiteral("New &Tab"), QKS(QStringLiteral("Ctrl+Shift+T"))),
+            &QAction::triggered, this, [this]() { addTab(LaunchRequest{}, {}); });
+    connect(addAct(file, QStringLiteral("closeTab"), QStringLiteral("Close T&ab"), QKS(QStringLiteral("Ctrl+Shift+W"))),
+            &QAction::triggered, this, [this]() { closeTab(m_tabs->currentIndex()); });
+    QAction *next = addAct(file, QStringLiteral("nextTab"), QStringLiteral("Ne&xt Tab"));
+    // Shift+] is reported as '}' on US layouts, so register both forms.
+    next->setShortcuts({QKS(Qt::CTRL | Qt::Key_PageDown), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_BracketRight),
+                        QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_BraceRight)});
+    connect(next, &QAction::triggered, this, &MainWindow::nextTab);
+    QAction *prev = addAct(file, QStringLiteral("previousTab"), QStringLiteral("Pre&vious Tab"));
+    prev->setShortcuts({QKS(Qt::CTRL | Qt::Key_PageUp), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_BracketLeft),
+                        QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_BraceLeft)});
+    connect(prev, &QAction::triggered, this, &MainWindow::previousTab);
+    file->addSeparator();
+    connect(addAct(file, QStringLiteral("newWindow"), QStringLiteral("New &Window")), &QAction::triggered, this,
+            [this]() { m_launcher(QApplication::applicationFilePath(), {}); });
+    connect(addAct(file, QStringLiteral("close"), QStringLiteral("&Close Window")),
             &QAction::triggered, this, &QWidget::close);
     connect(addAct(file, QStringLiteral("quit"), QStringLiteral("&Quit"), QKS(QStringLiteral("Ctrl+Shift+Q"))),
             &QAction::triggered, qApp, &QApplication::closeAllWindows);
@@ -214,16 +165,16 @@ void MainWindow::buildMenus()
     // Edit
     QMenu *edit = menuBar()->addMenu(QStringLiteral("&Edit"));
     connect(addAct(edit, QStringLiteral("copy"), QStringLiteral("&Copy"), QKS(QStringLiteral("Ctrl+Shift+C"))),
-            &QAction::triggered, m_view, &TerminalView::copySelection);
+            &QAction::triggered, this, [this]() { view()->copySelection(); });
     connect(addAct(edit, QStringLiteral("paste"), QStringLiteral("&Paste"), QKS(QStringLiteral("Ctrl+Shift+V"))),
-            &QAction::triggered, m_view, &TerminalView::pasteClipboard);
+            &QAction::triggered, this, [this]() { view()->pasteClipboard(); });
     connect(addAct(edit, QStringLiteral("pastePrimary"), QStringLiteral("Paste P&rimary"),
                    QKS(QStringLiteral("Shift+Insert"))),
-            &QAction::triggered, m_view, &TerminalView::pastePrimary);
+            &QAction::triggered, this, [this]() { view()->pastePrimary(); });
     edit->addSeparator();
     connect(addAct(edit, QStringLiteral("selectAll"), QStringLiteral("Select &All"),
                    QKS(QStringLiteral("Ctrl+Shift+A"))),
-            &QAction::triggered, m_view, &TerminalView::selectAll);
+            &QAction::triggered, this, [this]() { view()->selectAll(); });
     edit->addSeparator();
     addAct(edit, QStringLiteral("find"), QStringLiteral("&Find\u2026"), QKS(QStringLiteral("Ctrl+Shift+F")), false, later);
 
@@ -232,10 +183,10 @@ void MainWindow::buildMenus()
     // Shift changes the key Qt reports (= -> +, - -> _, 0 -> ), so register both forms.
     QAction *larger = addAct(view, QStringLiteral("fontLarger"), QStringLiteral("Font Size &Up"));
     larger->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Plus), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal)});
-    connect(larger, &QAction::triggered, this, [this]() { setFontSize(m_view->terminalFont().pointSize() + 1); });
+    connect(larger, &QAction::triggered, this, [this]() { setFontSize(this->view()->terminalFont().pointSize() + 1); });
     QAction *smaller = addAct(view, QStringLiteral("fontSmaller"), QStringLiteral("Font Size &Down"));
     smaller->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Underscore), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Minus)});
-    connect(smaller, &QAction::triggered, this, [this]() { setFontSize(m_view->terminalFont().pointSize() - 1); });
+    connect(smaller, &QAction::triggered, this, [this]() { setFontSize(this->view()->terminalFont().pointSize() - 1); });
     QAction *resetFont = addAct(view, QStringLiteral("fontReset"), QStringLiteral("&Reset Font Size"));
     resetFont->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_ParenRight), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_0)});
     connect(resetFont, &QAction::triggered, this, [this]() { setFontSize(AppSettings::kDefaultFontSize); });
@@ -250,18 +201,7 @@ void MainWindow::buildMenus()
         m_schemeGroup->addAction(a);
         m_actions << a;
     }
-    connect(m_schemeGroup, &QActionGroup::triggered, this, [this](QAction *a) {
-        if (m_saved && !m_saved->colorScheme.isEmpty()) {
-            // This session overrides the scheme: change (and save) the override.
-            m_saved->colorScheme = a->data().toString();
-            m_store.save(*m_saved);
-            applySettings();
-            return;
-        }
-        AppSettings s = m_settings;
-        s.colorScheme = a->data().toString();
-        setSettings(s);
-    });
+    connect(m_schemeGroup, &QActionGroup::triggered, this, [this](QAction *a) { setSchemeFor(a->data().toString()); });
     view->addSeparator();
     QAction *full = addAct(view, QStringLiteral("fullScreen"), QStringLiteral("&Full Screen"), QKS(Qt::Key_F11));
     full->setCheckable(true);
@@ -283,30 +223,23 @@ void MainWindow::buildMenus()
             &QAction::triggered, this, &MainWindow::duplicateSession);
     connect(addAct(session, QStringLiteral("restartSession"), QStringLiteral("&Restart Session"),
                    QKS(QStringLiteral("Ctrl+Shift+R"))),
-            &QAction::triggered, this, &MainWindow::restartSession);
-    QAction *brk = addAct(session, QStringLiteral("sendBreak"), QStringLiteral("Send &Break"), {}, isSerialSession());
-    brk->setToolTip(QStringLiteral("Holds the serial line in break (duration set per session; default 300 ms)"));
-    if (!isSerialSession()) {
-        brk->setToolTip(QStringLiteral("Serial sessions only"));
-    }
+            &QAction::triggered, this, [this]() { currentSession()->restartSession(); });
+    QAction *brk = addAct(session, QStringLiteral("sendBreak"), QStringLiteral("Send &Break"), {}, false);
     connect(brk, &QAction::triggered, this, [this]() {
-        if (!m_serial->sendBreak() && !m_serial->isOpen()) {
-            showSerialBanner(QStringLiteral("Not connected: Send Break needs an open serial port."));
+        SessionWidget *s = currentSession();
+        if (!s->serial()->sendBreak() && !s->serial()->isOpen()) {
+            s->showBanner(QStringLiteral("Not connected: Send Break needs an open serial port."));
         }
     });
-    QAction *login = addAct(session, QStringLiteral("sendStoredLogin"), QStringLiteral("Send Stored &Login"), {},
-                            isSerialSession() && m_saved);
-    login->setToolTip(isSerialSession() && m_saved
-                          ? QStringLiteral("Sends the login user, then the vault password when the device asks for it")
-                          : QStringLiteral("Saved serial sessions only"));
+    QAction *login = addAct(session, QStringLiteral("sendStoredLogin"), QStringLiteral("Send Stored &Login"), {}, false);
     connect(login, &QAction::triggered, this, &MainWindow::sendStoredLogin);
     QAction *cancelPasteAct = addAct(session, QStringLiteral("cancelPaste"), QStringLiteral("Cancel &Paste"), {}, false);
-    connect(cancelPasteAct, &QAction::triggered, m_serial, &SerialBackend::cancelPending);
+    connect(cancelPasteAct, &QAction::triggered, this, [this]() { serial()->cancelPending(); });
     session->addSeparator();
     QAction *logAct = addAct(session, QStringLiteral("toggleLogging"), QStringLiteral("Start &Logging"),
                              QKS(QStringLiteral("Ctrl+Shift+G")));
     connect(logAct, &QAction::triggered, this, [this]() {
-        if (m_log->isActive()) {
+        if (currentSession()->isLogging()) {
             stopLogging();
             return;
         }
@@ -318,9 +251,9 @@ void MainWindow::buildMenus()
     session->addSeparator();
     connect(addAct(session, QStringLiteral("clearScrollback"), QStringLiteral("&Clear Scrollback"),
                    QKS(QStringLiteral("Ctrl+Shift+K"))),
-            &QAction::triggered, m_term, &Terminal::clearScrollback);
+            &QAction::triggered, this, [this]() { terminal()->clearScrollback(); });
     connect(addAct(session, QStringLiteral("resetTerminal"), QStringLiteral("Reset &Terminal")),
-            &QAction::triggered, m_term, &Terminal::reset);
+            &QAction::triggered, this, [this]() { terminal()->reset(); });
     session->addSeparator();
     // Per-session settings are planned (M6); until then this opens Preferences.
     QAction *changeSettings = addAct(session, QStringLiteral("changeSettings"), QStringLiteral("Change &Settings\u2026"));
@@ -361,126 +294,282 @@ void MainWindow::buildMenus()
     m_contextMenu->addAction(showMenu);
     m_contextMenu->addAction(full);
     m_contextMenu->addSeparator();
-    for (const char *n : {"duplicateSession", "restartSession", "clearScrollback", "resetTerminal"}) {
+    for (const char *n : {"newTab", "closeTab", "duplicateSession", "restartSession", "clearScrollback", "resetTerminal"}) {
         m_contextMenu->addAction(action(QString::fromLatin1(n)));
     }
     m_contextMenu->addSeparator();
     m_contextMenu->addAction(prefs); // reachable even when the menu bar is hidden
 
     // Only these key combinations are taken from the session.
-    QSet<int> reserved;
     for (QAction *a : m_actions) {
         for (const QKeySequence &ks : a->shortcuts()) {
             if (!ks.isEmpty()) {
-                reserved.insert(ks[0].toCombined());
+                m_reservedKeys.insert(ks[0].toCombined());
             }
         }
     }
-    m_view->setAppShortcuts(reserved);
 }
+
+// ---- tabs ----
+
+int MainWindow::tabCount() const
+{
+    return m_tabs->count();
+}
+
+SessionWidget *MainWindow::sessionAt(int index) const
+{
+    return qobject_cast<SessionWidget *>(m_tabs->widget(index));
+}
+
+SessionWidget *MainWindow::currentSession() const
+{
+    return qobject_cast<SessionWidget *>(m_tabs->currentWidget());
+}
+
+SessionWidget *MainWindow::addTab(const LaunchRequest &request, const QStringList &args, bool start)
+{
+    auto *s = new SessionWidget(request, args, m_settings, m_tabs);
+    s->view()->setAppShortcuts(m_reservedKeys);
+    connect(s, &SessionWidget::titleChanged, this, [this, s]() {
+        updateTabText(s);
+        if (s == currentSession()) {
+            updateTitle();
+        }
+    });
+    connect(s, &SessionWidget::loggingChanged, this, [this, s]() {
+        updateTabText(s);
+        if (s == currentSession()) {
+            updateLoggingUi();
+        }
+    });
+    connect(s, &SessionWidget::pendingChanged, this, [this, s](qint64 remaining) {
+        if (s == currentSession()) {
+            action(QStringLiteral("cancelPaste"))->setEnabled(remaining > 0);
+        }
+    });
+    connect(s, &SessionWidget::contextMenuRequested, this, [this](const QPoint &p) { m_contextMenu->popup(p); });
+    const int i = m_tabs->addTab(s, s->sessionName());
+    updateTabText(s);
+    m_tabs->setCurrentIndex(i);
+    onCurrentTabChanged();
+    if (start) {
+        s->startSession();
+    }
+    s->view()->setFocus();
+    return s;
+}
+
+int MainWindow::liveTabCount() const
+{
+    int n = 0;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        n += sessionAt(i)->isLive() ? 1 : 0;
+    }
+    return n;
+}
+
+bool MainWindow::closeTab(int index, bool force)
+{
+    SessionWidget *s = sessionAt(index);
+    if (!s) {
+        return false;
+    }
+    if (!force && s->isLive()) {
+        m_tabs->setCurrentIndex(index);
+        const auto ret = QMessageBox::question(
+            this, QStringLiteral("Close Tab"),
+            QStringLiteral("\"%1\" is still running. Close the tab and end its session?").arg(s->sessionName().toHtmlEscaped()),
+            QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (ret != QMessageBox::Close) {
+            return false;
+        }
+    }
+    if (m_tabs->count() == 1) {
+        // The last tab: end it and close the window (no second question).
+        s->shutdown();
+        m_closingConfirmed = true;
+        close();
+        return true;
+    }
+    m_tabs->removeTab(index);
+    s->shutdown();
+    s->deleteLater();
+    return true;
+}
+
+void MainWindow::nextTab()
+{
+    if (m_tabs->count() > 1) {
+        m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % m_tabs->count());
+    }
+}
+
+void MainWindow::previousTab()
+{
+    if (m_tabs->count() > 1) {
+        m_tabs->setCurrentIndex((m_tabs->currentIndex() + m_tabs->count() - 1) % m_tabs->count());
+    }
+}
+
+void MainWindow::updateTabText(SessionWidget *s)
+{
+    const int i = m_tabs->indexOf(s);
+    if (i < 0) {
+        return;
+    }
+    // The tab title is the session name; "● " marks a tab that is logging.
+    m_tabs->setTabText(i, (s->isLogging() ? QStringLiteral("\u25CF ") : QString()) + s->sessionName());
+    m_tabs->setTabToolTip(i, makeWindowTitle(s->sessionName(), s->terminal()->title())
+                                 + (s->isLogging() ? QStringLiteral(" [REC]") : QString()));
+}
+
+void MainWindow::onCurrentTabChanged()
+{
+    SessionWidget *s = currentSession();
+    if (!s) {
+        return;
+    }
+    updateSessionActions();
+    updateLoggingUi();
+    for (QAction *a : m_schemeGroup->actions()) {
+        a->setChecked(a->data().toString() == s->terminal()->colorScheme().id);
+    }
+    s->view()->setFocus();
+}
+
+void MainWindow::updateSessionActions()
+{
+    SessionWidget *s = currentSession();
+    const bool serial = s->isSerialSession();
+    QAction *brk = action(QStringLiteral("sendBreak"));
+    brk->setEnabled(serial);
+    brk->setToolTip(serial ? QStringLiteral("Holds the serial line in break (duration set per session; default 300 ms)")
+                           : QStringLiteral("Serial sessions only"));
+    QAction *login = action(QStringLiteral("sendStoredLogin"));
+    const bool canLogin = serial && s->savedSession();
+    login->setEnabled(canLogin);
+    login->setToolTip(canLogin ? QStringLiteral("Sends the login user, then the vault password when the device asks for it")
+                               : QStringLiteral("Saved serial sessions only"));
+    action(QStringLiteral("cancelPaste"))->setEnabled(s->serial()->pending() > 0);
+}
+
+// ---- current-tab forwarding ----
+
+void MainWindow::startSession() { currentSession()->startSession(); }
+TerminalView *MainWindow::view() const { return currentSession()->view(); }
+Terminal *MainWindow::terminal() const { return currentSession()->terminal(); }
+Pty *MainWindow::pty() const { return currentSession()->pty(); }
+SerialBackend *MainWindow::serial() const { return currentSession()->serial(); }
+bool MainWindow::isSerialSession() const { return currentSession()->isSerialSession(); }
+QWidget *MainWindow::sessionBanner() const { return currentSession()->banner(); }
+QString MainWindow::serialBannerText() const { return currentSession()->bannerText(); }
+QWidget *MainWindow::pasteBar() const { return currentSession()->pasteBar(); }
+QString MainWindow::sessionName() const { return currentSession()->sessionName(); }
+MainWindow::Launch MainWindow::launchCommand() const { return currentSession()->launchCommand(); }
+AskpassServer *MainWindow::askpassServer() const { return currentSession()->askpassServer(); }
+bool MainWindow::sendStoredLogin() { return currentSession()->sendStoredLogin(); }
+bool MainWindow::loginPending() const { return currentSession()->loginPending(); }
+bool MainWindow::startLogging(QString *error) { return currentSession()->startLogging(error); }
+void MainWindow::stopLogging() { currentSession()->stopLogging(); }
+SessionLog *MainWindow::sessionLog() const { return currentSession()->sessionLog(); }
+bool MainWindow::confirmPaste(const QString &text) { return currentSession()->confirmPaste(text); }
+bool MainWindow::pasteConfirmSkipped() const { return currentSession()->pasteConfirmSkipped(); }
+
+const std::optional<SessionConfig> &MainWindow::savedSession() const
+{
+    SessionWidget *s = currentSession();
+    return s ? s->savedSession() : kNoSession;
+}
+
+std::optional<SessionConfig> MainWindow::currentSessionConfig(QString *why) const
+{
+    return currentSession()->currentSessionConfig(why);
+}
+
+bool MainWindow::saveCurrentSessionAs(const QString &name, QString *error)
+{
+    return currentSession()->saveAs(name, error); // titleChanged updates tab + window
+}
+
+// ---- window ----
 
 void MainWindow::applySettings()
 {
-    // Preferences, with this saved session's font/scheme overrides on top.
-    AppSettings eff = m_settings;
-    if (m_saved) {
-        if (!m_saved->fontFamily.isEmpty()) {
-            eff.fontFamily = m_saved->fontFamily;
-        }
-        if (m_saved->fontSize > 0) {
-            eff.fontSize = m_saved->fontSize;
-        }
-        if (!m_saved->colorScheme.isEmpty()) {
-            eff.colorScheme = m_saved->colorScheme;
-        }
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        sessionAt(i)->applySettings(m_settings);
     }
-    m_view->setTerminalFont(eff.font());
-    m_view->setMouseSettings(m_settings.mouse);
-    m_view->setTrimCopiedWhitespace(m_settings.trimCopiedWhitespace);
-    m_term->setScrollbackLimit(m_settings.scrollbackLines);
-    m_term->setColorScheme(ColorScheme::byId(eff.colorScheme));
     VaultManager::instance().setAutoLockMinutes(m_settings.vaultAutoLockMinutes);
-    for (QAction *a : m_schemeGroup->actions()) {
-        a->setChecked(a->data().toString() == m_term->colorScheme().id);
+    if (SessionWidget *s = currentSession()) {
+        for (QAction *a : m_schemeGroup->actions()) {
+            a->setChecked(a->data().toString() == s->terminal()->colorScheme().id);
+        }
     }
 }
 
 void MainWindow::updateTitle()
 {
-    const QString t = makeWindowTitle(sessionName(), m_term->title());
-    setWindowTitle(m_log && m_log->isActive() ? t + QStringLiteral(" [REC]") : t);
-}
-
-bool MainWindow::startLogging(QString *error)
-{
-    if (m_log->isActive()) {
-        return true;
+    SessionWidget *s = currentSession();
+    if (!s) {
+        return;
     }
-    m_log->setColumns(m_view->gridCols());
-    if (!m_log->start(m_settings.effectiveLogDirectory(), sessionName(), m_settings.logTimestamps)) {
-        if (error) {
-            *error = m_log->errorString();
-        }
-        return false;
-    }
-    if (VaultManager::instance().isDialogOpen()) {
-        m_log->suspend(QStringLiteral("vault dialog open"));
-    }
-    if (m_loginWait) {
-        m_log->suspend(QStringLiteral("Send Stored Login"));
-    }
-    updateLoggingUi();
-    return true;
-}
-
-void MainWindow::stopLogging()
-{
-    m_log->stop();
-    updateLoggingUi();
+    // Version + the active tab's session (+ program title, + [REC] while it logs).
+    const QString t = makeWindowTitle(s->sessionName(), s->terminal()->title());
+    setWindowTitle(s->isLogging() ? t + QStringLiteral(" [REC]") : t);
 }
 
 void MainWindow::updateLoggingUi()
 {
-    const bool on = m_log->isActive();
+    SessionWidget *s = currentSession();
+    const bool on = s && s->isLogging();
     m_recLabel->setVisible(on);
-    m_recLabel->setToolTip(on ? QStringLiteral("Logging to %1").arg(m_log->path()) : QString());
+    m_recLabel->setToolTip(on ? QStringLiteral("Logging to %1").arg(s->sessionLog()->path()) : QString());
     if (QAction *a = action(QStringLiteral("toggleLogging"))) {
         a->setText(on ? QStringLiteral("Stop &Logging") : QStringLiteral("Start &Logging"));
-        a->setStatusTip(on ? m_log->path() : QString());
+        a->setStatusTip(on ? s->sessionLog()->path() : QString());
     }
     updateTitle();
 }
 
-void MainWindow::logOutput(const QByteArray &d, bool fromPty)
+void MainWindow::updateSavedEverywhere(const SessionConfig &cfg)
 {
-    if (!m_log->isActive()) {
-        return;
-    }
-    if (fromPty) {
-        // Canonical + no-echo on our PTY = someone is typing a secret (sudo,
-        // passwd, ssh's own prompt, zterminal-askpass's manual fallback):
-        // keep whatever is printed meanwhile out of the log.
-        static const QString why = QStringLiteral("password prompt (terminal echo off)");
-        if (m_pty->isSecretInputMode()) {
-            m_log->suspend(why);
-            return;
+    m_store.save(cfg);
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        SessionWidget *s = sessionAt(i);
+        if (s->savedSession() && s->savedSession()->name == cfg.name) {
+            s->setSavedSession(cfg);
         }
-        m_log->resume(why);
     }
-    m_log->feed(d);
+    applySettings();
 }
 
 void MainWindow::setFontSize(int points)
 {
-    if (m_saved && m_saved->fontSize > 0) {
+    const auto &saved = savedSession();
+    if (saved && saved->fontSize > 0) {
         // This session overrides the size: zoom changes (and saves) the override.
-        m_saved->fontSize = std::clamp(points, 6, 48);
-        m_store.save(*m_saved);
-        applySettings();
+        SessionConfig cfg = *saved;
+        cfg.fontSize = std::clamp(points, 6, 48);
+        updateSavedEverywhere(cfg);
         return;
     }
     AppSettings s = m_settings;
     s.fontSize = std::clamp(points, 6, 48);
+    setSettings(s);
+}
+
+void MainWindow::setSchemeFor(const QString &id)
+{
+    const auto &saved = savedSession();
+    if (saved && !saved->colorScheme.isEmpty()) {
+        // This session overrides the scheme: change (and save) the override.
+        SessionConfig cfg = *saved;
+        cfg.colorScheme = id;
+        updateSavedEverywhere(cfg);
+        return;
+    }
+    AppSettings s = m_settings;
+    s.colorScheme = id;
     setSettings(s);
 }
 
@@ -535,157 +624,6 @@ void MainWindow::setMenuBarShown(bool shown)
     menuBar()->setVisible(shown);
 }
 
-void MainWindow::showContextMenu(const QPoint &globalPos)
-{
-    m_contextMenu->popup(globalPos);
-}
-
-MainWindow::Launch MainWindow::launchCommand() const
-{
-    Launch l;
-    switch (m_request.kind) {
-    case LaunchRequest::Kind::Ssh:
-    case LaunchRequest::Kind::Command:
-        l.program = m_request.program;
-        l.args = m_request.args;
-        break;
-    case LaunchRequest::Kind::Serial: {
-        SessionConfig s = *currentSessionConfig();
-        if (const QString e = validateSerial(s); !e.isEmpty()) {
-            l.error = e;
-        } else {
-            l.serial = s;
-        }
-        break;
-    }
-    case LaunchRequest::Kind::SavedSession:
-        if (!m_saved) {
-            l.error = m_store.unknownSessionMessage(m_request.sessionName);
-            break;
-        }
-        switch (m_saved->type) {
-        case SessionConfig::Type::Ssh: {
-            const SshCommand c = buildSshCommand(*m_saved);
-            if (!c.ok()) {
-                l.error = QStringLiteral("session \"%1\": %2").arg(m_saved->name, c.error);
-            } else {
-                l.program = c.program;
-                l.args = c.args;
-            }
-            break;
-        }
-        case SessionConfig::Type::Serial:
-            if (const QString e = validateSerial(*m_saved); !e.isEmpty()) {
-                l.error = QStringLiteral("session \"%1\": %2").arg(m_saved->name, e);
-            } else {
-                l.serial = *m_saved;
-            }
-            break;
-        case SessionConfig::Type::LocalShell:
-            break;
-        }
-        break;
-    default:
-        break; // local shell
-    }
-    return l;
-}
-
-void MainWindow::startSession()
-{
-    if (m_saved && m_saved->autoLog && !m_log->isActive()) {
-        QString err;
-        if (!startLogging(&err)) {
-            m_term->feed(QStringLiteral("\x1b[31mzterminal: logging not started: %1\x1b[0m\r\n").arg(err).toUtf8());
-        }
-    }
-    const Launch l = launchCommand();
-    if (!l.error.isEmpty()) {
-        m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n").arg(l.error).toUtf8());
-        return;
-    }
-    if (l.serial) {
-        const SessionConfig &s = *l.serial;
-        if (!m_serial->open(s)) {
-            m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n")
-                             .arg(QString(m_serial->errorString()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")))
-                             .toUtf8());
-            showSerialBanner(m_serial->errorString());
-            return;
-        }
-        m_banner->hide();
-        const QString line = QStringLiteral("%1 at %2 %3%4%5%6")
-                                 .arg(s.serialDevice)
-                                 .arg(s.baudRate)
-                                 .arg(s.dataBits)
-                                 .arg(s.parity.left(1).toUpper())
-                                 .arg(s.stopBits)
-                                 .arg(s.flowControl == QLatin1String("none") ? QString() : QStringLiteral(", ") + s.flowControl);
-        m_term->feed(QStringLiteral("\x1b[2m[connected to %1]\x1b[0m\r\n")
-                         .arg(line)
-                         .toUtf8());
-        return;
-    }
-    const QSize grid(m_view->gridCols(), m_view->gridRows());
-    const QStringList env = prepareStoredPassword();
-    if (!m_pty->start(l.program, l.args, grid.height(), grid.width(), env)) {
-        m_term->feed(QStringLiteral("\x1b[31mzterminal: could not start %1: %2\x1b[0m\r\n")
-                         .arg(l.program.isEmpty() ? Pty::defaultShell() : l.program, m_pty->errorString())
-                         .toUtf8());
-        delete m_askpass;
-        m_askpass = nullptr;
-        return;
-    }
-    if (m_askpass) {
-        m_askpass->setAllowedAncestor(m_pty->pid());
-    }
-}
-
-QStringList MainWindow::prepareStoredPassword()
-{
-    delete m_askpass; // a restart gets a fresh one-shot server
-    m_askpass = nullptr;
-    if (!m_saved || m_saved->type != SessionConfig::Type::Ssh || !m_saved->useStoredPassword) {
-        return {};
-    }
-    auto note = [this](const QString &m) {
-        m_term->feed(QStringLiteral("\x1b[2m[zterminal: %1]\x1b[0m\r\n").arg(m).toUtf8());
-    };
-    const QString helper = AskpassServer::findHelper();
-    if (helper.isEmpty()) {
-        note(QStringLiteral("zterminal-askpass not found; ssh will ask for the password"));
-        return {};
-    }
-    VaultManager &vm = VaultManager::instance();
-    if (!vm.exists()) {
-        note(QStringLiteral("no password vault yet; ssh will ask for the password"));
-        return {};
-    }
-    if (!vm.ensureUnlocked(this, QStringLiteral("Session \"%1\" uses a stored password.").arg(m_saved->name.toHtmlEscaped()))) {
-        note(QStringLiteral("vault locked; ssh will ask for the password"));
-        return {};
-    }
-    vm.vault().refresh();
-    const SecureBuffer *secret =
-        vm.vault().secret(Vault::secretKeyFor(QStringLiteral("ssh-password"), m_saved->name));
-    if (!secret) {
-        note(QStringLiteral("no stored password for this session; ssh will ask for it"));
-        return {};
-    }
-    m_askpass = new AskpassServer(secret->clone(), this);
-    QString err;
-    if (!m_askpass->listen(&err)) {
-        delete m_askpass;
-        m_askpass = nullptr;
-        note(QStringLiteral("can't offer the stored password (%1); ssh will ask for it").arg(err));
-        return {};
-    }
-    connect(m_askpass, &AskpassServer::served, this, [note]() {
-        note(QStringLiteral("stored password sent once; if it is rejected, ssh asks here"));
-    });
-    return m_askpass->sshEnvironment(helper);
-}
-
 void MainWindow::updateVaultActions()
 {
     VaultManager &vm = VaultManager::instance();
@@ -702,207 +640,19 @@ void MainWindow::updateVaultActions()
     }
 }
 
-namespace {
-// The device is *currently* asking for a password: the last line received
-// (no newline after it yet) mentions "password" and ends with ':'.
-bool endsWithPasswordPrompt(const QByteArray &tail)
-{
-    const QByteArray t = tail.trimmed();
-    const qsizetype nl = std::max(t.lastIndexOf('\n'), t.lastIndexOf('\r'));
-    const QByteArray last = t.mid(nl + 1).toLower();
-    return last.contains("assword") && last.endsWith(':');
-}
-} // namespace
-
-void MainWindow::onSerialData(const QByteArray &d)
-{
-    m_serialTail.append(d);
-    if (m_serialTail.size() > 512) {
-        m_serialTail.remove(0, m_serialTail.size() - 512);
-    }
-    if (m_loginWait && endsWithPasswordPrompt(m_serialTail)) {
-        finishLogin(true);
-    }
-}
-
-bool MainWindow::sendStoredLogin()
-{
-    if (!m_saved || m_saved->type != SessionConfig::Type::Serial || !m_serial->isOpen() || m_loginWait) {
-        return false;
-    }
-    VaultManager &vm = VaultManager::instance();
-    if (!vm.exists()) {
-        QMessageBox::information(this, QStringLiteral("Send Stored Login"),
-                                 QStringLiteral("There is no password vault yet. Store a login password in File > New Session (Save)."));
-        return false;
-    }
-    if (!vm.ensureUnlocked(this, QStringLiteral("Send Stored Login for \"%1\".").arg(m_saved->name.toHtmlEscaped()))) {
-        return false;
-    }
-    vm.vault().refresh();
-    if (!vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))) {
-        QMessageBox::information(this, QStringLiteral("Send Stored Login"),
-                                 QStringLiteral("No login password is stored for \"%1\".").arg(m_saved->name));
-        return false;
-    }
-    m_log->suspend(QStringLiteral("Send Stored Login"));
-    m_loginWait = new QTimer(this);
-    m_loginWait->setSingleShot(true);
-    m_loginWait->setInterval(10000);
-    connect(m_loginWait, &QTimer::timeout, this, [this]() { finishLogin(false); });
-    const bool promptShowing = endsWithPasswordPrompt(m_serialTail);
-    m_serialTail.clear();
-    if (promptShowing) {
-        finishLogin(true);
-        return true;
-    }
-    if (!m_saved->loginUser.isEmpty()) {
-        m_serial->write(m_saved->loginUser.toUtf8() + '\r'); // write() maps CR to the session's Enter
-    }
-    m_loginWait->start();
-    return true;
-}
-
-void MainWindow::finishLogin(bool sendPassword)
-{
-    delete m_loginWait;
-    m_loginWait = nullptr;
-    // Resume a moment after the password went out, so a device that echoes it
-    // (or '*'s) back isn't logged either.
-    QTimer::singleShot(sendPassword ? 1500 : 0, this, [this]() { m_log->resume(QStringLiteral("Send Stored Login")); });
-    if (!sendPassword) {
-        m_term->feed(QByteArrayLiteral("\r\n\x1b[2m[zterminal: no password prompt within 10 s; stored password NOT sent]\x1b[0m\r\n"));
-        return;
-    }
-    VaultManager &vm = VaultManager::instance();
-    const SecureBuffer *pw = vm.isUnlocked() && m_saved
-        ? vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))
-        : nullptr;
-    if (!pw) {
-        return;
-    }
-    // QSerialPort keeps its own write buffer (not locked memory); wipe our copy.
-    QByteArray bytes(reinterpret_cast<const char *>(pw->data()), qsizetype(pw->size()));
-    bytes += '\r';
-    m_serial->write(bytes, /*echo=*/false);
-    sodium_memzero(bytes.data(), std::size_t(bytes.size()));
-    m_serialTail.clear(); // that prompt has been answered
-}
-
-void MainWindow::onSessionFinished(int exitCode, bool crashed)
-{
-    const QString msg = crashed
-        ? QStringLiteral("\r\n\x1b[7m[process terminated (%1). Session > Restart Session (Ctrl+Shift+R) restarts it.]\x1b[0m\r\n")
-              .arg(exitCode)
-        : QStringLiteral("\r\n\x1b[7m[process exited with code %1. Session > Restart Session (Ctrl+Shift+R) restarts it.]\x1b[0m\r\n")
-              .arg(exitCode);
-    m_term->feed(msg.toUtf8());
-}
-
-bool MainWindow::confirmPaste(const QString &text)
-{
-    if (!m_settings.confirmMultilinePaste || m_skipPasteConfirm) {
-        return true;
-    }
-    const PasteInfo info = PasteInfo::analyze(text);
-    if (!info.needsConfirm()) {
-        return true;
-    }
-    PasteConfirmDialog::Context ctx;
-    ctx.bracketedPaste = m_term->bracketedPasteEnabled();
-    if (m_serial->isOpen() && m_serial->pacingEnabled()) {
-        ctx.serialPaced = true;
-        ctx.charDelayMs = m_serial->config().charDelayMs;
-        ctx.lineDelayMs = m_serial->config().lineDelayMs;
-        ctx.pacedMs = PasteInfo::pacedMilliseconds(Terminal::preparePasteBytes(text), ctx.charDelayMs,
-                                                   ctx.lineDelayMs);
-    }
-    PasteConfirmDialog dlg(info, ctx, this);
-    const bool ok = dlg.exec() == QDialog::Accepted;
-    if (ok && dlg.dontAskAgain()) {
-        m_skipPasteConfirm = true;
-    }
-    m_view->setFocus();
-    return ok;
-}
-
-bool MainWindow::isSerialSession() const
-{
-    return m_request.kind == LaunchRequest::Kind::Serial
-        || (m_saved && m_saved->type == SessionConfig::Type::Serial);
-}
-
-QString MainWindow::serialBannerText() const
-{
-    return m_banner->isHidden() ? QString() : m_bannerText->text();
-}
-
-void MainWindow::showSerialBanner(const QString &text)
-{
-    m_bannerText->setText(text);
-    m_banner->show();
-}
-
-void MainWindow::onSerialDisconnected(const QString &reason)
-{
-    m_term->feed(QStringLiteral("\r\n\x1b[41;97m[%1]\x1b[0m\r\n").arg(reason).toUtf8());
-    showSerialBanner(QStringLiteral("Disconnected: %1 Plug it back in and press Reconnect.").arg(reason));
-    updatePasteBar(0);
-}
-
-void MainWindow::updatePasteBar(qint64 remaining)
-{
-    const bool show = remaining > 0 && m_serial->pacingEnabled();
-    m_pasteBar->setVisible(show);
-    if (QAction *a = action(QStringLiteral("cancelPaste"))) {
-        a->setEnabled(remaining > 0);
-    }
-    if (show) {
-        m_pasteText->setText(QStringLiteral("Sending paste slowly (%1 ms/char, %2 ms/line)\u2026 %3 bytes left")
-                                 .arg(m_serial->config().charDelayMs)
-                                 .arg(m_serial->config().lineDelayMs)
-                                 .arg(remaining));
-    }
-}
-
-void MainWindow::restartSession()
-{
-    if (isSerialSession()) {
-        // Reconnect: close and reopen the port.
-        m_serial->close();
-        m_term->feed(QByteArrayLiteral("\r\n"));
-        startSession();
-        return;
-    }
-    if (m_pty->isRunning()) {
-        const auto ret = QMessageBox::question(this, QStringLiteral("Restart Session"),
-                                               QStringLiteral("The session is still running. Terminate it and restart?"));
-        if (ret != QMessageBox::Yes) {
-            return;
-        }
-        m_pty->terminate();
-    }
-    m_term->feed(QByteArrayLiteral("\r\n"));
-    startSession();
-}
-
-bool MainWindow::launch(const QStringList &args)
-{
-    return m_launcher(QApplication::applicationFilePath(), args);
-}
-
 void MainWindow::duplicateSession()
 {
-    launch(m_originalArgs);
+    SessionWidget *s = currentSession();
+    addTab(s->request(), s->originalArgs());
 }
 
 void MainWindow::showSessionDialog(bool focusSaved)
 {
-    // New Session starts blank; Open Saved Session starts on this window's
-    // saved session (if any) with the list focused.
+    // New Session starts blank; Open Saved Session starts on this tab's saved
+    // session (if any) with the list focused.
     SessionConfig initial;
-    if (focusSaved && m_saved) {
-        initial = *m_saved;
+    if (focusSaved && savedSession()) {
+        initial = *savedSession();
     }
     SessionDialog dlg(m_store, initial, this);
     if (focusSaved) {
@@ -910,13 +660,13 @@ void MainWindow::showSessionDialog(bool focusSaved)
     }
     if (dlg.exec() == QDialog::Accepted) {
         QString err;
-        if (!openInNewWindow(dlg.config(), &err)) {
+        if (!openInNewTab(dlg.config(), &err)) {
             QMessageBox::warning(this, QStringLiteral("Open Session"), err);
         }
     }
 }
 
-bool MainWindow::openInNewWindow(const SessionConfig &cfg, QString *error)
+bool MainWindow::openInNewTab(const SessionConfig &cfg, QString *error)
 {
     auto fail = [error](const QString &m) {
         if (error) {
@@ -924,77 +674,39 @@ bool MainWindow::openInNewWindow(const SessionConfig &cfg, QString *error)
         }
         return false;
     };
-    // A saved session that matches what is in the dialog opens by name, so the
-    // new window's title, Duplicate and overrides all refer to it.
-    if (!cfg.name.isEmpty()) {
-        if (const auto stored = m_store.load(cfg.name); stored && *stored == cfg) {
-            return launch({cfg.name}) || fail(QStringLiteral("Could not start a new zterminal window."));
+    // The same arguments `zterminal ARGS` would take; Duplicate re-opens them.
+    QStringList args;
+    if (const auto stored = cfg.name.isEmpty() ? std::nullopt : m_store.load(cfg.name); stored && *stored == cfg) {
+        // A saved session that matches what is in the dialog opens by name, so
+        // the tab's title, Duplicate and overrides all refer to it.
+        args = {cfg.name};
+    } else {
+        switch (cfg.type) {
+        case SessionConfig::Type::LocalShell:
+            break;
+        case SessionConfig::Type::Ssh: {
+            const SshCommand c = buildSshCommand(cfg);
+            if (!c.ok()) {
+                return fail(c.error);
+            }
+            args = QStringList{QStringLiteral("ssh")} + c.args;
+            break;
+        }
+        case SessionConfig::Type::Serial:
+            if (const QString e = validateSerial(cfg); !e.isEmpty()) {
+                return fail(e);
+            }
+            // Unsaved: device and baud only (8N1, no flow control); save the
+            // session to keep the other line settings.
+            args = {QStringLiteral("serial"), cfg.serialDevice, QString::number(cfg.baudRate)};
+            break;
         }
     }
-    switch (cfg.type) {
-    case SessionConfig::Type::LocalShell:
-        return launch({}) || fail(QStringLiteral("Could not start a new zterminal window."));
-    case SessionConfig::Type::Ssh: {
-        const SshCommand c = buildSshCommand(cfg);
-        if (!c.ok()) {
-            return fail(c.error);
-        }
-        return launch(QStringList{QStringLiteral("ssh")} + c.args)
-            || fail(QStringLiteral("Could not start a new zterminal window."));
+    const LaunchRequest req = parseCommandLine(args);
+    if (req.kind == LaunchRequest::Kind::Error) {
+        return fail(req.error);
     }
-    case SessionConfig::Type::Serial:
-        if (const QString e = validateSerial(cfg); !e.isEmpty()) {
-            return fail(e);
-        }
-        // Unsaved: device and baud travel on the command line (8N1, no flow
-        // control); save the session to keep the other line settings.
-        return launch({QStringLiteral("serial"), cfg.serialDevice, QString::number(cfg.baudRate)})
-            || fail(QStringLiteral("Could not start a new zterminal window."));
-    }
-    return fail(QStringLiteral("Unknown session type."));
-}
-
-std::optional<SessionConfig> MainWindow::currentSessionConfig(QString *why) const
-{
-    if (m_saved) {
-        return m_saved;
-    }
-    switch (m_request.kind) {
-    case LaunchRequest::Kind::LocalShell:
-        return SessionConfig{};
-    case LaunchRequest::Kind::Ssh:
-        return sessionFromSshArgs(m_request.args, why);
-    case LaunchRequest::Kind::Serial: {
-        SessionConfig s;
-        s.type = SessionConfig::Type::Serial;
-        s.serialDevice = m_request.program;
-        s.baudRate = m_request.baudRate;
-        return s;
-    }
-    default:
-        if (why) {
-            *why = QStringLiteral("only local shell, SSH and serial sessions can be saved");
-        }
-        return std::nullopt;
-    }
-}
-
-bool MainWindow::saveCurrentSessionAs(const QString &name, QString *error)
-{
-    auto cfg = currentSessionConfig(error);
-    if (!cfg) {
-        return false;
-    }
-    cfg->name = name.trimmed();
-    if (!m_store.save(*cfg, error)) {
-        return false;
-    }
-    m_saved = cfg;
-    m_request = LaunchRequest{};
-    m_request.kind = LaunchRequest::Kind::SavedSession;
-    m_request.sessionName = cfg->name;
-    m_originalArgs = {cfg->name}; // Duplicate now opens the saved session
-    updateTitle();
+    addTab(req, args);
     return true;
 }
 
@@ -1002,17 +714,18 @@ void MainWindow::saveSessionInteractive()
 {
     QString why;
     if (!currentSessionConfig(&why)) {
-        QMessageBox::warning(this, QStringLiteral("Save Session"), QStringLiteral("This window can't be saved: %1.").arg(why));
+        QMessageBox::warning(this, QStringLiteral("Save Session"), QStringLiteral("This tab can't be saved: %1.").arg(why));
         return;
     }
-    QString suggestion = m_saved ? m_saved->name : QString();
-    if (suggestion.isEmpty() && m_request.kind == LaunchRequest::Kind::Ssh) {
-        suggestion = m_request.displayName().mid(4); // "ssh user@host" -> "user@host"
+    const auto &saved = savedSession();
+    QString suggestion = saved ? saved->name : QString();
+    if (suggestion.isEmpty() && currentSession()->request().kind == LaunchRequest::Kind::Ssh) {
+        suggestion = currentSession()->request().displayName().mid(4); // "ssh user@host" -> "user@host"
     }
     for (;;) {
         bool ok = false;
         const QString name = QInputDialog::getText(this, QStringLiteral("Save Session"),
-                                                   QStringLiteral("Save this window's session as:"),
+                                                   QStringLiteral("Save this tab's session as:"),
                                                    QLineEdit::Normal, suggestion, &ok)
                                  .trimmed();
         if (!ok) {
@@ -1023,7 +736,7 @@ void MainWindow::saveSessionInteractive()
             suggestion = name;
             continue;
         }
-        if (m_store.contains(name) && (!m_saved || m_saved->name != name)
+        if (m_store.contains(name) && (!saved || saved->name != name)
             && QMessageBox::question(this, QStringLiteral("Save Session"),
                                      QStringLiteral("Replace the saved session \"%1\"?").arg(name))
                 != QMessageBox::Yes) {
@@ -1064,9 +777,22 @@ void MainWindow::showAbout()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
-    m_log->stop();
-    m_serial->close();
-    m_pty->terminate();
+    const int live = liveTabCount();
+    if (!m_closingConfirmed && live > 0) {
+        const QString what = live == 1 ? QStringLiteral("1 tab has a running session")
+                                       : QStringLiteral("%1 tabs have running sessions").arg(live);
+        const auto ret = QMessageBox::question(this, QStringLiteral("Close Window"),
+                                               QStringLiteral("%1. Close the window and end them?").arg(what),
+                                               QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (ret != QMessageBox::Close) {
+            e->ignore();
+            return;
+        }
+    }
+    m_closingConfirmed = false;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        sessionAt(i)->shutdown();
+    }
     e->accept();
 }
 
