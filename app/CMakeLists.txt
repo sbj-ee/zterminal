@@ -10,6 +10,8 @@ add_library(zterminal_ui STATIC
   VaultManager.cpp VaultManager.hpp
   VaultDialogs.cpp VaultDialogs.hpp
   PasteConfirmDialog.cpp PasteConfirmDialog.hpp
+  UpdateDialog.cpp UpdateDialog.hpp
+  UpdateManager.cpp UpdateManager.hpp
 )
 target_include_directories(zterminal_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(zterminal_ui PUBLIC zterminal_core Qt6::Gui Qt6::Widgets)

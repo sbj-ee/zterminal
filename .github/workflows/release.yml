@@ -1,0 +1,84 @@
+# Publish a release when a v* tag is pushed (e.g. `git push origin v0.10.0`):
+# build + test on Ubuntu 24.04, package the .deb, write SHA256SUMS and create
+# the GitHub Release with both files. The in-app updater (Help > Check for
+# Updates) reads releases/latest and needs exactly these two assets:
+#   zterminal_<version>_amd64.deb and SHA256SUMS.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # gh release create
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt 6 + build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qt6-base-dev qt6-qpa-plugins libgl1-mesa-dev cmake ninja-build g++ dpkg-dev fonts-dejavu-core \
+            xvfb xauth dbus qt6-serialport-dev socat libsodium-dev pkg-config
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Tag must match project() VERSION
+        run: |
+          version=$(sed -n 's/.*CMAKE_PROJECT_VERSION:STATIC=//p' build/CMakeCache.txt)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$GITHUB_REF_NAME project=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match project(zterminal VERSION $version) in CMakeLists.txt"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package .deb and SHA256SUMS
+        run: |
+          cd build
+          cpack -G DEB
+          deb="zterminal_${VERSION}_amd64.deb"
+          test -f "$deb"
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb" | grep -q './usr/bin/zterminal$'
+          sha256sum "$deb" > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd build
+          gh release create "$GITHUB_REF_NAME" \
+            "zterminal_${VERSION}_amd64.deb" SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "zterminal $VERSION" \
+            --generate-notes \
+            --verify-tag
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: zterminal-release
+          path: |
+            build/zterminal_*_amd64.deb
+            build/SHA256SUMS
+          if-no-files-found: error

@@ -1,0 +1,101 @@
+#pragma once
+
+#include "Update.hpp"
+#include "UpdateChecker.hpp"
+
+#include <QObject>
+#include <QPointer>
+#include <QStringList>
+
+#include <functional>
+#include <memory>
+
+class QProcess;
+class QProgressDialog;
+#include <QTemporaryDir>
+class QWidget;
+
+namespace zterminal {
+
+class UpdateDialog;
+
+// One per process: Help > Check for Updates, the automatic check shortly
+// after startup (Preferences, at most once a day), the dialog and the install:
+// download .deb + SHA256SUMS -> verify -> pkexec apt install -y ./<deb> -> restart.
+// Every dialog is opened non-modally-blocking (open(), not exec()) so the flow
+// is testable; objectNames: updateDialog, updateProgress, updateMessage,
+// updateRestart.
+class UpdateManager : public QObject
+{
+    Q_OBJECT
+public:
+    enum class Stage { Idle, Checking, Offering, Downloading, Installing, Done };
+    Q_ENUM(Stage)
+
+    static UpdateManager &instance();
+
+    // Help > Check for Updates: always reports (latest / error / dialog).
+    void checkNow(QWidget *parent);
+    // Called once from main(): after delayMs, checks quietly if enabled and due.
+    void scheduleStartupCheck(QWidget *parent, int delayMs = 3000);
+    // The startup decision, without the timer (tests).
+    bool startupCheckIfDue(QWidget *parent);
+
+    Stage stage() const { return m_stage; }
+    UpdateChecker *checker() const { return m_checker; }
+    const ReleaseInfo &lastRelease() const { return m_release; }
+    QString lastMessage() const { return m_lastMessage; }
+
+    // Tests: the version we pretend to run (default kVersionString).
+    void setCurrentVersionForTests(const QString &v) { m_currentVersion = v; }
+    // Tests: run this program instead of `pkexec apt install -y ./<deb>`; the
+    // .deb's file name is appended to args. Also skips the /usr/bin check.
+    void setInstallerForTests(const QString &program, const QStringList &args);
+    // Tests: called instead of relaunching + quitting.
+    void setRestartHandlerForTests(std::function<void()> fn) { m_restartHandler = std::move(fn); }
+    void resetForTests();
+
+    // The install command for a downloaded package (program, args); exposed for tests.
+    static QStringList installCommand(const QString &debFileName);
+    // Total live sessions in every open zterminal window of this process.
+    static int liveSessionCount(int *windows = nullptr);
+
+signals:
+    void stageChanged(zterminal::UpdateManager::Stage stage);
+    void checkFinished(bool offered);
+    void installFinished(bool ok, const QString &message);
+
+private:
+    explicit UpdateManager(QObject *parent = nullptr);
+    void startCheck(QWidget *parent, bool manual);
+    void onCheckFinished(const UpdateChecker::Result &r);
+    void offer();
+    void startDownload();
+    void onDownloadFinished(bool ok, const QString &debPath, const QString &error);
+    void runInstaller();
+    void onInstallerFinished(int exitCode, bool crashed);
+    void offerRestart();
+    void restart();
+    void fallback(const QString &why);
+    void message(const QString &title, const QString &text, bool warning);
+    void setStage(Stage s);
+
+    UpdateChecker *m_checker;
+    UpdateDownloader *m_downloader;
+    QPointer<QWidget> m_parent;
+    QPointer<QProgressDialog> m_progress;
+    QProcess *m_installer = nullptr;
+    std::unique_ptr<QTemporaryDir> m_tmp;
+    ReleaseInfo m_release;
+    QString m_debPath;
+    QString m_currentVersion;
+    QString m_lastMessage;
+    QString m_testProgram;
+    QStringList m_testArgs;
+    std::function<void()> m_restartHandler;
+    Stage m_stage = Stage::Idle;
+    bool m_manual = false;
+    bool m_startupScheduled = false;
+};
+
+} // namespace zterminal

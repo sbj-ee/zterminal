@@ -1,0 +1,406 @@
+#include "UpdateManager.hpp"
+
+#include "MainWindow.hpp"
+#include "UpdateDialog.hpp"
+#include "version.hpp"
+
+#include <QApplication>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFileInfo>
+#include <QMessageBox>
+#include <QProcess>
+#include <QProgressDialog>
+#include <QPushButton>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+#include <QTimer>
+#include <QUrl>
+
+namespace zterminal {
+
+namespace {
+const QString kInstalledBinary = QStringLiteral("/usr/bin/zterminal");
+}
+
+UpdateManager &UpdateManager::instance()
+{
+    static UpdateManager *m = new UpdateManager(qApp);
+    return *m;
+}
+
+UpdateManager::UpdateManager(QObject *parent)
+    : QObject(parent)
+    , m_checker(new UpdateChecker(this))
+    , m_downloader(new UpdateDownloader(this))
+    , m_currentVersion(QString::fromLatin1(kVersionString))
+{
+    connect(m_checker, &UpdateChecker::finished, this, &UpdateManager::onCheckFinished);
+    connect(m_downloader, &UpdateDownloader::finished, this, &UpdateManager::onDownloadFinished);
+    connect(m_downloader, &UpdateDownloader::progress, this, [this](const QString &name, qint64 got, qint64 total) {
+        if (!m_progress) {
+            return;
+        }
+        m_progress->setLabelText(QStringLiteral("Downloading %1\u2026").arg(name));
+        if (total > 0) {
+            m_progress->setMaximum(1000);
+            m_progress->setValue(int(got * 1000 / total));
+        } else {
+            m_progress->setMaximum(0); // busy
+        }
+    });
+}
+
+void UpdateManager::setStage(Stage s)
+{
+    if (m_stage != s) {
+        m_stage = s;
+        emit stageChanged(s);
+    }
+}
+
+void UpdateManager::setInstallerForTests(const QString &program, const QStringList &args)
+{
+    m_testProgram = program;
+    m_testArgs = args;
+}
+
+void UpdateManager::resetForTests()
+{
+    m_checker->abort();
+    m_downloader->cancel();
+    m_tmp.reset();
+    m_release = {};
+    m_debPath.clear();
+    m_lastMessage.clear();
+    m_startupScheduled = false;
+    m_stage = Stage::Idle;
+}
+
+QStringList UpdateManager::installCommand(const QString &debFileName)
+{
+    // "./" makes apt treat the argument as a file, not a package name.
+    return {QStringLiteral("pkexec"), QStringLiteral("apt"), QStringLiteral("install"), QStringLiteral("-y"),
+            QStringLiteral("./") + debFileName};
+}
+
+int UpdateManager::liveSessionCount(int *windows)
+{
+    int live = 0;
+    int wins = 0;
+    for (QWidget *w : QApplication::topLevelWidgets()) {
+        if (auto *mw = qobject_cast<MainWindow *>(w)) {
+            const int n = mw->liveTabCount();
+            live += n;
+            wins += n > 0 ? 1 : 0;
+        }
+    }
+    if (windows) {
+        *windows = wins;
+    }
+    return live;
+}
+
+void UpdateManager::checkNow(QWidget *parent)
+{
+    startCheck(parent, true);
+}
+
+void UpdateManager::scheduleStartupCheck(QWidget *parent, int delayMs)
+{
+    if (m_startupScheduled) {
+        return; // once per process, however many windows open
+    }
+    m_startupScheduled = true;
+    QPointer<QWidget> p(parent);
+    QTimer::singleShot(delayMs, this, [this, p]() {
+        if (p) {
+            startupCheckIfDue(p);
+        }
+    });
+}
+
+bool UpdateManager::startupCheckIfDue(QWidget *parent)
+{
+    const AppSettings settings = AppSettings::load();
+    const UpdateState state = UpdateState::load();
+    if (!UpdatePolicy::shouldCheckAtStartup(settings.checkForUpdatesOnStartup, state,
+                                            QDateTime::currentDateTimeUtc())) {
+        return false;
+    }
+    startCheck(parent, false);
+    return true;
+}
+
+void UpdateManager::startCheck(QWidget *parent, bool manual)
+{
+    if (m_stage != Stage::Idle && m_stage != Stage::Done) {
+        if (manual && m_stage == Stage::Checking) {
+            m_manual = true; // a quiet startup check becomes a reported one
+            m_parent = parent;
+        }
+        return;
+    }
+    m_parent = parent;
+    m_manual = manual;
+    setStage(Stage::Checking);
+    m_checker->check();
+}
+
+void UpdateManager::onCheckFinished(const UpdateChecker::Result &r)
+{
+    if (!m_manual) {
+        // Count the attempt even if it failed, so a flaky network or a rate
+        // limit doesn't turn into a request at every startup.
+        UpdateState st = UpdateState::load();
+        st.lastCheck = QDateTime::currentDateTimeUtc();
+        st.save();
+    }
+    setStage(Stage::Idle);
+    if (r.outcome != UpdateChecker::Outcome::Release) {
+        m_lastMessage = r.error;
+        if (m_manual) {
+            message(QStringLiteral("Check for Updates"), r.error, r.outcome == UpdateChecker::Outcome::Error);
+        }
+        emit checkFinished(false);
+        return;
+    }
+    m_release = r.release;
+    if (!UpdatePolicy::shouldOffer(m_release, m_currentVersion, UpdateState::load(), m_manual)) {
+        m_lastMessage = QStringLiteral("You're running the latest version of zterminal (%1).").arg(m_currentVersion);
+        if (m_manual) {
+            if (isNewerVersion(m_currentVersion, m_release.tag)) {
+                m_lastMessage = QStringLiteral("You're running zterminal %1, newer than the latest release (%2).")
+                                    .arg(m_currentVersion, m_release.tag);
+            }
+            message(QStringLiteral("Check for Updates"), m_lastMessage, false);
+        }
+        emit checkFinished(false);
+        return;
+    }
+    offer();
+    emit checkFinished(true);
+}
+
+void UpdateManager::offer()
+{
+    setStage(Stage::Offering);
+    auto *dlg = new UpdateDialog(m_release, m_currentVersion, m_parent);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &QDialog::finished, this, [this](int result) {
+        if (result == UpdateDialog::Skip) {
+            UpdateState st = UpdateState::load();
+            st.skippedVersion = m_release.tag;
+            st.save();
+            setStage(Stage::Idle);
+        } else if (result == UpdateDialog::Install) {
+            startDownload();
+        } else {
+            setStage(Stage::Idle);
+        }
+    });
+    dlg->open();
+}
+
+void UpdateManager::startDownload()
+{
+    m_tmp = std::make_unique<QTemporaryDir>(QDir::tempPath() + QStringLiteral("/zterminal-update-XXXXXX"));
+    if (!m_tmp->isValid()) {
+        message(QStringLiteral("Update"), QStringLiteral("Couldn't create a temporary folder for the download."), true);
+        setStage(Stage::Idle);
+        return;
+    }
+    setStage(Stage::Downloading);
+    m_progress = new QProgressDialog(QStringLiteral("Downloading\u2026"), QStringLiteral("Cancel"), 0, 0, m_parent);
+    m_progress->setObjectName(QStringLiteral("updateProgress"));
+    m_progress->setWindowTitle(QStringLiteral("Updating zterminal"));
+    m_progress->setAttribute(Qt::WA_DeleteOnClose);
+    m_progress->setAutoClose(false);
+    m_progress->setAutoReset(false);
+    m_progress->setMinimumDuration(0);
+    connect(m_progress, &QProgressDialog::canceled, m_downloader, &UpdateDownloader::cancel);
+    m_progress->open();
+    m_downloader->start(m_release, m_tmp->path());
+}
+
+void UpdateManager::onDownloadFinished(bool ok, const QString &debPath, const QString &error)
+{
+    if (m_progress) {
+        m_progress->disconnect(m_downloader);
+        m_progress->close();
+    }
+    if (!ok) {
+        m_tmp.reset();
+        setStage(Stage::Idle);
+        m_lastMessage = error;
+        if (error != QLatin1String("Download cancelled.")) {
+            message(QStringLiteral("Update Not Installed"), error, true);
+        }
+        emit installFinished(false, error);
+        return;
+    }
+    m_debPath = debPath;
+    runInstaller();
+}
+
+void UpdateManager::runInstaller()
+{
+    const QString debName = QFileInfo(m_debPath).fileName();
+    QString program;
+    QStringList args;
+    if (!m_testProgram.isEmpty()) {
+        program = m_testProgram;
+        args = m_testArgs;
+        args << debName;
+    } else {
+        // Only replace a packaged install; a build-tree or /usr/local binary
+        // wouldn't be the one apt updates.
+        if (QCoreApplication::applicationFilePath() != kInstalledBinary) {
+            fallback(QStringLiteral("This zterminal (%1) wasn't installed from the .deb, so the package can't be "
+                                    "installed in its place automatically.")
+                         .arg(QCoreApplication::applicationFilePath()));
+            return;
+        }
+        const QStringList cmd = installCommand(debName);
+        if (QStandardPaths::findExecutable(cmd.at(0)).isEmpty() || QStandardPaths::findExecutable(cmd.at(1)).isEmpty()) {
+            fallback(QStringLiteral("pkexec or apt isn't available, so the package can't be installed from here."));
+            return;
+        }
+        program = cmd.at(0);
+        args = cmd.mid(1);
+    }
+    setStage(Stage::Installing);
+    m_progress = new QProgressDialog(
+        QStringLiteral("Installing %1\u2026\nEnter your password in the system prompt.").arg(debName), QString(), 0, 0,
+        m_parent);
+    m_progress->setObjectName(QStringLiteral("updateProgress"));
+    m_progress->setWindowTitle(QStringLiteral("Updating zterminal"));
+    m_progress->setAttribute(Qt::WA_DeleteOnClose);
+    m_progress->setMinimumDuration(0);
+    m_progress->setCancelButton(nullptr);
+    m_progress->open();
+
+    m_installer = new QProcess(this);
+    m_installer->setWorkingDirectory(QFileInfo(m_debPath).absolutePath());
+    m_installer->setProcessChannelMode(QProcess::MergedChannels);
+    connect(m_installer, &QProcess::finished, this, [this](int code, QProcess::ExitStatus st) {
+        onInstallerFinished(code, st == QProcess::CrashExit);
+    });
+    connect(m_installer, &QProcess::errorOccurred, this, [this](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart) {
+            onInstallerFinished(127, false);
+        }
+    });
+    m_installer->start(program, args); // argv list, no shell
+}
+
+void UpdateManager::onInstallerFinished(int exitCode, bool crashed)
+{
+    if (!m_installer) {
+        return;
+    }
+    const QString output = QString::fromLocal8Bit(m_installer->readAll()).trimmed();
+    m_installer->deleteLater();
+    m_installer = nullptr;
+    if (m_progress) {
+        m_progress->close();
+    }
+    if (crashed || exitCode != 0) {
+        QString why;
+        if (exitCode == 126) {
+            why = QStringLiteral("The password prompt was dismissed, so nothing was installed.");
+        } else if (exitCode == 127) {
+            why = QStringLiteral("Not authorised to install packages (pkexec exit 127).");
+        } else {
+            why = QStringLiteral("apt couldn't install the package (exit %1).").arg(exitCode);
+            if (!output.isEmpty()) {
+                why += QLatin1Char('\n') + output.right(600);
+            }
+        }
+        fallback(why);
+        return;
+    }
+    setStage(Stage::Done);
+    m_lastMessage = QStringLiteral("zterminal %1 was installed.").arg(m_release.tag);
+    m_tmp.reset(); // remove the downloaded package
+    emit installFinished(true, m_lastMessage);
+    offerRestart();
+}
+
+void UpdateManager::offerRestart()
+{
+    int windows = 0;
+    const int live = liveSessionCount(&windows);
+    QString text = QStringLiteral("zterminal %1 was installed. Restart zterminal now to use it?").arg(m_release.tag);
+    if (live > 0) {
+        text += QStringLiteral("\n\nWarning: %1 open in %2 will be closed. Saved sessions are reopened, but their "
+                               "connections start over.")
+                    .arg(live == 1 ? QStringLiteral("1 live session is") : QStringLiteral("%1 live sessions are").arg(live),
+                         windows == 1 ? QStringLiteral("1 window") : QStringLiteral("%1 windows").arg(windows));
+    }
+    auto *box = new QMessageBox(live > 0 ? QMessageBox::Warning : QMessageBox::Question,
+                                QStringLiteral("Restart zterminal"), text, QMessageBox::NoButton, m_parent);
+    box->setObjectName(QStringLiteral("updateRestart"));
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    QPushButton *restartBtn = box->addButton(QStringLiteral("&Restart Now"), QMessageBox::AcceptRole);
+    restartBtn->setObjectName(QStringLiteral("restartNow"));
+    QPushButton *laterBtn = box->addButton(QStringLiteral("&Later"), QMessageBox::RejectRole);
+    laterBtn->setObjectName(QStringLiteral("restartLater"));
+    box->setDefaultButton(live > 0 ? laterBtn : restartBtn);
+    connect(box, &QMessageBox::buttonClicked, this, [this, restartBtn](QAbstractButton *b) {
+        if (b == restartBtn) {
+            restart();
+        }
+    });
+    box->open();
+}
+
+void UpdateManager::restart()
+{
+    if (m_restartHandler) {
+        m_restartHandler();
+        return;
+    }
+    // One new process per window, reopening what its current tab was started with.
+    bool any = false;
+    for (QWidget *w : QApplication::topLevelWidgets()) {
+        if (auto *mw = qobject_cast<MainWindow *>(w); mw && mw->currentSession()) {
+            any |= QProcess::startDetached(kInstalledBinary, mw->currentSession()->originalArgs());
+        }
+    }
+    if (!any) {
+        QProcess::startDetached(kInstalledBinary, {});
+    }
+    QCoreApplication::exit(0);
+}
+
+void UpdateManager::fallback(const QString &why)
+{
+    setStage(Stage::Idle);
+    if (m_tmp) {
+        m_tmp->setAutoRemove(false); // keep the verified package for a manual install
+    }
+    const QString text =
+        QStringLiteral("%1\n\nThe verified package is at:\n%2\n\nInstall it with:\nsudo apt install %2\n\n"
+                       "Opening the release page.")
+            .arg(why, m_debPath);
+    m_lastMessage = text;
+    if (!m_release.htmlUrl.isEmpty() && m_testProgram.isEmpty()) {
+        QDesktopServices::openUrl(QUrl(m_release.htmlUrl));
+    }
+    message(QStringLiteral("Update Not Installed"), text, true);
+    emit installFinished(false, text);
+}
+
+void UpdateManager::message(const QString &title, const QString &text, bool warning)
+{
+    m_lastMessage = text;
+    auto *box = new QMessageBox(warning ? QMessageBox::Warning : QMessageBox::Information, title, text,
+                                QMessageBox::Ok, m_parent);
+    box->setObjectName(QStringLiteral("updateMessage"));
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    box->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    box->open();
+}
+
+} // namespace zterminal
