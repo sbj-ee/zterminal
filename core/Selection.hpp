@@ -39,7 +39,11 @@ public:
     // History lines were discarded: shift coordinates up; clears if the selection fell off.
     void linesDropped(int count);
 
-    QString text(const Terminal &term) const;
+    // Plain text of the selection, one '\n' between rows. trimTrailingWhitespace
+    // strips spaces/tabs at the end of every line (also of a partly selected
+    // last line); without it, spaces the program printed are kept and only
+    // never-written cells past the end of a line are dropped.
+    QString text(const Terminal &term, bool trimTrailingWhitespace = true) const;
 
     // Word boundaries on a line around `col` (inclusive start, exclusive end).
     static void wordBounds(const Terminal &term, int line, int col, const QString &delimiters,

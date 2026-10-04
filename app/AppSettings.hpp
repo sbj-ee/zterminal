@@ -26,6 +26,10 @@ struct AppSettings {
     QString logDirectory;
     bool logTimestamps = false;
     QString effectiveLogDirectory() const;
+    // Safe copy and paste (0.6.0): trim trailing whitespace from copied lines,
+    // and confirm pastes that contain a line break.
+    bool trimCopiedWhitespace = true;
+    bool confirmMultilinePaste = true;
 
     static constexpr int kDefaultFontSize = 11;
     static QString defaultFontFamily();

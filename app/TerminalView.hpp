@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "MouseSettings.hpp"
 #include "Selection.hpp"
 
@@ -30,6 +32,11 @@ public:
     QFont terminalFont() const { return m_font; }
     void setMouseSettings(const MouseSettings &s) { m_mouse = s; }
     const MouseSettings &mouseSettings() const { return m_mouse; }
+    // Copy: trim trailing whitespace on every copied line (Preferences, default on).
+    void setTrimCopiedWhitespace(bool on) { m_trimCopy = on; }
+    // Called with the clipboard text before every paste; returning false drops it
+    // (MainWindow's multi-line paste confirmation).
+    void setPasteGuard(std::function<bool(const QString &)> guard) { m_pasteGuard = std::move(guard); }
     // Key combinations reserved for app shortcuts; all other keys go to the session.
     void setAppShortcuts(const QSet<int> &combined) { m_appShortcuts = combined; }
 
@@ -103,6 +110,8 @@ private:
     int m_clickCount = 0;
     QElapsedTimer m_lastClick;
     QPoint m_lastClickPos;
+    bool m_trimCopy = true;
+    std::function<bool(const QString &)> m_pasteGuard;
     QString m_lastSelectionText; // PRIMARY fallback where the platform has none
     Qt::MouseButtons m_forwardedButtons;
     QSet<int> m_appShortcuts;

@@ -45,6 +45,9 @@ and milestones.
 - Session logging (0.5.0): Session > Start/Stop Logging (Ctrl+Shift+G) or automatically per
   saved session; a red **● REC** marker and `[REC]` in the title while logging. See
   [Session logs](#session-logs).
+- Safe copy and paste (0.6.0): copies are plain text with trailing whitespace trimmed, and a
+  paste with more than one line asks first (line count, preview, "don't ask again for this
+  session"). Both are on by default in Preferences. See [Copy and paste](#copy-and-paste).
 
 Planned next: Find and update checks (see the plan).
 
@@ -134,6 +137,19 @@ Only what the terminal displays is logged, never what you type. Logging also pau
 vault dialog is open, during Send Stored Login, and while the terminal is at a no-echo
 password prompt, so stored and typed passwords stay out of the log. A remote program that
 echoes a password back can't be detected; treat logs as sensitive anyway.
+
+## Copy and paste
+
+Selecting copies (PRIMARY, and CLIPBOARD unless turned off); right-click pastes CLIPBOARD;
+Ctrl+Shift+C/V also work. Copies are plain text only, and trailing spaces/tabs are trimmed from
+each line (Preferences > Mouse and clipboard > "Trim trailing whitespace from copied lines").
+
+A paste that contains a line break would run commands as it arrives, so zterminal asks first:
+**Paste N lines?** with a preview of the first lines (control characters shown as symbols),
+the serial pacing estimate on paced consoles, and **Don't ask again for this session**. Cancel
+is the default button. Single-line pastes go straight through. Turn it off with "Ask before
+pasting text with more than one line". When the program enabled bracketed paste (bash, zsh,
+vim), the paste is wrapped in bracketed-paste markers as before and the dialog says so.
 
 ## Building
 

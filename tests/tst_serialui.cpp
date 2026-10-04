@@ -16,12 +16,17 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSerialPort>
 #include <QSettings>
 #include <QSpinBox>
 #include <QTest>
+#include <QTimer>
+
+#include <functional>
 
 #include <unistd.h>
 
@@ -45,6 +50,20 @@ QString screen(MainWindow &w)
         all += w.terminal()->lineText(r).trimmed() + QLatin1Char('\n');
     }
     return all;
+}
+
+// Run fn on the next modal dialog (e.g. the paste confirmation).
+void whenModal(const std::function<bool(QWidget *)> &fn)
+{
+    auto *timer = new QTimer;
+    timer->setInterval(20);
+    QObject::connect(timer, &QTimer::timeout, [timer, fn]() {
+        if (QWidget *w = QApplication::activeModalWidget(); w && fn(w)) {
+            timer->stop();
+            timer->deleteLater();
+        }
+    });
+    timer->start();
 }
 
 SessionConfig console(const QString &dev)
@@ -200,7 +219,21 @@ private slots:
             config += QStringLiteral("interface Gi0/%1\n description port %1\n").arg(i);
         }
         QApplication::clipboard()->setText(config);
+        // The multi-line paste confirmation comes first and shows the pacing.
+        QString notes, summary;
+        whenModal([&](QWidget *m) {
+            if (m->objectName() != QLatin1String("pasteConfirmDialog")) {
+                return false;
+            }
+            summary = child<QLabel>(m, "pasteSummary")->text();
+            notes = child<QLabel>(m, "pasteNotes")->text();
+            child<QPushButton>(m, "pasteButton")->click();
+            return true;
+        });
         w.action(QStringLiteral("paste"))->trigger();
+        QVERIFY2(summary.contains(QStringLiteral("80 lines")), qPrintable(summary));
+        QVERIFY2(notes.contains(QStringLiteral("serial pacing (25 ms/char, 100 ms/line)")), qPrintable(notes));
+        QVERIFY2(notes.contains(QStringLiteral("about ")), qPrintable(notes));
         QVERIFY(w.serial()->pending() > 1000);
         QVERIFY(!w.pasteBar()->isHidden());
         QVERIFY(w.action(QStringLiteral("cancelPaste"))->isEnabled());

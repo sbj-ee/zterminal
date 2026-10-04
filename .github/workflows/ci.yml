@@ -41,7 +41,7 @@ jobs:
           ctest --test-dir build -R 'tst_serial' -V | tee serial.log | grep -E 'PASS|SKIP|FAIL|Totals'
           ! grep -q 'SKIP ' serial.log
           # Vault, askpass and logging suites (Send Stored Login also needs socat): must run, not skip.
-          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF'
+          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui|tst_pasteguard|tst_safepaste' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF'
           ! grep -q 'SKIP ' vault.log
 
       - name: Package .deb

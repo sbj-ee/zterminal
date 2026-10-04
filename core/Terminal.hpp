@@ -61,8 +61,14 @@ public:
 
     Cell cell(int absLine, int col) const;
     // Text of [startCol, endCol) of a line; endCol < 0 means to the end of the line
-    // with trailing blanks trimmed.
-    QString lineText(int absLine, int startCol = 0, int endCol = -1) const;
+    // with trailing blanks trimmed. With keepPrintedSpaces, only cells nothing was
+    // ever written to (or that were erased) are trimmed; spaces the program
+    // actually printed stay.
+    QString lineText(int absLine, int startCol = 0, int endCol = -1, bool keepPrintedSpaces = false) const;
+    // Whether the program turned on bracketed paste (DECSET 2004). libvterm keeps
+    // the mode private, so this asks it to start a paste and sees whether it
+    // emits ESC[200~ (captured, never sent).
+    bool bracketedPasteEnabled() const;
 
     QPoint cursorPos() const; // x = col, y = screen row
     bool cursorVisible() const { return m_cursorVisible; }
@@ -123,6 +129,8 @@ private:
     bool m_cursorVisible = true;
     int m_cursorShape = VTERM_PROP_CURSORSHAPE_BLOCK;
     bool m_altScreen = false;
+    mutable bool m_probing = false;
+    mutable QByteArray m_probeOut;
     int m_mouseMode = VTERM_PROP_MOUSE_NONE;
     QString m_title;
     QByteArray m_titleBuf;

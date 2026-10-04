@@ -38,6 +38,8 @@ private:
     QCheckBox *m_checkUpdates = nullptr;
     QLineEdit *m_logDir = nullptr;
     QCheckBox *m_logTimestamps = nullptr;
+    QCheckBox *m_trimCopy = nullptr;
+    QCheckBox *m_confirmPaste = nullptr;
     QString m_initialComboFamily; // what the font combo showed before any edit
 };
 

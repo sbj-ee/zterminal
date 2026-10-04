@@ -5,6 +5,8 @@
 #include "Vault.hpp"
 #include "VaultManager.hpp"
 #include "ColorScheme.hpp"
+#include "PasteConfirmDialog.hpp"
+#include "PasteGuard.hpp"
 #include "PreferencesDialog.hpp"
 #include "SessionDialog.hpp"
 #include "Pty.hpp"
@@ -123,6 +125,7 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) { logOutput(d, true); });
     connect(m_pty, &Pty::finished, this, &MainWindow::onSessionFinished);
     connect(m_view, &TerminalView::gridSizeChanged, m_pty, &Pty::resize);
+    m_view->setPasteGuard([this](const QString &t) { return confirmPaste(t); });
     connect(m_view, &TerminalView::gridSizeChanged, this, [this](int, int cols) { m_log->setColumns(cols); });
     connect(m_term, &Terminal::titleChanged, this, &MainWindow::updateTitle);
     connect(m_term, &Terminal::bell, this, []() { QApplication::beep(); });
@@ -393,6 +396,7 @@ void MainWindow::applySettings()
     }
     m_view->setTerminalFont(eff.font());
     m_view->setMouseSettings(m_settings.mouse);
+    m_view->setTrimCopiedWhitespace(m_settings.trimCopiedWhitespace);
     m_term->setScrollbackLimit(m_settings.scrollbackLines);
     m_term->setColorScheme(ColorScheme::byId(eff.colorScheme));
     VaultManager::instance().setAutoLockMinutes(m_settings.vaultAutoLockMinutes);
@@ -793,6 +797,33 @@ void MainWindow::onSessionFinished(int exitCode, bool crashed)
         : QStringLiteral("\r\n\x1b[7m[process exited with code %1. Session > Restart Session (Ctrl+Shift+R) restarts it.]\x1b[0m\r\n")
               .arg(exitCode);
     m_term->feed(msg.toUtf8());
+}
+
+bool MainWindow::confirmPaste(const QString &text)
+{
+    if (!m_settings.confirmMultilinePaste || m_skipPasteConfirm) {
+        return true;
+    }
+    const PasteInfo info = PasteInfo::analyze(text);
+    if (!info.needsConfirm()) {
+        return true;
+    }
+    PasteConfirmDialog::Context ctx;
+    ctx.bracketedPaste = m_term->bracketedPasteEnabled();
+    if (m_serial->isOpen() && m_serial->pacingEnabled()) {
+        ctx.serialPaced = true;
+        ctx.charDelayMs = m_serial->config().charDelayMs;
+        ctx.lineDelayMs = m_serial->config().lineDelayMs;
+        ctx.pacedMs = PasteInfo::pacedMilliseconds(Terminal::preparePasteBytes(text), ctx.charDelayMs,
+                                                   ctx.lineDelayMs);
+    }
+    PasteConfirmDialog dlg(info, ctx, this);
+    const bool ok = dlg.exec() == QDialog::Accepted;
+    if (ok && dlg.dontAskAgain()) {
+        m_skipPasteConfirm = true;
+    }
+    m_view->setFocus();
+    return ok;
 }
 
 bool MainWindow::isSerialSession() const
