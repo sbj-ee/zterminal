@@ -1,7 +1,7 @@
 // Vault in the UI (offscreen): auto-lock, the create / unlock / change dialogs,
 // Settings > Password Vault menu, the session dialog writing passwords to the
 // vault (never the INI), SSH via SSH_ASKPASS against a fake `ssh` that checks
-// its own /proc/<pid>/cmdline and environ, the locked-at-start prompt, and
+// its own cmdline and environ, the locked-at-start prompt, and
 // serial Send Stored Login over a socat pty pair.
 #include "AppSettings.hpp"
 #include "AskpassServer.hpp"
@@ -378,10 +378,11 @@ private slots:
         {
             QFile f(bin.filePath(QStringLiteral("ssh")));
             QVERIFY(f.open(QIODevice::WriteOnly));
+            // Portable argv/environ capture (works without Linux /proc).
             f.write("#!/bin/sh\n"
                     "o=\"$ZT_FAKE_OUT\"\n"
-                    "cat /proc/$$/cmdline > \"$o/cmdline\"\n"
-                    "cat /proc/$$/environ > \"$o/environ\"\n"
+                    "{ printf '%s\\0' \"$0\"; for a; do printf '%s\\0' \"$a\"; done; } > \"$o/cmdline\"\n"
+                    "if env -0 > \"$o/environ\" 2>/dev/null; then :; else printenv > \"$o/environ\"; fi\n"
                     "\"$SSH_ASKPASS\" \"stevebj@core-sw1's password: \" > \"$o/answer1\"; echo $? > \"$o/rc1\"\n"
                     "\"$SSH_ASKPASS\" \"stevebj@core-sw1's password: \" > \"$o/answer2\"; echo $? > \"$o/rc2\"\n"
                     "echo fake-ssh-finished\n");
@@ -426,9 +427,11 @@ private slots:
         QVERIFY(env.contains("SSH_ASKPASS_REQUIRE=force"));
         QVERIFY(env.contains("ZTERMINAL_ASKPASS_SOCKET="));
         QVERIFY(env.contains(QByteArray("SSH_ASKPASS=") + qgetenv("ZTERMINAL_ASKPASS")));
-        // ...nor in ours.
+        // ...nor in ours (Linux /proc; skipped on macOS).
+#if defined(Q_OS_LINUX)
         QVERIFY(!readFile(QStringLiteral("/proc/self/environ")).contains("Sw0rdfish"));
         QVERIFY(!readFile(QStringLiteral("/proc/self/cmdline")).contains("Sw0rdfish"));
+#endif
 
         // Cancelled unlock: no askpass at all, ssh asks as usual.
         QFile::remove(out + QStringLiteral("/environ"));
@@ -528,3 +531,4 @@ int main(int argc, char **argv)
 }
 
 #include "tst_vaultui.moc"
+#include <QtGlobal>

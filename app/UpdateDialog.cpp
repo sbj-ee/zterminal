@@ -1,5 +1,7 @@
 #include "UpdateDialog.hpp"
 
+#include <QtGlobal>
+
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QLocale>
@@ -43,18 +45,30 @@ UpdateDialog::UpdateDialog(const ReleaseInfo &release, const QString &currentVer
     m_notes->setMinimumSize(520, 240);
     layout->addWidget(m_notes, 1);
 
-    const bool installable = release.debAsset() && release.checksumAsset();
+    const auto pkg = release.packageAsset();
+    const bool installable = pkg && release.checksumAsset();
     auto *how = new QLabel;
     how->setObjectName(QStringLiteral("updateInstallNote"));
     how->setWordWrap(true);
     if (installable) {
+#if defined(Q_OS_MACOS)
+        how->setText(QStringLiteral("<small>Install downloads %1 and SHA256SUMS, verifies the SHA256, then opens "
+                                    "the disk image so you can drag <tt>zterminal.app</tt> to Applications.</small>")
+                         .arg(pkg->name.toHtmlEscaped()));
+#else
         how->setText(QStringLiteral("<small>Install downloads %1 and SHA256SUMS, checks the SHA256, then runs "
                                     "<tt>pkexec apt install</tt> (you'll be asked for your password).</small>")
-                         .arg(release.debAsset()->name.toHtmlEscaped()));
+                         .arg(pkg->name.toHtmlEscaped()));
+#endif
     } else {
+#if defined(Q_OS_MACOS)
+        const QString expected = QStringLiteral("zterminal-%1-Darwin.dmg").arg(release.versionString());
+#else
+        const QString expected = QStringLiteral("zterminal_%1_amd64.deb").arg(release.versionString());
+#endif
         how->setText(QStringLiteral("<small>This release has no %1 package with a SHA256SUMS file, so it can't be "
                                     "installed from here. Download it from the release page.</small>")
-                         .arg(QStringLiteral("zterminal_%1_amd64.deb").arg(release.versionString())));
+                         .arg(expected));
     }
     layout->addWidget(how);
 

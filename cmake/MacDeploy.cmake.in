@@ -1,0 +1,87 @@
+# Generated from cmake/MacDeploy.cmake.in. Runs at install time (cpack) on the
+# installed zterminal.app: macdeployqt, drop build rpaths, ad-hoc sign, verify.
+set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/zterminal.app")
+if(NOT EXISTS "${_app}/Contents/MacOS/zterminal")
+  message(FATAL_ERROR "zterminal deploy: ${_app} not found")
+endif()
+
+function(_run)
+  execute_process(COMMAND ${ARGN} RESULT_VARIABLE _rc)
+  if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "zterminal deploy: command failed (${_rc}): ${ARGN}")
+  endif()
+endfunction()
+
+# Ensure askpass is inside the staged bundle (Packaging.cmake also installs it,
+# but a second copy_if_different is harmless and covers build-tree oddities).
+if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/zterminal.app/Contents/MacOS/zterminal-askpass")
+  message(STATUS "zterminal deploy: askpass already in bundle")
+endif()
+
+message(STATUS "zterminal deploy: macdeployqt ${_app}")
+set(_libpath)
+if(NOT "@ZTERMINAL_SODIUM_LIBDIR@" STREQUAL "")
+  set(_libpath "-libpath=@ZTERMINAL_SODIUM_LIBDIR@")
+endif()
+_run("@ZTERMINAL_MACDEPLOYQT@" "${_app}" -always-overwrite -verbose=1 ${_libpath})
+
+# Remove any LC_RPATH that points outside the bundle (Homebrew / build tree),
+# so dyld can only resolve @rpath libraries from Contents/Frameworks.
+file(GLOB_RECURSE _machos LIST_DIRECTORIES false "${_app}/Contents/*")
+foreach(_f IN LISTS _machos)
+  if(IS_SYMLINK "${_f}")
+    continue()
+  endif()
+  execute_process(COMMAND file -b "${_f}" OUTPUT_VARIABLE _kind)
+  if(NOT _kind MATCHES "Mach-O")
+    continue()
+  endif()
+  execute_process(COMMAND otool -l "${_f}" OUTPUT_VARIABLE _loads)
+  string(REGEX MATCHALL "path [^\n]+ \\(offset" _rp "${_loads}")
+  foreach(_line IN LISTS _rp)
+    string(REGEX REPLACE "^path (.+) \\(offset$" "\\1" _p "${_line}")
+    if(NOT _p MATCHES "^@")
+      message(STATUS "zterminal deploy: delete rpath ${_p} from ${_f}")
+      _run(install_name_tool -delete_rpath "${_p}" "${_f}")
+    endif()
+  endforeach()
+
+  # macdeployqt sometimes leaves a copied library's own install name (its
+  # LC_ID_DYLIB) pointing at Homebrew. Point it into the bundle.
+  execute_process(COMMAND otool -D "${_f}" OUTPUT_VARIABLE _d)
+  set(_id "")
+  if(_d MATCHES "\n([^\n]+)")
+    string(STRIP "${CMAKE_MATCH_1}" _id)
+  endif()
+  if(_id AND NOT _id MATCHES "^@")
+    file(RELATIVE_PATH _rel "${_app}/Contents/MacOS" "${_f}")
+    message(STATUS "zterminal deploy: id ${_id} -> @executable_path/${_rel}")
+    _run(install_name_tool -id "@executable_path/${_rel}" "${_f}")
+  endif()
+
+  # Safety net: any dependency still pointing outside the bundle is redirected
+  # to the bundled copy of the same library, if there is one.
+  execute_process(COMMAND otool -L "${_f}" OUTPUT_VARIABLE _deps)
+  string(REGEX MATCHALL "\t(/opt/homebrew|/usr/local)[^ ]+" _ext "${_deps}")
+  foreach(_dep IN LISTS _ext)
+    string(STRIP "${_dep}" _dep)
+    if(_dep STREQUAL _id)
+      continue()
+    endif()
+    set(_target "")
+    if(_dep MATCHES "([^/]+\\.framework/.+)$")
+      set(_target "${CMAKE_MATCH_1}")
+    else()
+      get_filename_component(_target "${_dep}" NAME)
+    endif()
+    if(EXISTS "${_app}/Contents/Frameworks/${_target}")
+      message(STATUS "zterminal deploy: ${_f}: ${_dep} -> bundled ${_target}")
+      _run(install_name_tool -change "${_dep}" "@executable_path/../Frameworks/${_target}" "${_f}")
+    endif()
+  endforeach()
+endforeach()
+
+message(STATUS "zterminal deploy: ad-hoc codesign")
+_run(codesign --force --deep -s - "${_app}")
+_run(codesign --verify --deep --strict --verbose=2 "${_app}")
+_run(bash "@ZTERMINAL_CHECK_BUNDLE@" "${_app}")

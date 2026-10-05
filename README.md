@@ -74,14 +74,17 @@ and milestones.
 - Updates (0.10.0): Help > Check for Updates, plus a quiet check at startup at most once a
   day (Settings > Preferences > "Check for updates at startup"). It asks the public GitHub
   Releases API for sbj-ee/zterminal. A newer release shows its notes with Install, Later and
-  Skip This Version. Install downloads the `.deb` and `SHA256SUMS`, refuses on a checksum
-  mismatch, runs `pkexec apt install -y ./zterminal_X_amd64.deb` (polkit asks for your
-  password) and offers a restart, warning first if sessions are still live. Without pkexec,
-  or when running from a build tree, it opens the release page and leaves the verified
-  `.deb` in place.
+  Skip This Version. On Linux, Install downloads the `.deb` and `SHA256SUMS`, refuses on a
+  checksum mismatch, runs `pkexec apt install -y ./zterminal_X_amd64.deb` (polkit asks for
+  your password) and offers a restart, warning first if sessions are still live. On macOS,
+  Install downloads `zterminal-X-Darwin.dmg` and `SHA256SUMS`, verifies the checksum, then
+  opens the disk image so you can drag `zterminal.app` to Applications (no automated replace).
+  Without pkexec (Linux), or when running from a build tree, it opens the release page and
+  leaves the verified package in place.
 
 Releases are published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed:
-`zterminal_X.Y.Z_amd64.deb` and `SHA256SUMS` (check with `sha256sum -c SHA256SUMS`).
+`zterminal_X.Y.Z_amd64.deb`, `zterminal-X.Y.Z-Darwin.dmg`, and `SHA256SUMS` listing both
+(check with `sha256sum -c SHA256SUMS`). Apple Silicon only (macOS 14+ / arm64).
 
 ## Usage
 

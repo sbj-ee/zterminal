@@ -1,8 +1,12 @@
 # Publish a release when a v* tag is pushed (e.g. `git push origin v0.10.0`):
-# build + test on Ubuntu 24.04, package the .deb, write SHA256SUMS and create
-# the GitHub Release with both files. The in-app updater (Help > Check for
-# Updates) reads releases/latest and needs exactly these two assets:
-#   zterminal_<version>_amd64.deb and SHA256SUMS.
+# build + test on Ubuntu 24.04 and macOS 14, package .deb + .dmg, write
+# SHA256SUMS (lists both assets so the Linux updater still finds its .deb line)
+# and create the GitHub Release.
+#
+# In-app updater:
+#   Linux: downloads zterminal_<version>_amd64.deb + SHA256SUMS, pkexec apt install
+#   macOS: downloads zterminal-<version>-Darwin.dmg + SHA256SUMS, opens the .dmg
+#          for a drag-to-Applications install (no automated replace).
 name: Release
 
 on:
@@ -17,8 +21,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish ${{ github.ref_name }}
+  linux:
+    name: Build Linux ${{ github.ref_name }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -50,7 +54,7 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-      - name: Package .deb and SHA256SUMS
+      - name: Package .deb
         run: |
           cd build
           cpack -G DEB
@@ -58,27 +62,112 @@ jobs:
           test -f "$deb"
           dpkg-deb -I "$deb"
           dpkg-deb -c "$deb" | grep -q './usr/bin/zterminal$'
-          sha256sum "$deb" > SHA256SUMS
-          cat SHA256SUMS
-          sha256sum -c SHA256SUMS
+          sha256sum "$deb" > SHA256SUMS.linux
+          cat SHA256SUMS.linux
 
-      - name: Create GitHub Release
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: zterminal-release-linux
+          path: |
+            build/zterminal_*_amd64.deb
+            build/SHA256SUMS.linux
+          if-no-files-found: error
+
+  macos:
+    name: Build macOS ${{ github.ref_name }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt + build tools (brew)
+        run: brew install qt cmake ninja libsodium pkg-config socat
+
+      - name: Configure arm64
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+
+      - name: Tag must match project() VERSION
+        run: |
+          version=$(sed -n 's/.*CMAKE_PROJECT_VERSION:STATIC=//p' build/CMakeCache.txt)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$GITHUB_REF_NAME project=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match project(zterminal VERSION $version) in CMakeLists.txt"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package .dmg
+        run: |
+          cd build
+          cpack -G DragNDrop
+          dmg="zterminal-${VERSION}-Darwin.dmg"
+          test -f "$dmg"
+          shasum -a 256 "$dmg" | sed 's/  /  /' > SHA256SUMS.macos
+          cat SHA256SUMS.macos
+
+      - name: Verify .dmg
+        run: |
+          set -euo pipefail
+          dmg=$(ls build/zterminal-*-Darwin.dmg)
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          trap 'hdiutil detach "$mnt" -quiet || true' EXIT
+          test -d "$mnt/zterminal.app"
+          tools/macos/check-bundle.sh "$mnt/zterminal.app"
+          codesign --verify --deep --strict --verbose=2 "$mnt/zterminal.app"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: zterminal-release-macos
+          path: |
+            build/zterminal-*-Darwin.dmg
+            build/SHA256SUMS.macos
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ github.ref_name }}
+    needs: [linux, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+
+      - name: Assemble SHA256SUMS and create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd build
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p out
+          cp dist/zterminal-release-linux/zterminal_${version}_amd64.deb out/
+          cp dist/zterminal-release-macos/zterminal-${version}-Darwin.dmg out/
+          # Combined checksums: Linux updater greps for its .deb line; macOS for .dmg.
+          {
+            cat dist/zterminal-release-linux/SHA256SUMS.linux
+            cat dist/zterminal-release-macos/SHA256SUMS.macos
+          } > out/SHA256SUMS
+          cat out/SHA256SUMS
+          (cd out && sha256sum -c SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" \
-            "zterminal_${VERSION}_amd64.deb" SHA256SUMS \
+            "out/zterminal_${version}_amd64.deb" \
+            "out/zterminal-${version}-Darwin.dmg" \
+            out/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
-            --title "zterminal $VERSION" \
+            --title "zterminal $version" \
             --generate-notes \
             --verify-tag
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: zterminal-release
-          path: |
-            build/zterminal_*_amd64.deb
-            build/SHA256SUMS
-          if-no-files-found: error

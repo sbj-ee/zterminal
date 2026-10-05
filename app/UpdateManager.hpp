@@ -21,7 +21,7 @@ class UpdateDialog;
 
 // One per process: Help > Check for Updates, the automatic check shortly
 // after startup (Preferences, at most once a day), the dialog and the install:
-// download .deb + SHA256SUMS -> verify -> pkexec apt install -y ./<deb> -> restart.
+// download package + SHA256SUMS -> verify -> install (Linux: pkexec apt; macOS: open .dmg) -> restart.
 // Every dialog is opened non-modally-blocking (open(), not exec()) so the flow
 // is testable; objectNames: updateDialog, updateProgress, updateMessage,
 // updateRestart.

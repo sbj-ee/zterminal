@@ -59,6 +59,10 @@ struct ReleaseInfo {
     // zterminal_<version>_amd64.deb for this release's version (also accepts the
     // Debian spelling of a prerelease, 1.0.0~rc1); nullopt when missing.
     std::optional<ReleaseAsset> debAsset() const;
+    // zterminal-<version>-Darwin.dmg (Apple Silicon DragNDrop package).
+    std::optional<ReleaseAsset> dmgAsset() const;
+    // Platform package: .deb on Linux, .dmg on macOS.
+    std::optional<ReleaseAsset> packageAsset() const;
     std::optional<ReleaseAsset> checksumAsset() const; // "SHA256SUMS"
     QString versionString() const { return version.toString(); }
 };

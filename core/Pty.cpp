@@ -8,7 +8,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include <util.h>   // openpty / forkpty
+#else
 #include <pty.h>
+#endif
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>

@@ -1,6 +1,7 @@
-# Build, test and package zterminal on Ubuntu 24.04 (Linux amd64 only).
-# Version comes from CMake project() -> PROJECT_VERSION; the .deb is
-# zterminal_<version>_amd64.deb.
+# Build, test and package zterminal on Ubuntu 24.04 (Linux amd64) and
+# macOS 14 (Apple Silicon). Version comes from CMake project() ->
+# PROJECT_VERSION; artifacts are zterminal_<version>_amd64.deb and
+# zterminal-<version>-Darwin.dmg.
 name: CI
 
 on:
@@ -10,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   linux:
@@ -66,4 +71,76 @@ jobs:
         with:
           name: zterminal-deb
           path: build/zterminal_*_amd64.deb
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt + build tools (brew)
+        run: |
+          brew install qt cmake ninja libsodium pkg-config socat
+          # Homebrew's `qt` formula ships QtSerialPort; confirm for the log.
+          ls "$(brew --prefix qt)/lib" | grep -i SerialPort || \
+            ls "$(brew --prefix qt)/lib/cmake" | grep -i SerialPort
+
+      - name: Configure arm64
+        run: |
+          # CMAKE_OSX_ARCHITECTURES=arm64 is also forced in CMakeLists before project()
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          # Linux-only: tst_globalmenu needs xvfb + DBus AppMenu; skip expectation here.
+          if ctest --test-dir build -N | grep -q tst_globalmenu; then
+            echo "::error::tst_globalmenu should not be built on macOS"
+            exit 1
+          fi
+          ctest --test-dir build --output-on-failure
+          # Serial via socat must run, not skip.
+          ctest --test-dir build -R 'tst_serial' -V | tee serial.log | grep -E 'PASS|SKIP|FAIL|Totals'
+          ! grep -q 'SKIP ' serial.log
+          ctest --test-dir build -N | grep -q tst_vaultshared
+          ctest --test-dir build -R 'tst_vault|tst_askpass|tst_sessionlog|tst_logui|tst_pasteguard|tst_safepaste|tst_tabs|tst_scrollback|tst_find|tst_scrollbench|tst_reconnect|tst_update' -V | tee vault.log | grep -E 'PASS|SKIP|FAIL|Totals|production KDF|BENCH'
+          ! grep -q 'SKIP ' vault.log
+
+      - name: Package .dmg (zterminal.app, macdeployqt, ad-hoc sign)
+        run: |
+          cd build
+          cpack -G DragNDrop
+          ls -la *.dmg
+
+      - name: Verify .dmg contents (no Homebrew references, signature)
+        run: |
+          set -euo pipefail
+          dmg=$(ls build/zterminal-*-Darwin.dmg)
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          trap 'hdiutil detach "$mnt" -quiet || true' EXIT
+          ls -la "$mnt"
+          test -d "$mnt/zterminal.app"
+          test -L "$mnt/Applications"
+          plutil -p "$mnt/zterminal.app/Contents/Info.plist"
+          file "$mnt/zterminal.app/Contents/MacOS/zterminal" | tee /tmp/zt-arch.txt
+          grep -q 'arm64' /tmp/zt-arch.txt
+          test -x "$mnt/zterminal.app/Contents/MacOS/zterminal-askpass"
+          tools/macos/check-bundle.sh "$mnt/zterminal.app"
+          codesign --verify --deep --strict --verbose=2 "$mnt/zterminal.app"
+          codesign -dv "$mnt/zterminal.app" 2>&1 | grep -E "Identifier|Signature|Format"
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: zterminal-macos-arm64-dmg
+          path: build/zterminal-*-Darwin.dmg
           if-no-files-found: error

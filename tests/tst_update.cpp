@@ -243,6 +243,24 @@ private slots:
         QCOMPARE(r->debAsset()->name, QStringLiteral("zterminal_0.10.0_amd64.deb"));
         QCOMPARE(r->debAsset()->size, qint64(4096));
         QVERIFY(r->checksumAsset());
+        QVERIFY(!r->dmgAsset()); // Linux fixture has no Darwin asset
+        QVERIFY(r->packageAsset());
+        QCOMPARE(r->packageAsset()->name, r->debAsset()->name);
+
+        // Darwin .dmg naming used by CPack DragNDrop / macOS updater.
+        {
+            const auto withDmg = ReleaseInfo::fromJson(QByteArrayLiteral(
+                "{"tag_name":"v0.10.0","draft":false,"prerelease":false,"assets":["
+                "{"name":"zterminal-0.10.0-Darwin.dmg","size":99,"
+                ""browser_download_url":"https://example.test/zterminal-0.10.0-Darwin.dmg"},"
+                "{"name":"SHA256SUMS","size":10,"
+                ""browser_download_url":"https://example.test/SHA256SUMS"}]}"));
+            QVERIFY(withDmg);
+            QVERIFY(withDmg->dmgAsset());
+            QCOMPARE(withDmg->dmgAsset()->name, QStringLiteral("zterminal-0.10.0-Darwin.dmg"));
+            QCOMPARE(withDmg->dmgAsset()->size, qint64(99));
+            QVERIFY(withDmg->checksumAsset());
+        }
 
         // Missing .deb for amd64 (an arm64 one doesn't count).
         const auto noDeb = ReleaseInfo::fromJson(fixture(QStringLiteral("release-no-deb.json")));

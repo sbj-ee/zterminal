@@ -1,5 +1,7 @@
 #include "UpdateManager.hpp"
 
+#include <QtGlobal>
+
 #include "MainWindow.hpp"
 #include "UpdateDialog.hpp"
 #include "version.hpp"
@@ -245,14 +247,34 @@ void UpdateManager::onDownloadFinished(bool ok, const QString &debPath, const QS
 
 void UpdateManager::runInstaller()
 {
-    const QString debName = QFileInfo(m_debPath).fileName();
+    const QString pkgName = QFileInfo(m_debPath).fileName();
     QString program;
     QStringList args;
     if (!m_testProgram.isEmpty()) {
         program = m_testProgram;
         args = m_testArgs;
-        args << debName;
+        args << pkgName;
     } else {
+#if defined(Q_OS_MACOS)
+        // macOS: open the verified .dmg so the user can drag zterminal.app to
+        // Applications. Automated replacement of a signed app bundle is out of
+        // scope (no pkexec/apt equivalent here).
+        setStage(Stage::Installing);
+        const QUrl dmgUrl = QUrl::fromLocalFile(m_debPath);
+        if (!QDesktopServices::openUrl(dmgUrl)) {
+            fallback(QStringLiteral("Couldn't open %1. Open it from Finder and drag zterminal.app to Applications.")
+                         .arg(m_debPath));
+            return;
+        }
+        setStage(Stage::Done);
+        m_lastMessage = QStringLiteral(
+            "zterminal %1 was downloaded and verified. The disk image is open — drag "
+            "zterminal.app to Applications, then quit and reopen zterminal.")
+                            .arg(m_release.tag);
+        message(QStringLiteral("Update Ready"), m_lastMessage, false);
+        emit installFinished(true, m_lastMessage);
+        return;
+#else
         // Only replace a packaged install; a build-tree or /usr/local binary
         // wouldn't be the one apt updates.
         if (QCoreApplication::applicationFilePath() != kInstalledBinary) {
@@ -261,17 +283,18 @@ void UpdateManager::runInstaller()
                          .arg(QCoreApplication::applicationFilePath()));
             return;
         }
-        const QStringList cmd = installCommand(debName);
+        const QStringList cmd = installCommand(pkgName);
         if (QStandardPaths::findExecutable(cmd.at(0)).isEmpty() || QStandardPaths::findExecutable(cmd.at(1)).isEmpty()) {
             fallback(QStringLiteral("pkexec or apt isn't available, so the package can't be installed from here."));
             return;
         }
         program = cmd.at(0);
         args = cmd.mid(1);
+#endif
     }
     setStage(Stage::Installing);
     m_progress = new QProgressDialog(
-        QStringLiteral("Installing %1\u2026\nEnter your password in the system prompt.").arg(debName), QString(), 0, 0,
+        QStringLiteral("Installing %1\u2026\nEnter your password in the system prompt.").arg(pkgName), QString(), 0, 0,
         m_parent);
     m_progress->setObjectName(QStringLiteral("updateProgress"));
     m_progress->setWindowTitle(QStringLiteral("Updating zterminal"));
@@ -380,10 +403,17 @@ void UpdateManager::fallback(const QString &why)
     if (m_tmp) {
         m_tmp->setAutoRemove(false); // keep the verified package for a manual install
     }
+#if defined(Q_OS_MACOS)
+    const QString text =
+        QStringLiteral("%1\n\nThe verified package is at:\n%2\n\nOpen the .dmg and drag zterminal.app to "
+                       "Applications.\n\nOpening the release page.")
+            .arg(why, m_debPath);
+#else
     const QString text =
         QStringLiteral("%1\n\nThe verified package is at:\n%2\n\nInstall it with:\nsudo apt install %2\n\n"
                        "Opening the release page.")
             .arg(why, m_debPath);
+#endif
     m_lastMessage = text;
     if (!m_release.htmlUrl.isEmpty() && m_testProgram.isEmpty()) {
         QDesktopServices::openUrl(QUrl(m_release.htmlUrl));
