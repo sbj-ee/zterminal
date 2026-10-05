@@ -208,6 +208,93 @@ private slots:
         t.feed("\x1b[?1h"); // DECCKM: application cursor keys
         QCOMPARE(collect(t, [&t]() { t.sendKey(VTERM_KEY_UP, VTERM_MOD_NONE); }), QByteArray("\x1bOA"));
     }
+
+    void cursorDefaultsToBlinkingBar()
+    {
+        Terminal t(5, 20);
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.cursorBlink());
+        QCOMPARE(t.defaultCursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.defaultCursorBlink());
+        t.feed("hello\r\n");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.cursorBlink());
+    }
+
+    void programCursorStyleIsHonouredAndDefaultRestores()
+    {
+        Terminal t(5, 20);
+        QSignalSpy damaged(&t, &Terminal::damaged);
+        t.feed("\x1b[2 q"); // DECSCUSR 2: steady block
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+        QVERIFY(!t.cursorBlink());
+        QVERIFY(damaged.count() > 0); // the view repaints the cursor
+        t.feed("\x1b[0 q"); // DECSCUSR 0: back to the user's default, not libvterm's block
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.cursorBlink());
+        t.feed("\x1b[4 q");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_UNDERLINE));
+        t.feed("\x1b[ q"); // DECSCUSR with no parameter (what Neovim sends on exit)
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        t.feed("\x1b[1 q"); // DECSCUSR 1 explicitly asks for a blinking block
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+        QVERIFY(t.cursorBlink());
+        t.feed("\x1b[6 q\x1b[?12l"); // steady bar, then DECRST 12 (blink off)
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(!t.cursorBlink());
+        t.feed("\x1b[?12h");
+        QVERIFY(t.cursorBlink());
+        // Order within one chunk matters: the later request wins.
+        t.feed("\x1b[0 q\x1b[2 q");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+        t.feed("\x1b[2 q\x1b[0 qtext");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QCOMPARE(t.lineText(0), QStringLiteral("text"));
+    }
+
+    void cursorDefaultRestoreSurvivesSplitChunks()
+    {
+        Terminal t(5, 20);
+        t.feed("\x1b[2 q");
+        t.feed("ab\x1b");
+        t.feed("[");
+        t.feed("0");
+        t.feed(" ");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+        t.feed("qcd");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.cursorBlink());
+        QCOMPARE(t.lineText(0), QStringLiteral("abcd"));
+        // Lookalikes don't reset the style.
+        t.feed("\x1b[2 q\x1b[3q\x1b[10 q\x1b[0;1 q\x1b[0 p");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+    }
+
+    void resetRestoresDefaultCursor()
+    {
+        Terminal t(5, 20);
+        t.feed("\x1b[4 q");
+        t.feed("\x1b" "c"); // RIS from the program (`reset`, `tput reset`)
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.cursorBlink());
+        t.feed("\x1b[2 q");
+        t.reset(); // Terminal > Reset
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BAR_LEFT));
+        QVERIFY(t.cursorBlink());
+    }
+
+    void defaultCursorStyleIsConfigurable()
+    {
+        Terminal t(5, 20);
+        t.setDefaultCursorStyle(VTERM_PROP_CURSORSHAPE_BLOCK, false);
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+        QVERIFY(!t.cursorBlink());
+        t.feed("\x1b[6 q\x1b[ q");
+        QCOMPARE(t.cursorShape(), int(VTERM_PROP_CURSORSHAPE_BLOCK));
+        QVERIFY(!t.cursorBlink());
+        t.setDefaultCursorStyle(99, true); // out of range -> built-in default shape
+        QCOMPARE(t.cursorShape(), int(Terminal::kDefaultCursorShape));
+    }
 };
 
 QTEST_GUILESS_MAIN(TstTerminal)

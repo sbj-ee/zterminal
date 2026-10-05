@@ -146,9 +146,21 @@ TerminalView::TerminalView(Terminal *term, QWidget *parent)
     f.setPointSize(11);
     setTerminalFont(f);
 
+    const int flash = QGuiApplication::styleHints()->cursorFlashTime();
+    m_blinkTimer.setInterval(flash > 0 ? flash / 2 : 0);
+    connect(&m_blinkTimer, &QTimer::timeout, this, [this]() {
+        m_blinkOn = !m_blinkOn;
+        viewport()->update(cursorRect());
+    });
+
     connect(m_term, &Terminal::damaged, this, [this]() {
         updateScrollBar();
         viewport()->update();
+        if (m_term->cursorPos() != m_lastCursorPos) {
+            m_lastCursorPos = m_term->cursorPos();
+            restartBlink();
+        }
+        updateBlink();
     });
     connect(m_term, &Terminal::scrolledIntoHistory, this, &TerminalView::onScrolledIntoHistory);
     connect(m_term, &Terminal::scrollbackCleared, this, [this]() {
@@ -333,22 +345,67 @@ CellPos TerminalView::cellAt(const QPoint &pos, bool roundToBoundary) const
     return {firstVisibleLine() + row, col};
 }
 
-void TerminalView::paintEvent(QPaintEvent *)
+QRect TerminalView::cursorRect() const
+{
+    const QPoint cur = m_term->cursorPos();
+    const int row = m_term->scrollbackLines() + cur.y() - firstVisibleLine();
+    if (row < 0 || row >= m_term->rows()) {
+        return {};
+    }
+    // Two cells wide so a wide character under a block cursor repaints whole.
+    return {kMargin + cur.x() * m_cellW, kMargin + row * m_cellH, 2 * m_cellW, m_cellH};
+}
+
+void TerminalView::updateBlink()
+{
+    const bool blink = m_focused && m_term->cursorBlink() && m_term->cursorVisible()
+        && m_blinkTimer.interval() > 0;
+    if (blink == m_blinkTimer.isActive()) {
+        return;
+    }
+    m_blinkOn = true;
+    if (blink) {
+        m_blinkTimer.start();
+    } else {
+        m_blinkTimer.stop();
+    }
+    viewport()->update(cursorRect());
+}
+
+void TerminalView::restartBlink()
+{
+    if (!m_blinkTimer.isActive()) {
+        return;
+    }
+    if (!m_blinkOn) {
+        m_blinkOn = true;
+        viewport()->update(cursorRect());
+    }
+    m_blinkTimer.start();
+}
+
+void TerminalView::paintEvent(QPaintEvent *e)
 {
     QPainter p(viewport());
     const ColorScheme &scheme = m_term->colorScheme();
-    p.fillRect(viewport()->rect(), QColor(scheme.background));
+    const QRect dirty = e->rect();
+    p.fillRect(dirty, QColor(scheme.background));
 
     const int first = firstVisibleLine();
     const int rows = m_term->rows();
+    // Only the rows the update touches (a cursor blink repaints one cell).
+    const int paintFrom = std::clamp((dirty.top() - kMargin) / m_cellH, 0, rows);
+    const int paintTo = std::clamp((dirty.bottom() - kMargin) / m_cellH + 1, paintFrom, rows);
     const int cols = m_term->cols();
     const QPoint cur = m_term->cursorPos();
     const int cursorLine = m_term->scrollbackLines() + cur.y();
+    // Blinking: drawn in the "on" half only. The hollow unfocused cursor never blinks.
+    const bool cursorShown = m_term->cursorVisible() && (m_blinkOn || !m_focused);
 
     // Find matches on the visible lines: binary search to the first one.
-    auto matchIt = std::lower_bound(m_findMatches.begin(), m_findMatches.end(), first,
+    auto matchIt = std::lower_bound(m_findMatches.begin(), m_findMatches.end(), first + paintFrom,
                                     [](const FindMatch &m, int line) { return m.line < line; });
-    for (int row = 0; row < rows; ++row) {
+    for (int row = paintFrom; row < paintTo; ++row) {
         const int line = first + row;
         const int y = kMargin + row * m_cellH;
         const auto rowBegin = matchIt;
@@ -364,7 +421,7 @@ void TerminalView::paintEvent(QPaintEvent *)
             const int x = kMargin + col * m_cellW;
             const int w = m_cellW * std::max(1, c.width);
             const bool selected = m_selection.contains(line, col);
-            const bool isCursor = m_term->cursorVisible() && line == cursorLine && col == cur.x()
+            const bool isCursor = cursorShown && line == cursorLine && col == cur.x()
                 && m_focused && m_term->cursorShape() == VTERM_PROP_CURSORSHAPE_BLOCK;
             QRgb fg = c.fg;
             QRgb bg = c.bg;
@@ -411,7 +468,7 @@ void TerminalView::paintEvent(QPaintEvent *)
     }
 
     // Non-block cursor shapes, and the hollow cursor when unfocused.
-    if (m_term->cursorVisible() && cursorLine >= first && cursorLine < first + rows) {
+    if (cursorShown && cursorLine >= first && cursorLine < first + rows) {
         const int x = kMargin + cur.x() * m_cellW;
         const int y = kMargin + (cursorLine - first) * m_cellH;
         p.setPen(QColor(scheme.cursor));
@@ -447,6 +504,7 @@ bool TerminalView::focusNextPrevChild(bool)
 void TerminalView::focusInEvent(QFocusEvent *e)
 {
     m_focused = true;
+    updateBlink();
     viewport()->update();
     QAbstractScrollArea::focusInEvent(e);
 }
@@ -454,6 +512,7 @@ void TerminalView::focusInEvent(QFocusEvent *e)
 void TerminalView::focusOutEvent(QFocusEvent *e)
 {
     m_focused = false;
+    updateBlink();
     viewport()->update();
     QAbstractScrollArea::focusOutEvent(e);
 }
@@ -488,6 +547,7 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
     }
 
     scrollToBottom();
+    restartBlink(); // keep the cursor solid while typing
     const VTermModifier vmod = vtermMods(mods & ~Qt::KeypadModifier);
 
     const VTermKey vk = vtermKey(key);

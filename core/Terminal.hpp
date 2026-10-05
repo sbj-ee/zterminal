@@ -82,7 +82,19 @@ public:
 
     QPoint cursorPos() const; // x = col, y = screen row
     bool cursorVisible() const { return m_cursorVisible; }
+    // VTERM_PROP_CURSORSHAPE_BLOCK/UNDERLINE/BAR_LEFT and blink, as currently in
+    // effect: the default style below unless the program changed it (DECSCUSR,
+    // DECSET 12).
     int cursorShape() const { return m_cursorShape; }
+    bool cursorBlink() const { return m_cursorBlink; }
+    // The user's cursor style: used at start-up, after a reset (RIS / reset())
+    // and whenever the program asks for "the default" (DECSCUSR 0, ESC[ q),
+    // which libvterm would otherwise turn into a blinking block.
+    static constexpr int kDefaultCursorShape = VTERM_PROP_CURSORSHAPE_BAR_LEFT;
+    static constexpr bool kDefaultCursorBlink = true;
+    void setDefaultCursorStyle(int shape, bool blink);
+    int defaultCursorShape() const { return m_defaultCursorShape; }
+    bool defaultCursorBlink() const { return m_defaultCursorBlink; }
     bool altScreen() const { return m_altScreen; }
     // VTERM_PROP_MOUSE_NONE/CLICK/DRAG/MOVE: whether the program grabbed the mouse.
     int mouseMode() const { return m_mouseMode; }
@@ -125,6 +137,8 @@ private:
     Cell convert(const VTermScreenCell &c) const;
     QRgb resolve(const VTermColor &c, bool isFg) const;
     void applySchemeToVterm();
+    void applyDefaultCursorStyle();
+    bool scanForCursorReset(char c);
     void flush();
 
     VTerm *m_vt = nullptr;
@@ -143,7 +157,13 @@ private:
     ColorScheme m_scheme;
     VTermPos m_cursor{0, 0};
     bool m_cursorVisible = true;
-    int m_cursorShape = VTERM_PROP_CURSORSHAPE_BLOCK;
+    int m_cursorShape = kDefaultCursorShape;
+    bool m_cursorBlink = kDefaultCursorBlink;
+    int m_defaultCursorShape = kDefaultCursorShape;
+    bool m_defaultCursorBlink = kDefaultCursorBlink;
+    // feed() watches for DECSCUSR 0 (ESC [ 0* SP q) and RIS (ESC c), across chunks.
+    enum class ResetScan : quint8 { Ground, Esc, Csi, CsiSpace };
+    ResetScan m_resetScan = ResetScan::Ground;
     bool m_altScreen = false;
     mutable bool m_probing = false;
     mutable QByteArray m_probeOut;
