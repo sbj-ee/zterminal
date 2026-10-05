@@ -202,14 +202,41 @@ private slots:
         QVERIFY(store.save(sshSession()));
 
         // Any master-password dialog, wherever it comes from, is counted.
+        // Prefer activeModalWidget; on macOS/offscreen a WindowModal unlock
+        // parented to a SessionWidget in a non-active window may not appear
+        // there, so also scan top-level widgets.
         watcher.setInterval(10);
         connect(&watcher, &QTimer::timeout, this, [this]() {
-            QWidget *m = QApplication::activeModalWidget();
-            auto *d = qobject_cast<UnlockVaultDialog *>(m);
+            auto findUnlock = []() -> UnlockVaultDialog * {
+                if (auto *d = qobject_cast<UnlockVaultDialog *>(QApplication::activeModalWidget())) {
+                    return d;
+                }
+                for (QWidget *w : QApplication::topLevelWidgets()) {
+                    if (auto *d = qobject_cast<UnlockVaultDialog *>(w)) {
+                        return d;
+                    }
+                }
+                return nullptr;
+            };
+            auto findCreate = []() -> CreateVaultDialog * {
+                if (auto *c = qobject_cast<CreateVaultDialog *>(QApplication::activeModalWidget())) {
+                    return c;
+                }
+                for (QWidget *w : QApplication::topLevelWidgets()) {
+                    if (auto *c = qobject_cast<CreateVaultDialog *>(w)) {
+                        return c;
+                    }
+                }
+                return nullptr;
+            };
+            UnlockVaultDialog *d = findUnlock();
             if (!d || d->property("zt-seen").toBool()) {
-                if (auto *c = qobject_cast<CreateVaultDialog *>(m)) {
-                    ++prompts;
-                    c->reject();
+                if (CreateVaultDialog *c = findCreate()) {
+                    if (!c->property("zt-seen").toBool()) {
+                        c->setProperty("zt-seen", true);
+                        ++prompts;
+                        c->reject();
+                    }
                 }
                 return;
             }

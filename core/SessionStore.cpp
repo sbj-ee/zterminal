@@ -1,5 +1,7 @@
 #include "SessionStore.hpp"
 
+#include "ConfigPaths.hpp"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -73,8 +75,7 @@ SessionStore::SessionStore(const QString &directory)
 
 QString SessionStore::defaultDirectory()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-        + QStringLiteral("/zterminal/sessions");
+    return configHome() + QStringLiteral("/zterminal/sessions");
 }
 
 QString SessionStore::filePathFor(const QString &name) const

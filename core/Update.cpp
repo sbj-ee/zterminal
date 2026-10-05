@@ -1,5 +1,7 @@
 #include "Update.hpp"
 
+#include "ConfigPaths.hpp"
+
 #include <QtGlobal>
 
 #include <QCryptographicHash>
@@ -293,8 +295,7 @@ QString ChecksumResult::message() const
 
 QString UpdateState::filePath()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-        + QStringLiteral("/zterminal/update-state.ini");
+    return configHome() + QStringLiteral("/zterminal/update-state.ini");
 }
 
 UpdateState UpdateState::load()

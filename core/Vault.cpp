@@ -1,5 +1,7 @@
 #include "Vault.hpp"
 
+#include "ConfigPaths.hpp"
+
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -109,8 +111,7 @@ Vault::~Vault()
 
 QString Vault::defaultPath()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-        + QStringLiteral("/zterminal/vault.bin");
+    return configHome() + QStringLiteral("/zterminal/vault.bin");
 }
 
 bool Vault::exists() const
