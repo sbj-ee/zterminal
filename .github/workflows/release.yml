@@ -1,4 +1,4 @@
-# Publish a release when a v* tag is pushed (e.g. `git push origin v0.10.0`):
+# Publish a release when a v* tag is pushed (e.g. `git push origin v1.0.0`):
 # build + test on Ubuntu 24.04 and macOS 14, package .deb + .dmg, write
 # SHA256SUMS (lists both assets so the Linux updater still finds its .deb line)
 # and create the GitHub Release.

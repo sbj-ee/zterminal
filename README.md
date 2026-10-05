@@ -1,108 +1,109 @@
 # zterminal
 
-A PuTTY-like terminal emulator for Linux, built with C++20, Qt 6 Widgets, and
+<img src="assets/icons/zterminal-256.png" alt="zterminal icon" width="128" height="128" align="right">
+
+A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**,
+built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-![zterminal 0.1.0 running a colour test, with a selection highlighted](docs/screenshot.png)
+**1.0.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
+vault, session logging, safe paste, Find, keepalive/reconnect, and in-app updates.
+See [docs/PLAN.md](docs/PLAN.md) for design notes.
 
-**Status:** early development (0.1.0, unreleased). See [docs/PLAN.md](docs/PLAN.md) for the plan
-and milestones.
+![zterminal running a colour test, with a selection highlighted](docs/screenshot.png)
 
-## What works today
+## Features
 
-- Local shell in a PTY (`$SHELL`), with `TERM=xterm-256color` and `COLORTERM=truecolor`
-- xterm-style emulation via libvterm: 16, 256 and 24-bit colour, bold, italic, underline,
-  reverse, strike, alternate screen, wide characters, bracketed paste, and the 1000/1002/1003/1006
-  mouse modes
-- Scrollback (0.8.0): 100,000 lines per tab by default, or Unlimited (Preferences), stored
-  compactly and zlib-compressed (about 3 MB per 100,000 lines of colourful log output);
-  wheel, scroll bar, Shift+PgUp/PgDn/Home/End
-- Mouse, PuTTY/X11 style:
-  - left-drag selects, and releasing **copies to PRIMARY and CLIPBOARD**
-  - double-click selects a word, triple-click a line
-  - **right-click pastes CLIPBOARD**
-  - **Ctrl+right-click opens the menu** (plain right-click never shows a menu)
-  - **middle-click** is configurable: paste PRIMARY (default), paste CLIPBOARD, or off
-  - when a program grabs the mouse (vim, htop, tmux), **hold Shift** to select or paste locally
-- Menu bar: File, Edit, View, Session, Settings, Help. Items that aren't implemented yet are
-  shown greyed out.
-- App shortcuts use Ctrl+Shift+… (Copy Ctrl+Shift+C, Paste Ctrl+Shift+V, …) plus F11 and
-  Shift+Insert, so plain Ctrl+C, Ctrl+W and the F-keys still reach the program.
-- Window title `zterminal <version> — <session>` (the active tab's). The version comes from CMake.
-- Tabs (0.7.0): each tab is its own local, SSH or serial session. New Tab Ctrl+Shift+T, Close
-  Tab Ctrl+Shift+W, Next/Previous Ctrl+PgDn/Ctrl+PgUp (or Ctrl+Shift+] / [). Opening a session
-  from File > New Session / Open Saved Session (or Duplicate) adds a tab. Closing a tab or
-  window with a running session asks first. Logging, the REC marker, stored passwords and the
-  paste confirmation work per tab. No split panes.
-- `zt` launcher: starts zterminal detached from your shell
-- Saved sessions (0.2.0): local shell or SSH, via a PuTTY-style dialog (File > New Session,
-  Open Saved Session, Save Session). SSH runs the system `ssh` with a validated argv
-  (no shell). Session files never contain passwords. **Export / Import Sessions** (File menu
-  or the session dialog) writes a re-importable JSON file (`format: zterminal-sessions`);
-  vault passwords are never included — only a `passwordStored` flag for SSH.
+- **Local / SSH / serial sessions** in tabs. Local shell runs `$SHELL` with
+  `TERM=xterm-256color` and `COLORTERM=truecolor`. SSH uses the system `ssh` with a
+  validated argv (no shell). Serial uses QSerialPort (9600 8N1 by default).
+- **xterm-style emulation** via libvterm: 16 / 256 / truecolor, bold, italic,
+  underline, reverse, strike, alternate screen, wide characters, bracketed paste,
+  and mouse modes 1000/1002/1003/1006.
+- **Blinking vertical-bar cursor** by default; programs can still change the shape
+  and blink via terminal sequences (DECSCUSR / libvterm cursor props).
+- **Scrollback:** 100,000 lines per tab by default (or Unlimited in Preferences),
+  zlib-compressed; wheel, scroll bar, and Shift+PgUp/PgDn/Home/End.
+- **Mouse (PuTTY/X11 style):** left-drag selects (release copies to PRIMARY and
+  CLIPBOARD); double-click word / triple-click line; right-click pastes CLIPBOARD;
+  Ctrl+right-click opens the menu; middle-click is configurable. Hold **Shift** to
+  select or paste when a program has grabbed the mouse.
+- **App shortcuts** use Ctrl+Shift+… (Copy Ctrl+Shift+C, Paste Ctrl+Shift+V, …)
+  plus F11 and Shift+Insert, so plain Ctrl+C / Ctrl+W and the F-keys still reach
+  the program.
+- **Saved sessions** (File → New / Open / Save Session): local, SSH, or serial.
+  Session INI files never store passwords. **Export / Import Sessions**
+  (File menu or the session dialog) writes re-importable JSON
+  (`format: zterminal-sessions`); vault passwords are never included — only a
+  `passwordStored` flag for SSH.
+- **Password vault:** optional, Argon2id + XChaCha20-Poly1305 (libsodium) in
+  `~/.config/zterminal/vault.bin`. Per SSH session, “Use stored password” answers
+  ssh’s first password prompt via `SSH_ASKPASS`; per serial session,
+  Session → Send Stored Login. See [Password vault](#password-vault).
+- **Session logging:** Session → Start/Stop Logging (Ctrl+Shift+G) or automatic
+  per saved session; red **● REC** while logging. See [Session logs](#session-logs).
+- **Safe paste:** multi-line pastes ask first (line count, preview, “don’t ask
+  again for this session”). Copies are plain text with trailing whitespace trimmed.
+- **Find** (Ctrl+Shift+F): search the current tab’s scrollback + screen; case,
+  regex, wrap; all matches highlighted with a count.
+- **Keepalive / reconnect:** SSH keepalives (30 s × 3 by default, per session).
+  On drop (ssh error or unplugged serial), the tab shows a Reconnect banner and
+  keeps scrollback; optional auto-reconnect with backoff. A clean `exit` never
+  reconnects.
+- **Updates:** Help → Check for Updates, plus a quiet startup check at most once
+  a day. On a newer GitHub Release: Install / Later / Skip.
+  - **Linux:** downloads `zterminal_<ver>_amd64.deb` + `SHA256SUMS`, refuses on
+    checksum mismatch, runs `pkexec apt install`, offers restart.
+  - **macOS:** downloads `zterminal-<ver>-Darwin.dmg` + `SHA256SUMS`, verifies,
+    opens the disk image for a drag-to-Applications install (no automated replace).
+- **Zorro-Z app icon** (terminal window + Z) on Linux hicolor icons and in the
+  macOS `.app` bundle (`zterminal.icns`).
 
-- Serial consoles (0.3.0): QSerialPort, 9600 8N1 by default (Cisco console), any baud,
-  data/parity/stop bits, flow control, local echo, CR / CR+LF / LF on Enter, paste pacing
-  (ms per character and per line, queued, with Cancel), Session > Send Break (300 ms by
-  default), a clear `dialout` explanation on permission errors, and a Reconnect banner
-  when the adapter is unplugged (since 0.9.0 the port reopens by itself when the adapter is
-  back, found by its /dev/serial/by-id name).
-- Password vault (0.4.0): optional, encrypted (Argon2id + XChaCha20-Poly1305, libsodium) in
-  `~/.config/zterminal/vault.bin`. Per SSH session, "Use stored password" answers ssh's first
-  password prompt through an `SSH_ASKPASS` helper; per serial session, Session > Send Stored
-  Login. Settings > Password Vault: Create/Unlock, Lock (Ctrl+Shift+L), Change Master Password;
-  auto-lock after 15 idle minutes (Preferences). See [Password vault](#password-vault).
-- Session logging (0.5.0): Session > Start/Stop Logging (Ctrl+Shift+G) or automatically per
-  saved session; a red **● REC** marker and `[REC]` in the title while logging. See
-  [Session logs](#session-logs).
-- Safe copy and paste (0.6.0): copies are plain text with trailing whitespace trimmed, and a
-  paste with more than one line asks first (line count, preview, "don't ask again for this
-  session"). Both are on by default in Preferences. See [Copy and paste](#copy-and-paste).
+## Platforms
 
-- Find (0.8.0): Edit > Find… (Ctrl+Shift+F) opens a find bar under the current tab and searches
-  that tab's whole scrollback plus the screen. Enter = next (older) match, Shift+Enter =
-  previous (newer), Esc closes. Options: Match case, Regex, Wrap. All matches are highlighted
-  (the current one in orange) with a count like "3 of 120"; 100,000 lines search in about 0.15 s.
-  Matches that run across a wrapped line are found and highlighted on both lines.
+| | Linux | macOS |
+|---|---|---|
+| Package | `zterminal_<ver>_amd64.deb` | `zterminal-<ver>-Darwin.dmg` (Apple Silicon / arm64, macOS 14+) |
+| Signing | distro packages | ad-hoc signed `.app` — first launch: right-click → **Open** (or System Settings → Privacy & Security → Open Anyway) |
+| Notes | needs `dialout` for serial | Local Network permission prompt; local shell starts in `$HOME` as a **login** shell (Homebrew on PATH); Ctrl-C works |
 
-- Keepalive and reconnect (0.9.0): SSH sessions send keepalives (30 s x 3 by default, per
-  session in the session editor). When a connection drops (ssh network error or an unplugged
-  serial adapter) the tab shows "Disconnected at HH:mm:ss" with the reason and a Reconnect
-  button, keeps its scrollback, and the log continues in the same file with
-  `--- disconnected … ---` / `--- reconnected … ---` markers. Optionally (per session, off by
-  default) it reconnects by itself after 2, 4, 8 … 60 s, with Cancel; a stored password is
-  reused without asking while the vault is unlocked. A clean `exit` never reconnects.
+## Install
 
-- Updates (0.10.0): Help > Check for Updates, plus a quiet check at startup at most once a
-  day (Settings > Preferences > "Check for updates at startup"). It asks the public GitHub
-  Releases API for sbj-ee/zterminal. A newer release shows its notes with Install, Later and
-  Skip This Version. On Linux, Install downloads the `.deb` and `SHA256SUMS`, refuses on a
-  checksum mismatch, runs `pkexec apt install -y ./zterminal_X_amd64.deb` (polkit asks for
-  your password) and offers a restart, warning first if sessions are still live. On macOS,
-  Install downloads `zterminal-X-Darwin.dmg` and `SHA256SUMS`, verifies the checksum, then
-  opens the disk image so you can drag `zterminal.app` to Applications (no automated replace).
-  Without pkexec (Linux), or when running from a build tree, it opens the release page and
-  leaves the verified package in place.
+Download the assets for [the latest release](https://github.com/sbj-ee/zterminal/releases/latest)
+(`zterminal_1.0.0_amd64.deb` or `zterminal-1.0.0-Darwin.dmg`, plus `SHA256SUMS`).
 
-Releases are published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed:
-`zterminal_X.Y.Z_amd64.deb`, `zterminal-X.Y.Z-Darwin.dmg`, and `SHA256SUMS` listing both
-(check with `sha256sum -c SHA256SUMS`). Apple Silicon only (macOS 14+ / arm64).
+```sh
+# Verify the package (Linux or macOS)
+sha256sum -c SHA256SUMS          # Linux
+shasum -a 256 -c SHA256SUMS      # macOS
+```
+
+**Linux:**
+
+```sh
+sudo apt install ./zterminal_1.0.0_amd64.deb
+# Serial consoles: sudo usermod -aG dialout $USER   # then log out and back in
+```
+
+**macOS:** open the `.dmg`, drag **zterminal** to Applications. On first launch,
+right-click → Open. Allow Local Network access when prompted if you use SSH / LAN
+tools from a local shell.
 
 ## Usage
 
 ```sh
-zt                      # local shell, returns to your prompt immediately
-zt core-sw1             # open a saved session (quote names with spaces: zt "lab box")
-zt --list-sessions      # list saved sessions
-zt ssh user@host        # ad-hoc SSH through the system ssh (all ssh args pass through)
-zt serial /dev/ttyUSB0  # ad-hoc serial console at 9600 8N1 (or: zt serial /dev/ttyACM0 115200)
-zt -e htop              # run a program
+zt                      # local shell (Linux: detaches from your prompt)
+zt core-sw1             # open a saved session (quote names with spaces)
+zt --list-sessions
+zt ssh user@host        # ad-hoc SSH (all ssh args pass through)
+zt serial /dev/ttyUSB0  # ad-hoc serial at 9600 8N1 (or: zt serial /dev/ttyACM0 115200)
+zt -e htop
 zt --version
 ```
 
-An unknown name fails at once with the list of saved sessions. Sessions are stored one
-INI file per session in `~/.config/zterminal/sessions/` (file name = percent-encoded
-session name; owner-only permissions), for example:
+On macOS the GUI app is `zterminal.app`; the same flags work when launching the
+binary inside the bundle. Saved sessions live in `~/.config/zterminal/sessions/`
+(one INI per session; owner-only permissions). An SSH example:
 
 ```ini
 [session]
@@ -118,120 +119,106 @@ jumpHost=sbj@vertex
 extraArgs=-o ServerAliveInterval=30
 ```
 
-A serial session (`type=serial`) has a `[serial]` group: `device`, `baudRate` (9600),
-`dataBits` (8), `parity` (none|even|odd|mark|space), `stopBits` (1|2), `flowControl`
-(none|rtscts|xonxoff), `localEcho`, `enterSends` (cr|crlf|lf), `charDelayMs`, `lineDelayMs`
-and `breakMs` (300), plus optional `loginUser`. An SSH session may have `authFromVault=true`
-("Use stored password"); that flag is all the INI ever says about a password.
-
-Serial devices belong to the `dialout` group. If opening one says "Permission denied", run
-`sudo usermod -aG dialout $USER` and log out and back in.
-
-The SSH example above runs `ssh -o ServerAliveInterval=30 -l admin -i /home/you/.ssh/id_lab -J sbj@vertex -- 10.0.0.1`.
-Host, user and jump host are validated (no leading `-`, no spaces or shell characters),
-extra arguments must be ssh options, and the host always follows `--`.
+Host, user and jump host are validated (no leading `-`, no spaces or shell
+characters); the host always follows `--` on the ssh argv. `authFromVault=true`
+is the only password-related flag ever written to the session file.
 
 ## Password vault
 
-Prefer SSH keys with `ssh-agent`; the vault is for devices and hosts where you must use a
-password. Creating the vault asks for a master password twice. **There is no recovery: if you
-forget the master password, the stored passwords are lost.**
+Prefer SSH keys with `ssh-agent`; the vault is for devices where you must use a
+password. Creating the vault asks for a master password twice. **There is no
+recovery: if you forget the master password, the stored passwords are lost.**
 
-- SSH: in the session dialog tick **Use stored password**, type the password, press **Save**.
-  It goes to the vault, never to the session file. When the session starts, ssh calls
-  `zterminal-askpass` (`SSH_ASKPASS_REQUIRE=force`), which fetches the password once over a
-  private one-shot Unix socket; if the server rejects it, ssh asks you in the terminal as usual.
-  If the vault is locked you're asked to unlock it (Cancel = type the password yourself).
-- Serial: set **Login user** and **Login password**, then use Session > Send Stored Login. The
-  password is sent only when the device shows a password prompt.
-- **One unlock per app (0.7.1).** All tabs and windows opened from inside zterminal (New Tab,
-  Open Saved Session, Duplicate, File > New Window) run in one process and share the unlocked
-  vault: you're asked for the master password only the first time, after Lock Vault
-  (Ctrl+Shift+L, locks every window), or after the idle auto-lock. Using a stored password
-  counts as activity. A zterminal started separately (e.g. `zt name` from a shell) is its own
-  process and unlocks on its own.
+- **SSH:** tick **Use stored password** in the session dialog; the password goes
+  to the vault, never the session file. ssh calls `zterminal-askpass`
+  (`SSH_ASKPASS_REQUIRE=force`) over a private one-shot Unix socket.
+- **Serial:** set Login user / password, then Session → Send Stored Login.
+- **One unlock per process:** tabs and windows opened from inside zterminal share
+  the unlocked vault. Lock with Ctrl+Shift+L (or idle auto-lock, default 15 min).
 
-**Threat model.** The vault protects the passwords **at rest**: in the file, in backups and
-against casual access to your disk. It does **not** protect against malware running as your
-user, root, keyloggers, or anyone who can read zterminal's memory while the vault is unlocked
-(the key and secrets are in locked, zeroed-on-free memory, but Qt's password fields keep their
-own copy while you type). Lock it when you step away, or let auto-lock do it.
-
-Later: unlock via the Secret Service / GNOME Keyring.
+The vault protects passwords **at rest**. It does not protect against malware
+running as your user, root, or keyloggers while the vault is unlocked.
 
 ## Session logs
 
-Start with Session > Start Logging (Ctrl+Shift+G), or tick "Log this session to a file
-automatically" in the session dialog. Logs go to `~/zterminal-logs/<session>-<YYYYMMDD-HHMMSS>.log`
-(folder and per-line ISO timestamps in Preferences > Session logs); the folder is created 0700
-and each log 0600. Logs are plain text: colours and other escape sequences are removed,
-carriage-return/backspace overwrites keep only the final text, and full-screen programs
-(vim, less, htop) are left out.
-
-```text
-=== zterminal 0.5.0 log of "core-sw1" started 2026-10-03T20:55:01.120 ===
-2026-10-03T20:55:01.402 Welcome to core-sw1
-2026-10-03T20:55:01.403 [zterminal: logging paused: password prompt (terminal echo off)]
-2026-10-03T20:55:03.871 [zterminal: logging resumed]
-2026-10-03T20:55:03.990 core-sw1# show clock
-```
-
-Only what the terminal displays is logged, never what you type. Logging also pauses while a
-vault dialog is open, during Send Stored Login, and while the terminal is at a no-echo
-password prompt, so stored and typed passwords stay out of the log. A remote program that
-echoes a password back can't be detected; treat logs as sensitive anyway.
+Session → Start Logging (Ctrl+Shift+G), or enable automatic logging in the
+session dialog. Files go to `~/zterminal-logs/<session>-<YYYYMMDD-HHMMSS>.log`
+(folder and per-line timestamps configurable in Preferences). Logs are plain
+text (escape sequences stripped); full-screen programs (vim, less, htop) are
+omitted. Logging pauses at password prompts and while vault dialogs are open so
+passwords stay out of the log. Only what the terminal displays is logged, never
+what you type.
 
 ## Copy and paste
 
-Selecting copies (PRIMARY, and CLIPBOARD unless turned off); right-click pastes CLIPBOARD;
-Ctrl+Shift+C/V also work. Copies are plain text only, and trailing spaces/tabs are trimmed from
-each line (Preferences > Mouse and clipboard > "Trim trailing whitespace from copied lines").
-
-A paste that contains a line break would run commands as it arrives, so zterminal asks first:
-**Paste N lines?** with a preview of the first lines (control characters shown as symbols),
-the serial pacing estimate on paced consoles, and **Don't ask again for this session**. Cancel
-is the default button. Single-line pastes go straight through. Turn it off with "Ask before
-pasting text with more than one line". When the program enabled bracketed paste (bash, zsh,
-vim), the paste is wrapped in bracketed-paste markers as before and the dialog says so.
+Selecting copies (PRIMARY, and CLIPBOARD unless turned off); right-click pastes
+CLIPBOARD; Ctrl+Shift+C/V also work. A paste that contains a line break asks
+first (**Paste N lines?**); Cancel is the default. Single-line pastes go
+straight through. Bracketed paste is honored when the program enabled it.
 
 ## Building
 
-Requires CMake 3.21+, a C++20 compiler, Ninja, Qt 6.4+ (Widgets, SerialPort, Test) and libsodium (via pkg-config).
+Requires CMake 3.21+, a C++20 compiler, Ninja, Qt 6.4+ (Widgets, SerialPort,
+Network, Test), and libsodium (pkg-config). libvterm is bundled under
+`third_party/libvterm/`.
+
+**Linux (Debian/Ubuntu):**
 
 ```sh
-sudo apt-get install -y qt6-base-dev qt6-serialport-dev libsodium-dev pkg-config libgl1-mesa-dev cmake ninja-build g++
-cmake -B build -G Ninja
+sudo apt-get install -y qt6-base-dev qt6-serialport-dev libsodium-dev pkg-config \
+  libgl1-mesa-dev cmake ninja-build g++
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/app/zterminal
 ```
 
-## Testing
+**macOS (Apple Silicon, Homebrew):**
+
+```sh
+brew install qt cmake ninja libsodium pkg-config
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+cmake --build build
+open ./build/app/zterminal.app
+```
+
+### Tests
 
 ```sh
 ctest --test-dir build --output-on-failure      # headless (QT_QPA_PLATFORM=offscreen)
-./tests/scripts/colortest.sh                    # run inside zterminal: 16/256/truecolor check
+./tests/scripts/colortest.sh                    # run inside zterminal: 16/256/truecolor
 ```
 
-## Packaging
+### Packages
 
 ```sh
-cd build && cpack -G DEB      # -> zterminal_<version>_amd64.deb (zterminal, zt, /usr/libexec/zterminal/zterminal-askpass)
+cd build && cpack -G DEB          # Linux  -> zterminal_<version>_amd64.deb
+cd build && cpack -G DragNDrop    # macOS  -> zterminal-<version>-Darwin.dmg
 ```
+
+Pushing a `vX.Y.Z` tag that matches `project(zterminal VERSION …)` runs
+`.github/workflows/release.yml`, which builds and publishes both packages plus
+`SHA256SUMS`.
 
 ## Version bumps
 
-Bump **only** `project(zterminal VERSION x.y.z)` in `CMakeLists.txt`. `src/version.hpp.in` is
-generated into the build tree, and the title, About, `--version` and the `.deb` name all follow
-from it.
+Bump **only** `project(zterminal VERSION x.y.z)` in `CMakeLists.txt`.
+`src/version.hpp.in` is generated into the build tree; the window title, About,
+`--version`, Info.plist, and the `.deb` / `.dmg` names all follow from it.
 
 ## Layout
 
-- `core/`: PTY, libvterm wrapper and scrollback, selection, settings (no widgets)
-- `app/`: Qt Widgets UI (`MainWindow`, `TerminalView`, Preferences)
-- `tests/`: Qt Test suites plus the `colortest.sh` script
-- `third_party/libvterm/`: bundled, unmodified libvterm 0.3.3 (MIT)
-- `askpass/`: `zterminal-askpass`, the plain-C `SSH_ASKPASS` helper
-- `packaging/`: `zt` launcher and `.desktop` file
+- `core/` — PTY, libvterm wrapper and scrollback, selection, settings, vault,
+  update logic (no widgets)
+- `app/` — Qt Widgets UI (`MainWindow`, `TerminalView`, Preferences, …)
+- `tests/` — Qt Test suites plus `colortest.sh`
+- `third_party/libvterm/` — bundled, unmodified libvterm 0.3.3 (MIT)
+- `askpass/` — `zterminal-askpass` (`SSH_ASKPASS` helper)
+- `assets/icons/` — Zorro-Z PNG set (and macOS `.icns` input)
+- `packaging/` — `zt` launcher and `.desktop` file
+- `cmake/` — packaging, macOS bundle / macdeployqt
 
 ## License
 
