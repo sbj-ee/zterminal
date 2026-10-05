@@ -18,12 +18,29 @@ if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/zterminal.app/Contents/MacOS/zte
   message(STATUS "zterminal deploy: askpass already in bundle")
 endif()
 
-message(STATUS "zterminal deploy: macdeployqt ${_app}")
-set(_libpath)
-if(NOT "@ZTERMINAL_SODIUM_LIBDIR@" STREQUAL "")
-  set(_libpath "-libpath=@ZTERMINAL_SODIUM_LIBDIR@")
+# Ensure the app icon is present before macdeployqt / check-bundle.
+set(_icns "@ZTERMINAL_ICNS_FILE@")
+if(EXISTS "${_icns}")
+  file(MAKE_DIRECTORY "${_app}/Contents/Resources")
+  file(COPY "${_icns}" DESTINATION "${_app}/Contents/Resources")
+elseif(NOT EXISTS "${_app}/Contents/Resources/zterminal.icns")
+  message(FATAL_ERROR "zterminal deploy: zterminal.icns missing (expected ${_icns})")
 endif()
-_run("@ZTERMINAL_MACDEPLOYQT@" "${_app}" -always-overwrite -verbose=1 ${_libpath})
+
+message(STATUS "zterminal deploy: macdeployqt ${_app}")
+set(_libpaths)
+if(NOT "@ZTERMINAL_SODIUM_LIBDIR@" STREQUAL "")
+  list(APPEND _libpaths "-libpath=@ZTERMINAL_SODIUM_LIBDIR@")
+endif()
+foreach(_lp IN ITEMS @ZTERMINAL_EXTRA_LIBPATHS@)
+  if(NOT "${_lp}" STREQUAL "")
+    list(APPEND _libpaths "-libpath=${_lp}")
+  endif()
+endforeach()
+_run("@ZTERMINAL_MACDEPLOYQT@" "${_app}" -always-overwrite -verbose=1 ${_libpaths})
+
+# Drop input-method plugins we do not need (pulls unresolved QtVirtualKeyboard).
+file(REMOVE_RECURSE "${_app}/Contents/PlugIns/platforminputcontexts")
 
 # Remove any LC_RPATH that points outside the bundle (Homebrew / build tree),
 # so dyld can only resolve @rpath libraries from Contents/Frameworks.

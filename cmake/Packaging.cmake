@@ -60,6 +60,12 @@ elseif(APPLE)
   install(TARGETS zterminal BUNDLE DESTINATION .)
   install(TARGETS zterminal-askpass
           RUNTIME DESTINATION zterminal.app/Contents/MacOS)
+  # Generated icns: ensure it lands in the staged .app (BUNDLE install can miss
+  # a generated resource living outside the app/ binary dir).
+  if(DEFINED ZTERMINAL_ICNS_FILE)
+    install(FILES "${ZTERMINAL_ICNS_FILE}"
+            DESTINATION zterminal.app/Contents/Resources)
+  endif()
   install(SCRIPT "${CMAKE_BINARY_DIR}/MacDeploy.cmake")
 else()
   message(FATAL_ERROR "zterminal: packaging is only configured for Linux amd64 and macOS arm64")

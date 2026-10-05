@@ -75,6 +75,22 @@ if(ZTERMINAL_SODIUM_LIBDIR STREQUAL "" OR NOT EXISTS "${ZTERMINAL_SODIUM_LIBDIR}
     endif()
   endif()
 endif()
+set(ZTERMINAL_ICNS_FILE "${_icns}")
+# Extra -libpath entries so macdeployqt can resolve Homebrew Qt transitive deps.
+set(ZTERMINAL_EXTRA_LIBPATHS "")
+if(DEFINED ENV{HOMEBREW_PREFIX})
+  list(APPEND ZTERMINAL_EXTRA_LIBPATHS "$ENV{HOMEBREW_PREFIX}/lib")
+  if(EXISTS "$ENV{HOMEBREW_PREFIX}/opt/qt/lib")
+    list(APPEND ZTERMINAL_EXTRA_LIBPATHS "$ENV{HOMEBREW_PREFIX}/opt/qt/lib")
+  endif()
+endif()
+get_filename_component(_qt_prefix "${_qtbin}" DIRECTORY) # .../qt/bin -> .../qt
+if(EXISTS "${_qt_prefix}/lib")
+  list(APPEND ZTERMINAL_EXTRA_LIBPATHS "${_qt_prefix}/lib")
+endif()
+list(REMOVE_DUPLICATES ZTERMINAL_EXTRA_LIBPATHS)
+# Space-separated for MacDeploy.cmake.in foreach(IN ITEMS ...).
+string(REPLACE ";" " " ZTERMINAL_EXTRA_LIBPATHS "${ZTERMINAL_EXTRA_LIBPATHS}")
 set(ZTERMINAL_CHECK_BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/tools/macos/check-bundle.sh")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MacDeploy.cmake.in"
                "${CMAKE_CURRENT_BINARY_DIR}/MacDeploy.cmake" @ONLY)
