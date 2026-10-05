@@ -157,7 +157,10 @@ bool VaultManager::unlockInteractive(QWidget *parent, const QString &why)
         return true; // already open app-wide: nothing to ask
     }
     DialogScope scope(*this);
-    UnlockVaultDialog dlg(*m_vault, why, parent);
+    // Anchor to the top-level window (not a SessionWidget): ApplicationModal
+    // unlock is shared process-wide and is visible to tests via allWidgets().
+    QWidget *anchor = parent ? parent->window() : nullptr;
+    UnlockVaultDialog dlg(*m_vault, why, anchor);
     // Another window unlocked meanwhile (e.g. two sessions starting at once):
     // this prompt is no longer needed.
     const QMetaObject::Connection c = connect(this, &VaultManager::lockedChanged, &dlg, [&dlg](bool unlocked) {

@@ -8,13 +8,21 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include <util.h>   // openpty / forkpty
+#else
 #include <pty.h>
+#endif
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 #include <vector>
+
+#if defined(__APPLE__)
+extern char **environ; // POSIX, must stay outside namespace zterminal
+#endif
 
 namespace zterminal {
 
@@ -97,7 +105,13 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
         ::signal(SIGINT, SIG_DFL);
         ::signal(SIGQUIT, SIG_DFL);
         ::signal(SIGCHLD, SIG_DFL);
+#if defined(__APPLE__)
+        // execvpe is GNU-only; point POSIX environ at our envp and use execvp.
+        environ = envp.data();
+        ::execvp(argv[0], argv.data());
+#else
         ::execvpe(argv[0], argv.data(), envp.data());
+#endif
         const char msg[] = "zterminal: failed to execute program\r\n";
         (void)!::write(STDERR_FILENO, msg, sizeof msg - 1);
         ::_exit(127);

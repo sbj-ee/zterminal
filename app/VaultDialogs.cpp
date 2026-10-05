@@ -84,6 +84,8 @@ UnlockVaultDialog::UnlockVaultDialog(Vault &vault, const QString &why, QWidget *
 {
     setWindowTitle(QStringLiteral("Unlock Password Vault"));
     setObjectName(QStringLiteral("unlockVaultDialog"));
+    // Vault is process-wide: unlock must not be WindowModal to one tab's window.
+    setWindowModality(Qt::ApplicationModal);
     auto *layout = new QVBoxLayout(this);
     auto *intro = new QLabel(why.isEmpty() ? QStringLiteral("Enter the master password to unlock the vault.")
                                            : why + QStringLiteral("<br>Enter the master password to unlock the vault."));

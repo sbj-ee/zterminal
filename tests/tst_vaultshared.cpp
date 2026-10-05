@@ -202,14 +202,43 @@ private slots:
         QVERIFY(store.save(sshSession()));
 
         // Any master-password dialog, wherever it comes from, is counted.
+        // Prefer activeModalWidget; on macOS/offscreen a WindowModal unlock
+        // parented to a SessionWidget in a non-active window may not appear
+        // there, so also scan top-level widgets.
         watcher.setInterval(10);
         connect(&watcher, &QTimer::timeout, this, [this]() {
-            QWidget *m = QApplication::activeModalWidget();
-            auto *d = qobject_cast<UnlockVaultDialog *>(m);
+            auto findUnlock = []() -> UnlockVaultDialog * {
+                if (auto *d = qobject_cast<UnlockVaultDialog *>(QApplication::activeModalWidget())) {
+                    return d;
+                }
+                // Parent dialogs are not top-level; scan every widget (macOS/offscreen
+                // often leaves activeModalWidget null for WindowModal children).
+                for (QWidget *w : QApplication::allWidgets()) {
+                    if (auto *d = qobject_cast<UnlockVaultDialog *>(w); d && d->isVisible()) {
+                        return d;
+                    }
+                }
+                return nullptr;
+            };
+            auto findCreate = []() -> CreateVaultDialog * {
+                if (auto *c = qobject_cast<CreateVaultDialog *>(QApplication::activeModalWidget())) {
+                    return c;
+                }
+                for (QWidget *w : QApplication::allWidgets()) {
+                    if (auto *c = qobject_cast<CreateVaultDialog *>(w); c && c->isVisible()) {
+                        return c;
+                    }
+                }
+                return nullptr;
+            };
+            UnlockVaultDialog *d = findUnlock();
             if (!d || d->property("zt-seen").toBool()) {
-                if (auto *c = qobject_cast<CreateVaultDialog *>(m)) {
-                    ++prompts;
-                    c->reject();
+                if (CreateVaultDialog *c = findCreate()) {
+                    if (!c->property("zt-seen").toBool()) {
+                        c->setProperty("zt-seen", true);
+                        ++prompts;
+                        c->reject();
+                    }
                 }
                 return;
             }
@@ -309,7 +338,11 @@ private slots:
         QVERIFY(b->action(QStringLiteral("unlockVault"))->isEnabled());
         QFile::remove(out(QStringLiteral("drop")));
         answer = QString::fromUtf8(kMaster);
-        t->findChild<QPushButton *>(QStringLiteral("reconnect"))->click();
+        QTRY_VERIFY(!t->pty()->isRunning());
+        QPushButton *reconnect = t->findChild<QPushButton *>(QStringLiteral("reconnect"));
+        QVERIFY(reconnect);
+        QTRY_VERIFY(reconnect->isEnabled());
+        reconnect->click();
         QTRY_COMPARE(prompts, 1);
         expectAskpassAnswered();
         QVERIFY(vm().isUnlocked());

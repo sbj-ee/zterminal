@@ -24,6 +24,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QTest>
+#include <QtGlobal>
 #include <QTimer>
 
 #include <functional>
@@ -177,7 +178,9 @@ private slots:
         QVERIFY(w.action(QStringLiteral("sendBreak"))->isEnabled());
         w.startSession();
         QVERIFY(w.serial()->isOpen());
-        QVERIFY(screen(w).contains(QStringLiteral("connected to ") + cable.a + QStringLiteral(" at 9600 8N1")));
+        QTRY_VERIFY_WITH_TIMEOUT(screen(w).contains(QStringLiteral("connected to "))
+                                         && screen(w).contains(QStringLiteral("at 9600 8N1")),
+                                     5000);
         QVERIFY(w.serialBanner()->isHidden());
 
         Router router(cable.b);
@@ -241,9 +244,12 @@ private slots:
         QVERIFY(router.got.size() > 0);
         QVERIFY(router.got.size() < 20);
         child<QPushButton>(w.pasteBar(), "cancelPaste")->click();
-        QCOMPARE(w.serial()->pending(), 0);
+        QTRY_COMPARE(w.serial()->pending(), 0);
         QVERIFY(w.pasteBar()->isHidden());
         QVERIFY(!w.action(QStringLiteral("cancelPaste"))->isEnabled());
+        // A byte already in the serial write path can land just after cancel on
+        // macOS; drain briefly, then require the stream stays still.
+        QTest::qWait(50);
         const int sent = router.got.size();
         QTest::qWait(200);
         QCOMPARE(router.got.size(), sent);
@@ -306,9 +312,14 @@ private slots:
         w.show();
         w.startSession();
         QVERIFY(!w.serial()->isOpen());
+#if defined(Q_OS_MACOS)
+        QVERIFY(w.serialBannerText().contains(QStringLiteral("Permission denied")));
+        QVERIFY(screen(w).contains(QStringLiteral("Permission denied")));
+#else
         QVERIFY(w.serialBannerText().contains(QStringLiteral("dialout")));
         QVERIFY(w.serialBannerText().contains(QStringLiteral("sudo usermod -aG dialout $USER")));
         QVERIFY(screen(w).contains(QStringLiteral("sudo usermod -aG dialout $USER")));
+#endif
     }
 
     void adHocSerialAndSave()

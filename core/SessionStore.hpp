@@ -10,7 +10,8 @@
 namespace zterminal {
 
 // Saved sessions: one INI file per session in
-// $XDG_CONFIG_HOME/zterminal/sessions/ (default ~/.config/zterminal/sessions/).
+// $XDG_CONFIG_HOME/zterminal/sessions/ when set; else GenericConfigLocation
+// (Linux ~/.config/…, macOS ~/Library/Application Support/…).
 // The file name is the session name, percent-encoded (so "core sw/1" becomes
 // "core%20sw%2F1.ini"), and the real name is also stored inside as session/name.
 // Files are plain, human-editable INI. No password is ever written; stored

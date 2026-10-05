@@ -22,3 +22,24 @@ target_link_libraries(zterminal PRIVATE zterminal_ui)
 zterminal_set_warnings(zterminal)
 # The askpass helper must be built whenever the app is (it's found next to it).
 add_dependencies(zterminal zterminal-askpass)
+
+# macOS: copy askpass + icns into the build-tree .app (TARGET POST_BUILD must
+# live in this directory — the same CMakeLists that created zterminal).
+# zterminal.icns is produced by target zterminal-icns (cmake/MacBundle.cmake).
+if(APPLE)
+  add_custom_command(TARGET zterminal POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/MacOS"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:zterminal-askpass>"
+            "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/MacOS/zterminal-askpass"
+    COMMENT "Bundling zterminal-askpass into zterminal.app"
+    VERBATIM)
+  add_custom_command(TARGET zterminal POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/zterminal.icns"
+            "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/Resources/zterminal.icns"
+    COMMENT "Copying zterminal.icns into zterminal.app"
+    VERBATIM)
+endif()

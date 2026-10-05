@@ -12,7 +12,11 @@
  * The answer is never logged, never put in argv or the environment, and the
  * buffer is wiped before exit.
  */
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#else
 #define _GNU_SOURCE
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -26,6 +30,17 @@
 #define MAX_SECRET 4096
 
 static char buf[MAX_SECRET + 2];
+
+static void wipe(void *p, size_t n)
+{
+#if defined(__APPLE__)
+    volatile unsigned char *v = (volatile unsigned char *)p;
+    while (n--)
+        *v++ = 0;
+#else
+    explicit_bzero(p, n);
+#endif
+}
 
 static int write_all(int fd, const char *p, size_t n)
 {
@@ -49,9 +64,10 @@ static ssize_t from_socket(const char *path)
     size_t len = strlen(path);
     if (len == 0 || len >= sizeof addr.sun_path)
         return -1;
-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0)
         return -1;
+    (void)fcntl(fd, F_SETFD, FD_CLOEXEC);
     memset(&addr, 0, sizeof addr);
     addr.sun_family = AF_UNIX;
     memcpy(addr.sun_path, path, len);
@@ -63,7 +79,7 @@ static ssize_t from_socket(const char *path)
     for (;;) {
         if (got >= MAX_SECRET) {
             close(fd);
-            explicit_bzero(buf, sizeof buf);
+            wipe(buf, sizeof buf);
             return -1;
         }
         ssize_t r = read(fd, buf + got, MAX_SECRET - got);
@@ -71,7 +87,7 @@ static ssize_t from_socket(const char *path)
             continue;
         if (r < 0) {
             close(fd);
-            explicit_bzero(buf, sizeof buf);
+            wipe(buf, sizeof buf);
             return -1;
         }
         if (r == 0)
@@ -128,11 +144,11 @@ int main(int argc, char **argv)
     if (n <= 0)
         n = from_tty(prompt, is_question);
     if (n < 0) {
-        explicit_bzero(buf, sizeof buf);
+        wipe(buf, sizeof buf);
         return 1;
     }
     buf[n] = '\n';
     int rc = write_all(STDOUT_FILENO, buf, (size_t)n + 1) == 0 ? 0 : 1;
-    explicit_bzero(buf, sizeof buf);
+    wipe(buf, sizeof buf);
     return rc;
 }

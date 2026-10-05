@@ -809,7 +809,7 @@ void MainWindow::showAbout()
     QMessageBox::about(
         this, QStringLiteral("About zterminal"),
         QStringLiteral("<h3>zterminal %1</h3>"
-                       "<p>A PuTTY-like terminal emulator for Linux.</p>"
+                       "<p>A PuTTY-like terminal emulator for Linux and Apple Silicon.</p>"
                        "<p>Qt %2 &middot; libvterm %3.%4</p>"
                        "<p>MIT License &middot; &copy; 2026 Stephen B. Johnson</p>"
                        "<p><a href=\"%5\">%5</a></p>")

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSerialPortInfo>
+#include <QtGlobal>
 #include <QTimer>
 
 #include <algorithm>
@@ -51,11 +52,18 @@ QString SerialBackend::describeError(QSerialPort::SerialPortError error, const Q
 {
     switch (error) {
     case QSerialPort::PermissionError:
+#if defined(Q_OS_MACOS)
+        return QStringLiteral(
+                   "Permission denied opening %1. On macOS try the matching /dev/cu.* device "
+                   "(not /dev/tty.*), and grant Terminal/zterminal access if prompted.")
+            .arg(device);
+#else
         return QStringLiteral(
                    "Permission denied opening %1. Serial devices belong to the \"dialout\" group; add yourself with\n"
                    "    sudo usermod -aG dialout $USER\n"
                    "then log out and back in (or reboot) so the new group takes effect.")
             .arg(device);
+#endif
     case QSerialPort::DeviceNotFoundError: {
         const QStringList ports = availablePorts();
         return QStringLiteral("%1 was not found (is the adapter plugged in?). %2")

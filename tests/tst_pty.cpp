@@ -4,6 +4,8 @@
 #include <QSignalSpy>
 #include <QTest>
 
+#include <csignal>
+
 using namespace zterminal;
 
 class TstPty : public QObject
@@ -78,6 +80,30 @@ private slots:
         const QByteArray out = runUntilExit(pty, &code);
         QCOMPARE(code, 127);
         QVERIFY(out.contains("failed to execute"));
+    }
+
+    // Writing VINTR (0x03) to the PTY master must deliver SIGINT to the
+    // foreground process group — the kernel path Ctrl+C relies on once the
+    // UI emits the byte (see AA_MacDontSwapCtrlAndMeta in main.cpp).
+    void ctrlCByteDeliversSigint()
+    {
+        Pty pty;
+        QVERIFY(pty.start(QStringLiteral("/bin/sleep"), {QStringLiteral("30")}, 24, 80));
+        QVERIFY(pty.isRunning());
+        QSignalSpy finished(&pty, &Pty::finished);
+        QTest::qWait(100); // let sleep become the foreground group
+        pty.write(QByteArray(1, '\x03'));
+        QVERIFY2(finished.wait(5000), "sleep did not exit after VINTR (0x03)");
+        QCOMPARE(finished.size(), 1);
+        const int code = finished.first().at(0).toInt();
+        const bool crashed = finished.first().at(1).toBool();
+        // SIGINT → 128+SIGINT (130) with crashed=true, or a clean exit on some libc.
+        QVERIFY2(crashed || code == 130 || code == 0,
+                 qPrintable(QStringLiteral("unexpected exit code=%1 crashed=%2").arg(code).arg(crashed)));
+        if (crashed) {
+            QCOMPARE(code, 128 + SIGINT);
+        }
+        QVERIFY(!pty.isRunning());
     }
 };
 

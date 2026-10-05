@@ -1,5 +1,9 @@
 #include "Update.hpp"
 
+#include "ConfigPaths.hpp"
+
+#include <QtGlobal>
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
@@ -190,6 +194,26 @@ std::optional<ReleaseAsset> ReleaseInfo::debAsset() const
     return std::nullopt;
 }
 
+
+std::optional<ReleaseAsset> ReleaseInfo::dmgAsset() const
+{
+    const QStringList names{QStringLiteral("zterminal-%1-Darwin.dmg").arg(version.toString())};
+    for (const ReleaseAsset &a : assets) {
+        if (names.contains(a.name)) {
+            return a;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<ReleaseAsset> ReleaseInfo::packageAsset() const
+{
+#if defined(Q_OS_MACOS)
+    return dmgAsset();
+#else
+    return debAsset();
+#endif
+}
 std::optional<ReleaseAsset> ReleaseInfo::checksumAsset() const
 {
     for (const ReleaseAsset &a : assets) {
@@ -271,8 +295,7 @@ QString ChecksumResult::message() const
 
 QString UpdateState::filePath()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-        + QStringLiteral("/zterminal/update-state.ini");
+    return configHome() + QStringLiteral("/zterminal/update-state.ini");
 }
 
 UpdateState UpdateState::load()

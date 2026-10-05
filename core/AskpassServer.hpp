@@ -20,8 +20,9 @@ namespace zterminal {
 //   - a private 0700 directory under $XDG_RUNTIME_DIR (else /tmp) holds a
 //     Unix socket; only its *path* goes in the environment
 //     (ZTERMINAL_ASKPASS_SOCKET), never the secret;
-//   - a connecting peer must have our uid (SO_PEERCRED) and be a descendant
-//     of the ssh process we started;
+//   - a connecting peer must have our uid (SO_PEERCRED on Linux, getpeereid
+//     + LOCAL_PEERPID on macOS) and be a descendant of the ssh process we
+//     started;
 //   - the secret is written once with ::write() straight from secure memory,
 //     then wiped; the socket and directory are removed. A second password
 //     prompt therefore finds no socket and the helper asks the user on the
@@ -47,7 +48,7 @@ public:
     // <prefix>/libexec/zterminal/zterminal-askpass. Empty if none exists.
     static QString findHelper();
 
-    // True if `pid` is `ancestor` or descends from it (walks /proc ppid links).
+    // True if `pid` is `ancestor` or descends from it (/proc on Linux, sysctl on macOS).
     static bool isDescendant(qint64 pid, qint64 ancestor);
 
 signals:

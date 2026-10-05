@@ -16,7 +16,113 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#endif
+
 namespace zterminal {
+
+namespace {
+
+int makeListenSocket(QString *error)
+{
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+#else
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
+    if (fd < 0) {
+        if (error) {
+            *error = QStringLiteral("socket: %1").arg(QString::fromLocal8Bit(std::strerror(errno)));
+        }
+        return -1;
+    }
+#if !defined(SOCK_CLOEXEC) || !defined(SOCK_NONBLOCK)
+    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    const int flags = ::fcntl(fd, F_GETFL);
+    if (flags >= 0) {
+        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+#endif
+#if defined(__APPLE__)
+    // Avoid SIGPIPE on send() when the helper goes away mid-write.
+    const int one = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
+    return fd;
+}
+
+int acceptHelper(int listenFd)
+{
+#if defined(__APPLE__) || !defined(SOCK_CLOEXEC)
+    const int fd = ::accept(listenFd, nullptr, nullptr);
+    if (fd >= 0) {
+        ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+#if defined(__APPLE__)
+        const int one = 1;
+        ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
+    }
+    return fd;
+#else
+    return ::accept4(listenFd, nullptr, nullptr, SOCK_CLOEXEC);
+#endif
+}
+
+struct PeerCred {
+    uid_t uid = static_cast<uid_t>(-1);
+    pid_t pid = -1;
+    bool ok = false;
+};
+
+PeerCred peerCredentials(int fd)
+{
+    PeerCred out;
+#if defined(__APPLE__)
+    uid_t euid = static_cast<uid_t>(-1);
+    gid_t egid = static_cast<gid_t>(-1);
+    if (::getpeereid(fd, &euid, &egid) != 0) {
+        return out;
+    }
+    out.uid = euid;
+    // LOCAL_PEERPID (sys/un.h) yields the connecting process id on Darwin.
+    pid_t peerPid = -1;
+    socklen_t len = sizeof(peerPid);
+    if (::getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &peerPid, &len) == 0) {
+        out.pid = peerPid;
+    }
+    out.ok = true;
+#else
+    ucred cred {};
+    socklen_t len = sizeof cred;
+    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) {
+        return out;
+    }
+    out.uid = cred.uid;
+    out.pid = cred.pid;
+    out.ok = true;
+#endif
+    return out;
+}
+
+#if defined(__APPLE__)
+pid_t parentOf(pid_t pid)
+{
+    if (pid <= 0) {
+        return -1;
+    }
+    struct kinfo_proc info {};
+    size_t size = sizeof(info);
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    if (::sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size < sizeof(info)) {
+        return -1;
+    }
+    return info.kp_eproc.e_ppid;
+}
+#endif
+
+} // namespace
 
 AskpassServer::AskpassServer(SecureBuffer secret, QObject *parent)
     : QObject(parent)
@@ -70,9 +176,10 @@ bool AskpassServer::listen(QString *error)
         return fail(QStringLiteral("socket path too long"));
     }
     std::memcpy(addr.sun_path, sp.constData(), std::size_t(sp.size()));
-    m_listenFd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    QString sockErr;
+    m_listenFd = makeListenSocket(&sockErr);
     if (m_listenFd < 0) {
-        return fail(QStringLiteral("socket: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
+        return fail(sockErr);
     }
     const mode_t old = ::umask(0077);
     const int rc = ::bind(m_listenFd, reinterpret_cast<sockaddr *>(&addr), sizeof addr);
@@ -99,8 +206,10 @@ QString AskpassServer::findHelper()
         return QFileInfo(env).isExecutable() ? env : QString();
     }
     const QString appDir = QCoreApplication::applicationDirPath();
+    // Build tree / Linux install / macOS .app (Contents/MacOS).
     for (const QString &c : {appDir + QStringLiteral("/zterminal-askpass"),
-                             appDir + QStringLiteral("/../libexec/zterminal/zterminal-askpass")}) {
+                             appDir + QStringLiteral("/../libexec/zterminal/zterminal-askpass"),
+                             appDir + QStringLiteral("/../Helpers/zterminal-askpass")}) {
         if (QFileInfo(c).isExecutable()) {
             return QFileInfo(c).canonicalFilePath();
         }
@@ -117,6 +226,13 @@ bool AskpassServer::isDescendant(qint64 pid, qint64 ancestor)
         if (pid == ancestor) {
             return true;
         }
+#if defined(__APPLE__)
+        const pid_t ppid = parentOf(static_cast<pid_t>(pid));
+        if (ppid <= 0) {
+            return false;
+        }
+        pid = ppid;
+#else
         QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
         if (!stat.open(QIODevice::ReadOnly)) {
             return false;
@@ -132,25 +248,28 @@ bool AskpassServer::isDescendant(qint64 pid, qint64 ancestor)
             return false;
         }
         pid = rest.at(1).toLongLong();
+#endif
     }
     return false;
 }
 
 void AskpassServer::onConnection()
 {
-    const int fd = ::accept4(m_listenFd, nullptr, nullptr, SOCK_CLOEXEC);
+    const int fd = acceptHelper(m_listenFd);
     if (fd < 0) {
         return;
     }
-    ucred cred {};
-    socklen_t len = sizeof cred;
+    const PeerCred cred = peerCredentials(fd);
     QString why;
-    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) {
+    if (!cred.ok) {
         why = QStringLiteral("no peer credentials");
     } else if (cred.uid != ::getuid()) {
         why = QStringLiteral("peer uid %1 is not ours").arg(cred.uid);
-    } else if (!isDescendant(cred.pid, m_ancestor)) {
+    } else if (cred.pid > 0 && !isDescendant(cred.pid, m_ancestor)) {
         why = QStringLiteral("peer pid %1 is not part of this ssh session").arg(cred.pid);
+    } else if (cred.pid <= 0 && m_ancestor > 0) {
+        // Darwin without LOCAL_PEERPID: refuse rather than serve an unverified peer.
+        why = QStringLiteral("peer pid unavailable");
     }
     if (!why.isEmpty()) {
         ::close(fd); // keep listening for the real helper
@@ -163,7 +282,11 @@ void AskpassServer::onConnection()
     const unsigned char *p = m_secret.data();
     std::size_t left = m_secret.size();
     while (left > 0) {
+#if defined(MSG_NOSIGNAL)
         const ssize_t w = ::send(fd, p, left, MSG_NOSIGNAL);
+#else
+        const ssize_t w = ::send(fd, p, left, 0);
+#endif
         if (w < 0 && errno == EINTR) {
             continue;
         }

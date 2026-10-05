@@ -1,5 +1,7 @@
 #include "UpdateChecker.hpp"
 
+#include <QtGlobal>
+
 #include "version.hpp"
 
 #include <QDateTime>
@@ -161,12 +163,16 @@ void UpdateDownloader::start(const ReleaseInfo &release, const QString &dir)
     }
     m_cancelled = false;
     m_dir = dir;
-    const auto deb = release.debAsset();
+    const auto pkg = release.packageAsset();
     const auto sums = release.checksumAsset();
-    if (!deb || !sums) {
+    if (!pkg || !sums) {
         QStringList missing;
-        if (!deb) {
+        if (!pkg) {
+#if defined(Q_OS_MACOS)
+            missing << QStringLiteral("zterminal-%1-Darwin.dmg").arg(release.versionString());
+#else
             missing << QStringLiteral("zterminal_%1_amd64.deb").arg(release.versionString());
+#endif
         }
         if (!sums) {
             missing << QStringLiteral("SHA256SUMS");
@@ -177,7 +183,7 @@ void UpdateDownloader::start(const ReleaseInfo &release, const QString &dir)
         QMetaObject::invokeMethod(this, [this, msg] { emit finished(false, QString(), msg); }, Qt::QueuedConnection);
         return;
     }
-    m_deb = *deb;
+    m_deb = *pkg;
     m_sums = *sums;
     m_stage = 1;
     fetch(m_sums, QDir(m_dir).filePath(m_sums.name));
