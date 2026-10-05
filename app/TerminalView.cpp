@@ -498,6 +498,8 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         return;
     }
 
+    // Requires AA_MacDontSwapCtrlAndMeta (main.cpp) so ControlModifier is ⌃
+    // on macOS; otherwise physical Ctrl never reaches this branch.
     if (mods & Qt::ControlModifier) {
         const int b = controlByte(key);
         if (b >= 0) {

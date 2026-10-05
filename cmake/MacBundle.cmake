@@ -1,6 +1,12 @@
 # macOS: build zterminal as a real zterminal.app bundle (Apple Silicon only).
 # Included from the top-level CMakeLists.txt after the zterminal target exists.
-#   - Info.plist from cmake/Info.plist.in (versions from PROJECT_VERSION)
+#   - Info.plist from cmake/Info.plist.in
+#       CFBundleIdentifier MUST use @MACOSX_BUNDLE_GUI_IDENTIFIER@ (not a custom
+#       @ZTERMINAL_BUNDLE_ID@): the zterminal target lives in app/, so variables
+#       set only in this file's parent scope are empty when CMake configures the
+#       plist. An empty bundle id breaks macOS Local Network privacy (TN3179).
+#       NSLocalNetworkUsageDescription is required so LAN access from the local
+#       shell / SSH children can prompt instead of failing with EHOSTUNREACH.
 #   - zterminal.icns generated from assets/icons/*.png with iconutil
 #   - zterminal-askpass copied into Contents/MacOS (SSH_ASKPASS helper)
 # Qt frameworks/plugins and libsodium are copied at install time by

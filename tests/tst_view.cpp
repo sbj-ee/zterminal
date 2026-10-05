@@ -199,6 +199,10 @@ private slots:
 
     void keyboardEncoding()
     {
+        // Ctrl+C must become 0x03 (VINTR). On macOS, main.cpp sets
+        // AA_MacDontSwapCtrlAndMeta so Qt::ControlModifier is the physical
+        // Control key (otherwise ⌃ arrives as MetaModifier and this path
+        // never runs — ping ignores "Ctrl+C" and appears to hang).
         Fixture f;
         QTest::keyClick(&f.view, Qt::Key_A);
         QTest::keyClick(&f.view, Qt::Key_C, Qt::ControlModifier);

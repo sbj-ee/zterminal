@@ -10,6 +10,10 @@ endif()
 # Minimum macOS for zterminal.app (Info.plist LSMinimumSystemVersion). CI links
 # Homebrew Qt bottles built for macOS 14 (Sonoma), so nothing older can work.
 set(ZTERMINAL_MACOS_MIN "14.0")
+# Bundle id must be available in app/ scope (where the zterminal target lives)
+# when CMake configures Info.plist. MacBundle.cmake also sets this; keep a
+# top-level value so @ZTERMINAL_BUNDLE_ID@ would not expand empty if reintroduced.
+set(ZTERMINAL_BUNDLE_ID "ee.sbj.zterminal")
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "${ZTERMINAL_MACOS_MIN}" CACHE STRING "Minimum macOS version" FORCE)
 endif()

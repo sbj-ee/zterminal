@@ -34,6 +34,21 @@ for need in Contents/Resources/zterminal.icns Contents/Resources/qt.conf \
             Contents/MacOS/zterminal-askpass; do
   [[ -e "$app/$need" ]] || { echo "MISSING $need"; hits=$((hits + 1)); }
 done
+# Local Network privacy (macOS 15+): empty CFBundleIdentifier or a missing usage
+# description makes LAN access from the local shell fail with "No route to host"
+# and never prompts (Apple TN3179).
+bid="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true)"
+if [[ -z "$bid" ]]; then
+  echo "MISSING/EMPTY Info.plist CFBundleIdentifier (need ee.sbj.zterminal)"
+  hits=$((hits + 1))
+elif [[ "$bid" != "ee.sbj.zterminal" ]]; then
+  echo "UNEXPECTED CFBundleIdentifier='$bid' (expected ee.sbj.zterminal)"
+  hits=$((hits + 1))
+fi
+if ! /usr/libexec/PlistBuddy -c 'Print NSLocalNetworkUsageDescription' "$app/Contents/Info.plist" >/dev/null 2>&1; then
+  echo "MISSING Info.plist NSLocalNetworkUsageDescription"
+  hits=$((hits + 1))
+fi
 # libsodium must be bundled (vault).
 if ! find "$app/Contents/Frameworks" -maxdepth 1 -name 'libsodium*.dylib' | grep -q .; then
   echo "MISSING Contents/Frameworks/libsodium*.dylib"
