@@ -779,7 +779,16 @@ void SessionWidget::resetModesForReconnect()
 void SessionWidget::reconnectNow()
 {
     if (m_pty->isRunning()) {
-        return;
+        // Disconnected UI can briefly race the PTY reap on some platforms
+        // (notably macOS); finish the child so a manual Reconnect can run.
+        if (!m_disconnected) {
+            return;
+        }
+        m_userStop = true;
+        m_pty->terminate();
+        if (m_pty->isRunning()) {
+            return;
+        }
     }
     m_reconnect->cancel();
     if (isSerialSession()) {

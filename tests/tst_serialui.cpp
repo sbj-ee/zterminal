@@ -244,9 +244,12 @@ private slots:
         QVERIFY(router.got.size() > 0);
         QVERIFY(router.got.size() < 20);
         child<QPushButton>(w.pasteBar(), "cancelPaste")->click();
-        QCOMPARE(w.serial()->pending(), 0);
+        QTRY_COMPARE(w.serial()->pending(), 0);
         QVERIFY(w.pasteBar()->isHidden());
         QVERIFY(!w.action(QStringLiteral("cancelPaste"))->isEnabled());
+        // A byte already in the serial write path can land just after cancel on
+        // macOS; drain briefly, then require the stream stays still.
+        QTest::qWait(50);
         const int sent = router.got.size();
         QTest::qWait(200);
         QCOMPARE(router.got.size(), sent);

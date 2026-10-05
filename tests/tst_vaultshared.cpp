@@ -338,7 +338,11 @@ private slots:
         QVERIFY(b->action(QStringLiteral("unlockVault"))->isEnabled());
         QFile::remove(out(QStringLiteral("drop")));
         answer = QString::fromUtf8(kMaster);
-        t->findChild<QPushButton *>(QStringLiteral("reconnect"))->click();
+        QTRY_VERIFY(!t->pty()->isRunning());
+        QPushButton *reconnect = t->findChild<QPushButton *>(QStringLiteral("reconnect"));
+        QVERIFY(reconnect);
+        QTRY_VERIFY(reconnect->isEnabled());
+        reconnect->click();
         QTRY_COMPARE(prompts, 1);
         expectAskpassAnswered();
         QVERIFY(vm().isUnlocked());
