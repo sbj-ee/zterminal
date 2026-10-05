@@ -15,6 +15,7 @@
 #include <sodium.h>
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 using namespace zterminal;
 
