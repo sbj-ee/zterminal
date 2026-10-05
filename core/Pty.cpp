@@ -1,5 +1,6 @@
 #include "Pty.hpp"
 
+#include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QSocketNotifier>
 
@@ -20,11 +21,74 @@
 #include <unistd.h>
 #include <vector>
 
-#if defined(__APPLE__)
-extern char **environ; // POSIX, must stay outside namespace zterminal
-#endif
-
 namespace zterminal {
+
+namespace {
+
+// Home directory for the PTY child: passwd entry first (reliable when a GUI
+// app is launched from Finder/Dock with cwd=/), then $HOME, then "/".
+QByteArray userHomeDir(const passwd *pw)
+{
+    if (pw && pw->pw_dir && *pw->pw_dir) {
+        return QByteArray(pw->pw_dir);
+    }
+    const QByteArray home = qgetenv("HOME");
+    if (!home.isEmpty()) {
+        return home;
+    }
+    return QByteArrayLiteral("/");
+}
+
+// Fill identity vars a GUI-launched process may lack, and put Homebrew plus
+// the usual UNIX dirs on PATH when they exist (Finder PATH is often just
+// /usr/bin:/bin:/usr/sbin:/sbin). Login shells still rewrite PATH via
+// path_helper / brew shellenv; this is the baseline before that runs.
+void ensureUserEnvironment(QProcessEnvironment &env, const passwd *pw, const QString &shell)
+{
+    const QByteArray home = userHomeDir(pw);
+    if (!env.contains(QStringLiteral("HOME")) || env.value(QStringLiteral("HOME")).isEmpty()) {
+        env.insert(QStringLiteral("HOME"), QString::fromLocal8Bit(home));
+    }
+    if (pw && pw->pw_name && *pw->pw_name) {
+        const QString name = QString::fromLocal8Bit(pw->pw_name);
+        if (!env.contains(QStringLiteral("USER")) || env.value(QStringLiteral("USER")).isEmpty()) {
+            env.insert(QStringLiteral("USER"), name);
+        }
+        if (!env.contains(QStringLiteral("LOGNAME")) || env.value(QStringLiteral("LOGNAME")).isEmpty()) {
+            env.insert(QStringLiteral("LOGNAME"), name);
+        }
+    }
+    if (!env.contains(QStringLiteral("SHELL")) || env.value(QStringLiteral("SHELL")).isEmpty()) {
+        env.insert(QStringLiteral("SHELL"), shell);
+    }
+
+    QStringList parts = env.value(QStringLiteral("PATH")).split(QLatin1Char(':'), Qt::SkipEmptyParts);
+    auto ensureDir = [&](const QString &dir, bool prepend) {
+        if (!QFileInfo(dir).isDir() || parts.contains(dir)) {
+            return;
+        }
+        if (prepend) {
+            parts.prepend(dir);
+        } else {
+            parts.append(dir);
+        }
+    };
+#if defined(__APPLE__)
+    // Apple Silicon Homebrew first; Intel Homebrew /usr/local next.
+    ensureDir(QStringLiteral("/opt/homebrew/bin"), true);
+    ensureDir(QStringLiteral("/opt/homebrew/sbin"), true);
+#endif
+    ensureDir(QStringLiteral("/usr/local/bin"), true);
+    ensureDir(QStringLiteral("/usr/local/sbin"), true);
+    for (const char *d : {"/usr/bin", "/bin", "/usr/sbin", "/sbin"}) {
+        ensureDir(QString::fromLatin1(d), false);
+    }
+    if (!parts.isEmpty()) {
+        env.insert(QStringLiteral("PATH"), parts.join(QLatin1Char(':')));
+    }
+}
+
+} // namespace
 
 Pty::Pty(QObject *parent)
     : QObject(parent)
@@ -55,11 +119,24 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
         m_error = QStringLiteral("already running");
         return false;
     }
-    const QString prog = program.isEmpty() ? defaultShell() : program;
+    // Empty program = the user's login shell (local-shell tab). Non-empty is
+    // ssh / -e / a saved-session command: keep argv as given, still start in $HOME.
+    const bool loginShell = program.isEmpty();
+    const QString prog = loginShell ? defaultShell() : program;
+    const passwd *pw = ::getpwuid(::getuid());
+    const QByteArray home = userHomeDir(pw);
+    const QByteArray execPath = prog.toLocal8Bit();
 
     // Build argv/envp before fork(): the child may only call async-signal-safe functions.
     std::vector<QByteArray> argvStore;
-    argvStore.push_back(prog.toLocal8Bit());
+    if (loginShell) {
+        // argv0 starting with '-' makes bash/zsh/sh a login shell (loads
+        // /etc/zprofile, ~/.zprofile — where Homebrew's shellenv usually lives).
+        // execve uses execPath; argv[0] is only the name the shell sees.
+        argvStore.push_back(QByteArray("-") + QFileInfo(prog).fileName().toLocal8Bit());
+    } else {
+        argvStore.push_back(execPath);
+    }
     for (const QString &a : args) {
         argvStore.push_back(a.toLocal8Bit());
     }
@@ -73,6 +150,7 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
     env.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
     env.insert(QStringLiteral("COLORTERM"), QStringLiteral("truecolor"));
     env.insert(QStringLiteral("TERM_PROGRAM"), QStringLiteral("zterminal"));
+    ensureUserEnvironment(env, pw, prog);
     for (const QString &kv : extraEnv) {
         const qsizetype eq = kv.indexOf(QLatin1Char('='));
         if (eq > 0) {
@@ -100,18 +178,19 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
         return false;
     }
     if (pid == 0) {
-        // Child.
+        // Child. Only async-signal-safe calls from here.
         ::signal(SIGPIPE, SIG_DFL);
         ::signal(SIGINT, SIG_DFL);
         ::signal(SIGQUIT, SIG_DFL);
         ::signal(SIGCHLD, SIG_DFL);
-#if defined(__APPLE__)
-        // execvpe is GNU-only; point POSIX environ at our envp and use execvp.
-        environ = envp.data();
-        ::execvp(argv[0], argv.data());
-#else
-        ::execvpe(argv[0], argv.data(), envp.data());
-#endif
+        // GUI apps on macOS often inherit cwd=/ from LaunchServices; Terminal.app
+        // always starts in the user's home. Do the same for every PTY child.
+        if (!home.isEmpty()) {
+            (void)::chdir(home.constData());
+        }
+        // execve is POSIX (unlike GNU execvpe) and takes envp on every platform,
+        // so we can use a login argv0 that is not a path.
+        ::execve(execPath.constData(), argv.data(), envp.data());
         const char msg[] = "zterminal: failed to execute program\r\n";
         (void)!::write(STDERR_FILENO, msg, sizeof msg - 1);
         ::_exit(127);
