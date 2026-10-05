@@ -134,6 +134,19 @@ private slots:
         QVERIFY2(out.contains(wantHome), out.constData());
     }
 
+    // execve does not search PATH; Pty must resolve bare names (ssh, sh) itself.
+    void pathSearchResolvesBareName()
+    {
+        Pty pty;
+        QVERIFY(pty.start(QStringLiteral("sh"),
+                          {QStringLiteral("-c"), QStringLiteral("printf 'path-ok'")},
+                          24, 80));
+        int code = -99;
+        const QByteArray out = runUntilExit(pty, &code);
+        QCOMPARE(code, 0);
+        QVERIFY2(out.contains("path-ok"), out.constData());
+    }
+
     // Empty program = login shell (argv0 "-zsh"/etc). Probe with a marker the
     // interactive shell prints, then exit. Tolerates motd/profile noise.
     void defaultShellIsLoginInHome()

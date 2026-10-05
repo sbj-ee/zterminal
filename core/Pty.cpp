@@ -88,6 +88,27 @@ void ensureUserEnvironment(QProcessEnvironment &env, const passwd *pw, const QSt
     }
 }
 
+
+// Resolve prog to an absolute path using env's PATH (execve does not search
+// PATH; tests put a fake `ssh` first on PATH, and GUI launches often have a
+// minimal PATH we already enriched above).
+QByteArray resolveExecPath(const QString &prog, const QProcessEnvironment &env)
+{
+    const QByteArray raw = prog.toLocal8Bit();
+    if (prog.startsWith(QLatin1Char('/'))) {
+        return raw;
+    }
+    const QStringList dirs = env.value(QStringLiteral("PATH")).split(QLatin1Char(':'), Qt::SkipEmptyParts);
+    for (const QString &dir : dirs) {
+        const QString candidate = dir + QLatin1Char('/') + prog;
+        const QByteArray c = candidate.toLocal8Bit();
+        if (::access(c.constData(), X_OK) == 0) {
+            return c;
+        }
+    }
+    return raw; // execve will fail; child prints the usual 127 message
+}
+
 } // namespace
 
 Pty::Pty(QObject *parent)
@@ -125,7 +146,21 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
     const QString prog = loginShell ? defaultShell() : program;
     const passwd *pw = ::getpwuid(::getuid());
     const QByteArray home = userHomeDir(pw);
-    const QByteArray execPath = prog.toLocal8Bit();
+
+    // Build env before argv: PATH may include a test fake `ssh`, and we must
+    // resolve through that PATH because execve does not search it.
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
+    env.insert(QStringLiteral("COLORTERM"), QStringLiteral("truecolor"));
+    env.insert(QStringLiteral("TERM_PROGRAM"), QStringLiteral("zterminal"));
+    ensureUserEnvironment(env, pw, prog);
+    for (const QString &kv : extraEnv) {
+        const qsizetype eq = kv.indexOf(QLatin1Char('='));
+        if (eq > 0) {
+            env.insert(kv.left(eq), kv.mid(eq + 1));
+        }
+    }
+    const QByteArray execPath = resolveExecPath(prog, env);
 
     // Build argv/envp before fork(): the child may only call async-signal-safe functions.
     std::vector<QByteArray> argvStore;
@@ -146,17 +181,6 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
     }
     argv.push_back(nullptr);
 
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
-    env.insert(QStringLiteral("COLORTERM"), QStringLiteral("truecolor"));
-    env.insert(QStringLiteral("TERM_PROGRAM"), QStringLiteral("zterminal"));
-    ensureUserEnvironment(env, pw, prog);
-    for (const QString &kv : extraEnv) {
-        const qsizetype eq = kv.indexOf(QLatin1Char('='));
-        if (eq > 0) {
-            env.insert(kv.left(eq), kv.mid(eq + 1));
-        }
-    }
     std::vector<QByteArray> envStore;
     for (const QString &kv : env.toStringList()) {
         envStore.push_back(kv.toLocal8Bit());
