@@ -60,6 +60,10 @@ int main(int argc, char *argv[])
         }
     }
 
+    // On macOS Qt maps Qt::ControlModifier to ⌘ and Qt::MetaModifier to ⌃ by
+    // default. A terminal must treat physical Ctrl like Linux/xterm (Ctrl+C =
+    // SIGINT / 0x03). Disable the swap before QApplication is constructed.
+    QApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("zterminal"));
     QApplication::setApplicationName(QStringLiteral("zterminal"));
