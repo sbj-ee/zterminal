@@ -19,7 +19,10 @@ public:
     ~Pty() override;
 
     // Starts `program` with `args` (argv list, never a shell string).
-    // An empty program starts the user's login shell ($SHELL, else passwd, else /bin/sh).
+    // An empty program starts the user's login shell ($SHELL, else passwd,
+    // else /bin/sh) with argv0 = "-basename" so profile files load (e.g.
+    // ~/.zprofile / Homebrew shellenv on macOS). Every child chdirs to the
+    // user's home and gets HOME/USER/LOGNAME/SHELL plus a sane PATH.
     bool start(const QString &program, const QStringList &args, int rows, int cols,
                const QStringList &extraEnv = {});
     void write(const QByteArray &data);

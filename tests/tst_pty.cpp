@@ -1,6 +1,8 @@
-// PTY backend: output, exit codes, window size (TIOCSWINSZ), TERM/COLORTERM.
+// PTY backend: output, exit codes, window size (TIOCSWINSZ), TERM/COLORTERM,
+// home cwd + HOME, login shell for the default shell.
 #include "Pty.hpp"
 
+#include <QDir>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -104,6 +106,73 @@ private slots:
             QCOMPARE(code, 128 + SIGINT);
         }
         QVERIFY(!pty.isRunning());
+    }
+
+    // Finder/Dock launch leaves the app at cwd=/; the PTY child must still
+    // start in $HOME with HOME set (the "/ $" prompt bug).
+    void childStartsInHomeWithHomeSet()
+    {
+        const QString home = QDir::homePath();
+        QVERIFY(!home.isEmpty());
+        QVERIFY2(home != QLatin1String("/"), "test user home must not be /");
+        const QString prev = QDir::currentPath();
+        QVERIFY(QDir::setCurrent(QStringLiteral("/")));
+        QCOMPARE(QDir::currentPath(), QStringLiteral("/"));
+
+        Pty pty;
+        QVERIFY(pty.start(QStringLiteral("/bin/sh"),
+                          {QStringLiteral("-c"),
+                           QStringLiteral("printf 'ZT_CWD=%s\nZT_HOME=%s\n' \"$PWD\" \"$HOME\"")},
+                          24, 80));
+        int code = -99;
+        const QByteArray out = runUntilExit(pty, &code);
+        QVERIFY(QDir::setCurrent(prev));
+        QCOMPARE(code, 0);
+        const QByteArray wantCwd = QByteArray("ZT_CWD=") + home.toLocal8Bit();
+        const QByteArray wantHome = QByteArray("ZT_HOME=") + home.toLocal8Bit();
+        QVERIFY2(out.contains(wantCwd), out.constData());
+        QVERIFY2(out.contains(wantHome), out.constData());
+    }
+
+    // execve does not search PATH; Pty must resolve bare names (ssh, sh) itself.
+    void pathSearchResolvesBareName()
+    {
+        Pty pty;
+        QVERIFY(pty.start(QStringLiteral("sh"),
+                          {QStringLiteral("-c"), QStringLiteral("printf 'path-ok'")},
+                          24, 80));
+        int code = -99;
+        const QByteArray out = runUntilExit(pty, &code);
+        QCOMPARE(code, 0);
+        QVERIFY2(out.contains("path-ok"), out.constData());
+    }
+
+    // Empty program = login shell (argv0 "-zsh"/etc). Probe with a marker the
+    // interactive shell prints, then exit. Tolerates motd/profile noise.
+    void defaultShellIsLoginInHome()
+    {
+        const QString home = QDir::homePath();
+        const QString prev = QDir::currentPath();
+        QVERIFY(QDir::setCurrent(QStringLiteral("/")));
+
+        Pty pty;
+        QVERIFY(pty.start({}, {}, 24, 80));
+        QByteArray out;
+        connect(&pty, &Pty::dataReceived, this, [&out](const QByteArray &b) { out += b; });
+        QSignalSpy finished(&pty, &Pty::finished);
+        // bash: $- has l; zsh: [[ -o login ]]; either prints ZT_LOGIN=1.
+        QByteArray cmd;
+        cmd += "printf 'ZT_CWD=%s\nZT_HOME=%s\n' \"$PWD\" \"$HOME\"; ";
+        cmd += "ZT_LOGIN=0; ";
+        cmd += "case $- in *l*) ZT_LOGIN=1;; esac; ";
+        cmd += "if eval '[[ -o login ]]' 2>/dev/null; then ZT_LOGIN=1; fi; ";
+        cmd += "printf 'ZT_LOGIN=%s\n' \"$ZT_LOGIN\"; exit\n";
+        pty.write(cmd);
+        QVERIFY2(finished.wait(15000), "default shell did not exit");
+        QVERIFY(QDir::setCurrent(prev));
+        QVERIFY2(out.contains(QByteArray("ZT_CWD=") + home.toLocal8Bit()), out.constData());
+        QVERIFY2(out.contains(QByteArray("ZT_HOME=") + home.toLocal8Bit()), out.constData());
+        QVERIFY2(out.contains("ZT_LOGIN=1"), out.constData());
     }
 };
 
