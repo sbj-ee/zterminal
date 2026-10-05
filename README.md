@@ -37,7 +37,9 @@ and milestones.
 - `zt` launcher: starts zterminal detached from your shell
 - Saved sessions (0.2.0): local shell or SSH, via a PuTTY-style dialog (File > New Session,
   Open Saved Session, Save Session). SSH runs the system `ssh` with a validated argv
-  (no shell). Session files never contain passwords.
+  (no shell). Session files never contain passwords. **Export / Import Sessions** (File menu
+  or the session dialog) writes a re-importable JSON file (`format: zterminal-sessions`);
+  vault passwords are never included — only a `passwordStored` flag for SSH.
 
 - Serial consoles (0.3.0): QSerialPort, 9600 8N1 by default (Cisco console), any baud,
   data/parity/stop bits, flow control, local echo, CR / CR+LF / LF on Enter, paste pacing

@@ -45,7 +45,7 @@ A classic `QMenuBar`. Every item is a `QAction` owned by an `Actions` registry i
 
 | Menu | Items (default shortcut) |
 |---|---|
-| **File** | New Session… (Ctrl+Shift+N), Open Saved Session… (Ctrl+Shift+O), Save Session (Ctrl+Shift+S), New Tab (Ctrl+Shift+T), Close Tab (Ctrl+Shift+W), Next Tab (Ctrl+PgDn, Ctrl+Shift+]), Previous Tab (Ctrl+PgUp, Ctrl+Shift+[), New Window, Close Window, Quit (Ctrl+Shift+Q). The sessions dialog opens its session in a **new tab** (0.7.0) |
+| **File** | New Session… (Ctrl+Shift+N), Open Saved Session… (Ctrl+Shift+O), Save Session (Ctrl+Shift+S), Export Sessions…, Import Sessions…, New Tab (Ctrl+Shift+T), Close Tab (Ctrl+Shift+W), Next Tab (Ctrl+PgDn, Ctrl+Shift+]), Previous Tab (Ctrl+PgUp, Ctrl+Shift+[), New Window, Close Window, Quit (Ctrl+Shift+Q). The sessions dialog opens its session in a **new tab** (0.7.0) |
 | **Edit** | Copy (Ctrl+Shift+C), Paste (Ctrl+Shift+V; Shift+Insert pastes PRIMARY), Select All (Ctrl+Shift+A), Find… (Ctrl+Shift+F; live since 0.8.0, §4.17) |
 | **View** | Font Size Up (Ctrl+Shift+=), Font Size Down (Ctrl+Shift+−), Reset Font Size (Ctrl+Shift+0), Color Scheme ▸ (radio list), Full Screen (F11), Show Menu Bar (toggle, Ctrl+Shift+M) |
 | **Session** | Duplicate Session (Ctrl+Shift+D; a new tab since 0.7.0), Restart Session (Ctrl+Shift+R, enabled once the process has exited or after confirming), Send Break (serial only), Send Stored Login (saved serial sessions, 0.4.0), Start/Stop Logging (Ctrl+Shift+G, 0.5.0), Clear Scrollback (Ctrl+Shift+K), Reset Terminal, Change Settings… (opens this session's settings and applies live where possible; **until per-session settings land (M6) it opens Preferences**) |

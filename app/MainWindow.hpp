@@ -74,6 +74,9 @@ public:
     // File > New Session / Open Saved Session: opens the session dialog; the
     // chosen session opens in a new tab.
     void showSessionDialog(bool focusSaved);
+    // File > Export / Import Sessions (JSON; no vault secrets).
+    void exportSessionsInteractive();
+    void importSessionsInteractive();
     bool openInNewTab(const SessionConfig &cfg, QString *error = nullptr);
     bool saveCurrentSessionAs(const QString &name, QString *error = nullptr);
     std::optional<SessionConfig> currentSessionConfig(QString *why = nullptr) const;

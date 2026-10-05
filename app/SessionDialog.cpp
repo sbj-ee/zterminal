@@ -1,5 +1,7 @@
 #include "SessionDialog.hpp"
 
+#include "SessionExport.hpp"
+
 #include "AppSettings.hpp"
 #include "ColorScheme.hpp"
 #include "SecureBuffer.hpp"
@@ -11,6 +13,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFontComboBox>
 #include <QFontDatabase>
@@ -78,6 +81,19 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
         savedButtons->addWidget(b);
     }
     savedLayout->addLayout(savedButtons);
+    auto *ioButtons = new QHBoxLayout;
+    m_export = new QPushButton(QStringLiteral("&Export\u2026"));
+    m_import = new QPushButton(QStringLiteral("&Import\u2026"));
+    m_export->setObjectName(QStringLiteral("exportSessions"));
+    m_import->setObjectName(QStringLiteral("importSessions"));
+    m_export->setToolTip(QStringLiteral("Save all sessions to a JSON file (passwords are never exported)"));
+    m_import->setToolTip(QStringLiteral("Merge sessions from a previously exported JSON file"));
+    for (QPushButton *b : {m_export, m_import}) {
+        b->setAutoDefault(false);
+        ioButtons->addWidget(b);
+    }
+    ioButtons->addStretch(1);
+    savedLayout->addLayout(ioButtons);
     auto *where = new QLabel(QStringLiteral("<small>Stored in %1 (no passwords; stored passwords live only in the encrypted vault)</small>")
                                  .arg(QDir::toNativeSeparators(m_store.directory()).replace(QDir::homePath(), QStringLiteral("~"))));
     where->setWordWrap(true);
@@ -319,6 +335,8 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     connect(m_load, &QPushButton::clicked, this, &SessionDialog::loadSelected);
     connect(m_save, &QPushButton::clicked, this, &SessionDialog::saveCurrent);
     connect(m_delete, &QPushButton::clicked, this, &SessionDialog::deleteSelected);
+    connect(m_export, &QPushButton::clicked, this, &SessionDialog::exportSessions);
+    connect(m_import, &QPushButton::clicked, this, &SessionDialog::importSessions);
     connect(m_list, &QListWidget::currentTextChanged, this, [this](const QString &t) {
         if (!t.isEmpty()) {
             m_name->setText(t);
@@ -607,6 +625,102 @@ bool SessionDialog::deleteSelected()
     }
     setError({});
     refreshList();
+    return true;
+}
+
+
+bool SessionDialog::exportSessions()
+{
+    if (m_store.names().isEmpty()) {
+        setError(QStringLiteral("No saved sessions to export."));
+        return false;
+    }
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Export Sessions"),
+        QDir::homePath() + QLatin1Char('/') + defaultSessionsExportFileName(),
+        QStringLiteral("zterminal sessions (*.json);;All files (*)"));
+    if (path.isEmpty()) {
+        return false;
+    }
+    QString err;
+    if (!exportSessionsToFile(m_store, path, &err)) {
+        setError(err);
+        return false;
+    }
+    setError({});
+    QMessageBox::information(this, QStringLiteral("Export Sessions"),
+                             QStringLiteral("Exported %1 session(s) to\n%2\n\n"
+                                            "Passwords were not included; they stay in the vault.")
+                                 .arg(m_store.names().size())
+                                 .arg(QDir::toNativeSeparators(path)));
+    return true;
+}
+
+bool SessionDialog::importSessions()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Import Sessions"), QDir::homePath(),
+        QStringLiteral("zterminal sessions (*.json);;All files (*)"));
+    if (path.isEmpty()) {
+        return false;
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        setError(QStringLiteral("Can't read %1: %2").arg(path, f.errorString()));
+        return false;
+    }
+    const QByteArray bytes = f.readAll();
+    QString parseErr;
+    const auto doc = sessionsFromExportJson(bytes, &parseErr);
+    if (!doc) {
+        setError(parseErr);
+        return false;
+    }
+    if (doc->sessions.isEmpty()) {
+        setError(QStringLiteral("The file contains no sessions."));
+        return false;
+    }
+
+    int conflicts = 0;
+    for (const SessionConfig &s : doc->sessions) {
+        if (m_store.contains(s.name)) {
+            ++conflicts;
+        }
+    }
+    SessionImportConflict policy = SessionImportConflict::Overwrite;
+    if (conflicts > 0) {
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("Import Sessions"),
+            QStringLiteral("%1 of %2 session(s) already exist. Overwrite them?\n\n"
+                           "Yes replaces matching names; No keeps existing ones and only "
+                           "adds new names; Cancel aborts.")
+                .arg(conflicts)
+                .arg(doc->sessions.size()),
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer == QMessageBox::Cancel) {
+            return false;
+        }
+        policy = (answer == QMessageBox::Yes) ? SessionImportConflict::Overwrite
+                                              : SessionImportConflict::Skip;
+    }
+
+    QString err;
+    const SessionImportResult r = importSessionsFromJson(m_store, bytes, policy, &err);
+    if (!err.isEmpty() && r.imported == 0 && r.overwritten == 0 && r.skipped == 0) {
+        setError(err);
+        return false;
+    }
+    refreshList();
+    setError({});
+    QString msg = QStringLiteral("Imported %1, overwritten %2, skipped %3.")
+                      .arg(r.imported)
+                      .arg(r.overwritten)
+                      .arg(r.skipped);
+    if (!r.errors.isEmpty()) {
+        msg += QStringLiteral("\n\nSome sessions failed:\n") + r.errors.join(QLatin1Char('\n'));
+    }
+    msg += QStringLiteral("\n\nPasswords are never imported; re-enter them under Save if needed.");
+    QMessageBox::information(this, QStringLiteral("Import Sessions"), msg);
     return true;
 }
 
