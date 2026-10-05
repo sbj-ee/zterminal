@@ -46,8 +46,23 @@ add_custom_command(
   DEPENDS ${_icon_deps}
   COMMENT "Generating zterminal.icns"
   VERBATIM)
+# zterminal lives in app/; add_custom_command(OUTPUT) only attaches to targets
+# defined in the same CMakeLists directory. Force generation via a helper
+# target + dependency, then copy into the built .app (Ninja + cross-dir
+# MACOSX_PACKAGE_LOCATION alone omits the icns).
+add_custom_target(zterminal-icns DEPENDS "${_icns}")
+add_dependencies(zterminal zterminal-icns)
 target_sources(zterminal PRIVATE "${_icns}")
-set_source_files_properties("${_icns}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+set_source_files_properties("${_icns}" PROPERTIES
+  MACOSX_PACKAGE_LOCATION Resources
+  GENERATED TRUE)
+add_custom_command(TARGET zterminal POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/Resources"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icns}"
+          "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/Resources/zterminal.icns"
+  COMMENT "Copying zterminal.icns into zterminal.app"
+  VERBATIM)
 
 # --- Deployment (runs at install time, i.e. inside `cpack -G DragNDrop`) ---
 get_target_property(_qmake Qt6::qmake IMPORTED_LOCATION)
