@@ -13,6 +13,7 @@
 #include <QFont>
 #include <QPoint>
 #include <QSet>
+#include <QTimer>
 
 namespace zterminal {
 
@@ -66,6 +67,12 @@ public:
     static constexpr QRgb kFindMatchBackground = 0xfff0c040;
     static constexpr QRgb kFindCurrentBackground = 0xffff7a00;
     static constexpr QRgb kFindForeground = 0xff000000;
+    // Cursor blink (Terminal::cursorBlink(), default on): runs only while the
+    // view has focus; the cursor stays solid for a full phase after typing or
+    // moving. Half-period from the platform's cursor flash time (0 = no blink).
+    bool cursorBlinking() const { return m_blinkTimer.isActive(); }
+    bool cursorBlinkPhaseOn() const { return m_blinkOn; }
+    int cursorBlinkInterval() const { return m_blinkTimer.interval(); }
 
 public slots:
     void copySelection();   // Edit > Copy: PRIMARY (if supported) + CLIPBOARD
@@ -106,6 +113,9 @@ private:
     void copyOnSelect(); // after a mouse selection: PRIMARY, + CLIPBOARD if configured
     void scrollBy(int lines);
     bool isCurrentFindSegment(int i) const;
+    QRect cursorRect() const; // viewport pixels of the cursor cell (empty if off-screen)
+    void updateBlink();       // start/stop the blink timer for focus and terminal state
+    void restartBlink();      // cursor solid now, next toggle a full phase later
 
     Terminal *m_term;
     QFont m_font;
@@ -134,6 +144,9 @@ private:
     bool m_focused = false;
     std::vector<FindMatch> m_findMatches; // sorted by (line, col)
     int m_findCurrent = -1;
+    QTimer m_blinkTimer;
+    bool m_blinkOn = true;
+    QPoint m_lastCursorPos{-1, -1};
 };
 
 } // namespace zterminal

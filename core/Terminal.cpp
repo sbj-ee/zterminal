@@ -44,6 +44,7 @@ Terminal::Terminal(int rows, int cols, QObject *parent)
     vterm_screen_enable_reflow(m_screen, true);
     applySchemeToVterm();
     vterm_screen_reset(m_screen, 1);
+    applyDefaultCursorStyle();
 }
 
 Terminal::~Terminal()
@@ -69,12 +70,81 @@ void Terminal::setColorScheme(const ColorScheme &scheme)
     emit damaged();
 }
 
+void Terminal::setDefaultCursorStyle(int shape, bool blink)
+{
+    if (shape < VTERM_PROP_CURSORSHAPE_BLOCK || shape >= VTERM_N_PROP_CURSORSHAPES) {
+        shape = kDefaultCursorShape;
+    }
+    m_defaultCursorShape = shape;
+    m_defaultCursorBlink = blink;
+    applyDefaultCursorStyle();
+    flush();
+}
+
+void Terminal::applyDefaultCursorStyle()
+{
+    // Through libvterm's state so DECSC/DECRC and DECRQSS see the same style.
+    VTermValue v;
+    v.number = m_defaultCursorShape;
+    vterm_state_set_termprop(m_state, VTERM_PROP_CURSORSHAPE, &v);
+    v.boolean = m_defaultCursorBlink ? 1 : 0;
+    vterm_state_set_termprop(m_state, VTERM_PROP_CURSORBLINK, &v);
+}
+
+// True right after the last byte of DECSCUSR 0 ("ESC [ SP q", "ESC [ 0 SP q")
+// or RIS ("ESC c"): libvterm then sets a blinking block; we restore the default.
+bool Terminal::scanForCursorReset(char c)
+{
+    const ResetScan st = m_resetScan;
+    m_resetScan = c == '\x1b' ? ResetScan::Esc : ResetScan::Ground;
+    switch (st) {
+    case ResetScan::Ground:
+        return false;
+    case ResetScan::Esc:
+        if (c == '[') {
+            m_resetScan = ResetScan::Csi;
+        }
+        return c == 'c';
+    case ResetScan::Csi:
+        if (c == '0') {
+            m_resetScan = ResetScan::Csi;
+        } else if (c == ' ') {
+            m_resetScan = ResetScan::CsiSpace;
+        }
+        return false;
+    case ResetScan::CsiSpace:
+        return c == 'q';
+    }
+    return false;
+}
+
 void Terminal::feed(const QByteArray &bytes)
 {
     if (bytes.isEmpty()) {
         return;
     }
-    vterm_input_write(m_vt, bytes.constData(), static_cast<size_t>(bytes.size()));
+    const char *data = bytes.constData();
+    const char *const end = data + bytes.size();
+    const char *start = data;
+    const char *p = data;
+    while (p < end) {
+        if (m_resetScan == ResetScan::Ground) {
+            // Fast path: nothing pending, skip to the next ESC.
+            const void *esc = std::memchr(p, '\x1b', static_cast<size_t>(end - p));
+            if (!esc) {
+                break;
+            }
+            p = static_cast<const char *>(esc);
+        }
+        if (scanForCursorReset(*p++)) {
+            vterm_input_write(m_vt, start, static_cast<size_t>(p - start));
+            applyDefaultCursorStyle();
+            start = p;
+        }
+    }
+    if (start < end) {
+        vterm_input_write(m_vt, start, static_cast<size_t>(end - start));
+    }
     flush();
 }
 
@@ -212,6 +282,7 @@ void Terminal::clearScrollback()
 void Terminal::reset()
 {
     vterm_screen_reset(m_screen, 1);
+    applyDefaultCursorStyle();
     m_title.clear();
     m_mouseMode = VTERM_PROP_MOUSE_NONE;
     m_altScreen = false;
@@ -400,6 +471,11 @@ int Terminal::cbSetTermProp(VTermProp prop, VTermValue *val, void *user)
         break;
     case VTERM_PROP_CURSORSHAPE:
         t->m_cursorShape = val->number;
+        t->m_dirty = true;
+        break;
+    case VTERM_PROP_CURSORBLINK:
+        t->m_cursorBlink = val->boolean;
+        t->m_dirty = true;
         break;
     case VTERM_PROP_ALTSCREEN:
         t->m_altScreen = val->boolean;

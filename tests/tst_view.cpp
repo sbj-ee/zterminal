@@ -10,6 +10,8 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QFocusEvent>
+#include <QImage>
 #include <QMenuBar>
 #include <QMouseEvent>
 #include <QSettings>
@@ -320,6 +322,71 @@ private slots:
         // Saving settings drops the obsolete 0.1.0 key.
         AppSettings::load().save();
         QVERIFY(!QSettings().contains(QStringLiteral("view/menuBarVisible")));
+    }
+
+    static void focus(TerminalView &v, bool in)
+    {
+        QFocusEvent e(in ? QEvent::FocusIn : QEvent::FocusOut, Qt::OtherFocusReason);
+        QApplication::sendEvent(&v, &e);
+    }
+
+    // Pixel of the rendered viewport inside cell (row, col), dx/dy from its top-left.
+    static QRgb cellPixel(TerminalView &v, int row, int col, int dx, int dy)
+    {
+        const QImage img = v.viewport()->grab().toImage();
+        const qreal dpr = img.devicePixelRatio();
+        const QSize c = v.cellSize();
+        return img.pixel(int((2 + col * c.width() + dx) * dpr), int((2 + row * c.height() + dy) * dpr)) | 0xff000000u;
+    }
+
+    void cursorIsABlinkingBarByDefault()
+    {
+        Fixture f;
+        f.term.feed("ab");
+        focus(f.view, true);
+        QVERIFY(f.view.cursorBlinking());
+        QVERIFY(f.view.cursorBlinkPhaseOn());
+        const QRgb cursor = f.term.colorScheme().cursor | 0xff000000u;
+        const QRgb bg = f.term.colorScheme().background | 0xff000000u;
+        const int h = f.view.cellSize().height();
+        const int w = f.view.cellSize().width();
+        // A thin vertical bar at the left edge of the cursor cell, not a block.
+        QCOMPARE(cellPixel(f.view, 0, 2, 0, h / 2), cursor);
+        QCOMPARE(cellPixel(f.view, 0, 2, 1, h / 2), cursor);
+        QCOMPARE(cellPixel(f.view, 0, 2, w - 2, h / 2), bg);
+
+        // It blinks: the "off" phase hides it, the next phase shows it again.
+        const int interval = f.view.cursorBlinkInterval();
+        QVERIFY(interval > 0);
+        QTRY_VERIFY_WITH_TIMEOUT(!f.view.cursorBlinkPhaseOn(), interval * 4);
+        QCOMPARE(cellPixel(f.view, 0, 2, 0, h / 2), bg);
+        QTRY_VERIFY_WITH_TIMEOUT(f.view.cursorBlinkPhaseOn(), interval * 4);
+        QCOMPARE(cellPixel(f.view, 0, 2, 0, h / 2), cursor);
+    }
+
+    void cursorBlinkFollowsFocusTypingAndProgram()
+    {
+        Fixture f;
+        QVERIFY(!f.view.cursorBlinking()); // never focused: no timer
+        focus(f.view, true);
+        QVERIFY(f.view.cursorBlinking());
+        QTRY_VERIFY_WITH_TIMEOUT(!f.view.cursorBlinkPhaseOn(), f.view.cursorBlinkInterval() * 4);
+        // Typing (and cursor movement) shows the cursor solid again at once.
+        QTest::keyClick(&f.view, Qt::Key_X);
+        QVERIFY(f.view.cursorBlinkPhaseOn());
+        QTRY_VERIFY_WITH_TIMEOUT(!f.view.cursorBlinkPhaseOn(), f.view.cursorBlinkInterval() * 4);
+        f.term.feed("z");
+        QVERIFY(f.view.cursorBlinkPhaseOn());
+        // A steady style from the program stops blinking; the default brings it back.
+        f.term.feed("\x1b[2 q");
+        QVERIFY(!f.view.cursorBlinking());
+        QVERIFY(f.view.cursorBlinkPhaseOn());
+        f.term.feed("\x1b[0 q");
+        QVERIFY(f.view.cursorBlinking());
+        // Unfocused: hollow block, solid, no timer.
+        focus(f.view, false);
+        QVERIFY(!f.view.cursorBlinking());
+        QVERIFY(f.view.cursorBlinkPhaseOn());
     }
 
     void mainWindowRunsLocalShell()
