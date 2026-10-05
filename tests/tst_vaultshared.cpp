@@ -328,7 +328,12 @@ private slots:
 
         t->findChild<QPushButton *>(QStringLiteral("reconnect"))->click();
         expectAskpassAnswered(); // a fresh one-shot askpass with the same stored password
-        QTRY_VERIFY_WITH_TIMEOUT(t->isDisconnected(), 10000); // (drops again: $o/drop is still there)
+        // Wait for this second attempt to really exit (it drops again: $o/drop is still there).
+        // isDisconnected() alone is no wait: it is still true from the first drop. Without this,
+        // removing $o/drop below can race the fake ssh's `-e $o/drop` check (it runs just after
+        // askpass answers); on a slow runner the attempt then succeeds and sleeps 30s instead.
+        QTRY_VERIFY_WITH_TIMEOUT(!t->pty()->isRunning(), 10000);
+        QVERIFY(t->isDisconnected());
         QCOMPARE(prompts, 0);
         QVERIFY(vm().isUnlocked());
 
@@ -338,7 +343,7 @@ private slots:
         QVERIFY(b->action(QStringLiteral("unlockVault"))->isEnabled());
         QFile::remove(out(QStringLiteral("drop")));
         answer = QString::fromUtf8(kMaster);
-        QTRY_VERIFY(!t->pty()->isRunning());
+        QVERIFY(!t->pty()->isRunning());
         QPushButton *reconnect = t->findChild<QPushButton *>(QStringLiteral("reconnect"));
         QVERIFY(reconnect);
         QTRY_VERIFY(reconnect->isEnabled());
