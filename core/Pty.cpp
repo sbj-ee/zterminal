@@ -20,6 +20,10 @@
 #include <unistd.h>
 #include <vector>
 
+#if defined(__APPLE__)
+extern char **environ; // POSIX, must stay outside namespace zterminal
+#endif
+
 namespace zterminal {
 
 Pty::Pty(QObject *parent)
@@ -102,8 +106,7 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
         ::signal(SIGQUIT, SIG_DFL);
         ::signal(SIGCHLD, SIG_DFL);
 #if defined(__APPLE__)
-        // execvpe is GNU-only; point environ at our envp and use execvp.
-        extern char **environ;
+        // execvpe is GNU-only; point POSIX environ at our envp and use execvp.
         environ = envp.data();
         ::execvp(argv[0], argv.data());
 #else
