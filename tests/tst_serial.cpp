@@ -13,6 +13,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QtGlobal>
 
 #include <unistd.h>
 
@@ -195,7 +196,12 @@ private slots:
         const qint64 span = router.times.last() - router.times.first();
         QVERIFY2(span >= 5 * 30 - 15, qPrintable(QString::number(span)));
         for (int i = 1; i < router.times.size(); ++i) {
+#if defined(Q_OS_MACOS)
+            // macOS CI timers coalesce more aggressively than Linux.
+            QVERIFY2(router.times[i] - router.times[i - 1] >= 10, qPrintable(QString::number(router.times[i] - router.times[i - 1])));
+#else
             QVERIFY2(router.times[i] - router.times[i - 1] >= 20, qPrintable(QString::number(router.times[i] - router.times[i - 1])));
+#endif
         }
     }
 
@@ -300,9 +306,13 @@ private slots:
         // Permission denied -> the dialout explanation
         const QString perm = SerialBackend::describeError(QSerialPort::PermissionError, QStringLiteral("/dev/ttyUSB0"));
         QVERIFY(perm.contains(QStringLiteral("Permission denied opening /dev/ttyUSB0")));
+#if defined(Q_OS_MACOS)
+        QVERIFY(perm.contains(QStringLiteral("/dev/cu.")));
+#else
         QVERIFY(perm.contains(QStringLiteral("dialout")));
         QVERIFY(perm.contains(QStringLiteral("sudo usermod -aG dialout $USER")));
         QVERIFY(perm.contains(QStringLiteral("log out and back in")));
+#endif
         QVERIFY(SerialBackend::describeError(QSerialPort::OpenError, QStringLiteral("/dev/ttyS0")).contains(QStringLiteral("already open")));
         QVERIFY(SerialBackend::describeError(QSerialPort::ResourceError, QStringLiteral("/dev/ttyS0")).contains(QStringLiteral("unplugged")));
 
@@ -316,7 +326,11 @@ private slots:
         QVERIFY(!target.isEmpty());
         QVERIFY(QFile::setPermissions(target, QFileDevice::Permissions{}));
         QVERIFY(!be.open(serialCfg(cable.a)));
+#if defined(Q_OS_MACOS)
+        QVERIFY2(be.errorString().contains(QStringLiteral("Permission denied")), qPrintable(be.errorString()));
+#else
         QVERIFY2(be.errorString().contains(QStringLiteral("usermod -aG dialout")), qPrintable(be.errorString()));
+#endif
     }
 };
 

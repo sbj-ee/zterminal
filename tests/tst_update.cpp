@@ -26,6 +26,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QtGlobal>
 #include <QTextBrowser>
 
 #include <map>
@@ -156,9 +157,20 @@ class TstUpdate : public QObject
     {
         gh.routes[QStringLiteral("/latest")].body = fixture(QStringLiteral("release-0.10.0.json"), gh.base());
         gh.routes[QStringLiteral("/download/v0.10.0/zterminal_0.10.0_amd64.deb")].body = debBytes;
+        gh.routes[QStringLiteral("/download/v0.10.0/zterminal-0.10.0-Darwin.dmg")].body = debBytes;
         const QByteArray sum = goodSum ? sha256Hex(debBytes) : sha256Hex("something else");
         gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS")].body =
-            sum + "  zterminal_0.10.0_amd64.deb\n" + QByteArray(64, 'a') + "  other.tar.gz\n";
+            sum + "  zterminal_0.10.0_amd64.deb\n" + sum + "  zterminal-0.10.0-Darwin.dmg\n"
+            + QByteArray(64, 'a') + "  other.tar.gz\n";
+    }
+
+    static QString platformPackageName()
+    {
+#if defined(Q_OS_MACOS)
+        return QStringLiteral("zterminal-0.10.0-Darwin.dmg");
+#else
+        return QStringLiteral("zterminal_0.10.0_amd64.deb");
+#endif
     }
 
     UpdateManager &freshManager(MockGitHub &gh)
@@ -238,14 +250,15 @@ private slots:
         QVERIFY(r->notes.contains(QStringLiteral("Auto-update")));
         QCOMPARE(r->htmlUrl, QStringLiteral("https://github.com/sbj-ee/zterminal/releases/tag/v0.10.0"));
         QVERIFY(r->publishedAt.isValid());
-        QCOMPARE(r->assets.size(), 2);
+        QCOMPARE(r->assets.size(), 3);
         QVERIFY(r->debAsset());
         QCOMPARE(r->debAsset()->name, QStringLiteral("zterminal_0.10.0_amd64.deb"));
         QCOMPARE(r->debAsset()->size, qint64(4096));
         QVERIFY(r->checksumAsset());
-        QVERIFY(!r->dmgAsset()); // Linux fixture has no Darwin asset
+        QVERIFY(r->dmgAsset());
+        QCOMPARE(r->dmgAsset()->name, QStringLiteral("zterminal-0.10.0-Darwin.dmg"));
         QVERIFY(r->packageAsset());
-        QCOMPARE(r->packageAsset()->name, r->debAsset()->name);
+        QCOMPARE(r->packageAsset()->name, platformPackageName());
 
         // Darwin .dmg naming used by CPack DragNDrop / macOS updater.
         {
@@ -470,7 +483,7 @@ private slots:
         auto args = done.takeFirst();
         QVERIFY2(args.at(0).toBool(), qPrintable(args.at(2).toString()));
         const QString deb = args.at(1).toString();
-        QCOMPARE(deb, dir.filePath(QStringLiteral("zterminal_0.10.0_amd64.deb")));
+        QCOMPARE(deb, dir.filePath(platformPackageName()));
         QCOMPARE(sha256OfFile(deb).toLatin1(), sha256Hex(debBytes));
         QVERIFY(QFile::exists(dir.filePath(QStringLiteral("SHA256SUMS"))));
         QVERIFY(!prog.isEmpty());
@@ -483,7 +496,7 @@ private slots:
         args = done.takeFirst();
         QVERIFY(!args.at(0).toBool());
         QVERIFY(args.at(2).toString().contains(QStringLiteral("does not match")));
-        QVERIFY(!QFile::exists(dir2.filePath(QStringLiteral("zterminal_0.10.0_amd64.deb"))));
+        QVERIFY(!QFile::exists(dir2.filePath(platformPackageName())));
 
         // SHA256SUMS vanished from the server (404).
         gh.routes.erase(QStringLiteral("/download/v0.10.0/SHA256SUMS"));
@@ -500,7 +513,11 @@ private slots:
         QVERIFY(done.wait(5000));
         args = done.takeFirst();
         QVERIFY(!args.at(0).toBool());
+#if defined(Q_OS_MACOS)
+        QVERIFY(args.at(2).toString().contains(QStringLiteral("missing zterminal-0.11.0-Darwin.dmg")));
+#else
         QVERIFY(args.at(2).toString().contains(QStringLiteral("missing zterminal_0.11.0_amd64.deb")));
+#endif
         QCOMPARE(gh.requests.size(), before);
     }
 
@@ -659,7 +676,7 @@ private slots:
         QFile mk(marker);
         QVERIFY(mk.open(QIODevice::ReadOnly));
         const QStringList lines = QString::fromUtf8(mk.readAll()).trimmed().split(QLatin1Char('\n'));
-        QCOMPARE(lines.value(1), QStringLiteral("./zterminal_0.10.0_amd64.deb").mid(2));
+        QCOMPARE(lines.value(1), platformPackageName());
         QVERIFY(lines.value(0).contains(QStringLiteral("zterminal-update-")));
         QTRY_VERIFY(findTop<QMessageBox>("updateRestart"));
         QMessageBox *box = findTop<QMessageBox>("updateRestart");
@@ -695,7 +712,7 @@ private slots:
         const QString msg = args.at(1).toString();
         QVERIFY2(msg.contains(QStringLiteral("password prompt was dismissed")), qPrintable(msg));
         const QString kept = msg.section(QStringLiteral("The verified package is at:\n"), 1).section(QLatin1Char('\n'), 0, 0);
-        QVERIFY2(kept.endsWith(QStringLiteral("zterminal_0.10.0_amd64.deb")), qPrintable(kept));
+        QVERIFY2(kept.endsWith(platformPackageName()), qPrintable(kept));
         QVERIFY(QFile::exists(kept));
         QDir(QFileInfo(kept).absolutePath()).removeRecursively();
         closeAllTop();

@@ -16,6 +16,12 @@
       "browser_download_url": "@BASE@/download/v0.10.0/zterminal_0.10.0_amd64.deb"
     },
     {
+      "name": "zterminal-0.10.0-Darwin.dmg",
+      "size": 4096,
+      "content_type": "application/x-apple-diskimage",
+      "browser_download_url": "@BASE@/download/v0.10.0/zterminal-0.10.0-Darwin.dmg"
+    },
+    {
       "name": "SHA256SUMS",
       "size": 93,
       "content_type": "text/plain",
