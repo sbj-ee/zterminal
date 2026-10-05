@@ -211,8 +211,10 @@ private slots:
                 if (auto *d = qobject_cast<UnlockVaultDialog *>(QApplication::activeModalWidget())) {
                     return d;
                 }
-                for (QWidget *w : QApplication::topLevelWidgets()) {
-                    if (auto *d = qobject_cast<UnlockVaultDialog *>(w)) {
+                // Parent dialogs are not top-level; scan every widget (macOS/offscreen
+                // often leaves activeModalWidget null for WindowModal children).
+                for (QWidget *w : QApplication::allWidgets()) {
+                    if (auto *d = qobject_cast<UnlockVaultDialog *>(w); d && d->isVisible()) {
                         return d;
                     }
                 }
@@ -222,8 +224,8 @@ private slots:
                 if (auto *c = qobject_cast<CreateVaultDialog *>(QApplication::activeModalWidget())) {
                     return c;
                 }
-                for (QWidget *w : QApplication::topLevelWidgets()) {
-                    if (auto *c = qobject_cast<CreateVaultDialog *>(w)) {
+                for (QWidget *w : QApplication::allWidgets()) {
+                    if (auto *c = qobject_cast<CreateVaultDialog *>(w); c && c->isVisible()) {
                         return c;
                     }
                 }

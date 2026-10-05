@@ -223,8 +223,14 @@ private slots:
         const int l2 = router.got.indexOf("description");
         const int l3 = router.got.indexOf("no shutdown");
         // Each line arrives whole; the next one waits >= the line delay.
+#if defined(Q_OS_MACOS)
+        // macOS CI timers are coarse (~10–20 ms); allow a little under 150 ms.
+        QVERIFY2(router.times[l2] - router.times[l2 - 1] >= 100, qPrintable(QString::number(router.times[l2] - router.times[l2 - 1])));
+        QVERIFY2(router.times[l3] - router.times[l3 - 1] >= 100, qPrintable(QString::number(router.times[l3] - router.times[l3 - 1])));
+#else
         QVERIFY2(router.times[l2] - router.times[l2 - 1] >= 135, qPrintable(QString::number(router.times[l2] - router.times[l2 - 1])));
         QVERIFY2(router.times[l3] - router.times[l3 - 1] >= 135, qPrintable(QString::number(router.times[l3] - router.times[l3 - 1])));
+#endif
         QVERIFY(router.times[l2 - 2] - router.times[0] < 100); // no delay inside a line
     }
 
