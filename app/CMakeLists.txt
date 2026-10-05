@@ -22,3 +22,14 @@ target_link_libraries(zterminal PRIVATE zterminal_ui)
 zterminal_set_warnings(zterminal)
 # The askpass helper must be built whenever the app is (it's found next to it).
 add_dependencies(zterminal zterminal-askpass)
+
+# macOS: copy askpass into the build-tree .app so AskpassServer::findHelper works.
+if(APPLE)
+  add_custom_command(TARGET zterminal POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/MacOS"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:zterminal-askpass>"
+            "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/MacOS/zterminal-askpass"
+    COMMENT "Bundling zterminal-askpass into zterminal.app"
+    VERBATIM)
+endif()

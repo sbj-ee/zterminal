@@ -249,12 +249,13 @@ private slots:
 
         // Darwin .dmg naming used by CPack DragNDrop / macOS updater.
         {
-            const auto withDmg = ReleaseInfo::fromJson(QByteArrayLiteral(
-                "{"tag_name":"v0.10.0","draft":false,"prerelease":false,"assets":["
-                "{"name":"zterminal-0.10.0-Darwin.dmg","size":99,"
-                ""browser_download_url":"https://example.test/zterminal-0.10.0-Darwin.dmg"},"
-                "{"name":"SHA256SUMS","size":10,"
-                ""browser_download_url":"https://example.test/SHA256SUMS"}]}"));
+            const auto withDmg = ReleaseInfo::fromJson(R"json(
+{"tag_name":"v0.10.0","draft":false,"prerelease":false,"assets":[
+  {"name":"zterminal-0.10.0-Darwin.dmg","size":99,
+   "browser_download_url":"https://example.test/zterminal-0.10.0-Darwin.dmg"},
+  {"name":"SHA256SUMS","size":10,
+   "browser_download_url":"https://example.test/SHA256SUMS"}
+]})json");
             QVERIFY(withDmg);
             QVERIFY(withDmg->dmgAsset());
             QCOMPARE(withDmg->dmgAsset()->name, QStringLiteral("zterminal-0.10.0-Darwin.dmg"));

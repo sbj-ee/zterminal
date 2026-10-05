@@ -49,17 +49,6 @@ add_custom_command(
 target_sources(zterminal PRIVATE "${_icns}")
 set_source_files_properties("${_icns}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
-# Place askpass next to the app binary in the build-tree bundle so
-# AskpassServer::findHelper() (applicationDirPath()/zterminal-askpass) works
-# without an install.
-add_custom_command(TARGET zterminal POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/MacOS"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "$<TARGET_FILE:zterminal-askpass>"
-          "$<TARGET_BUNDLE_CONTENT_DIR:zterminal>/MacOS/zterminal-askpass"
-  COMMENT "Bundling zterminal-askpass into zterminal.app"
-  VERBATIM)
-
 # --- Deployment (runs at install time, i.e. inside `cpack -G DragNDrop`) ---
 get_target_property(_qmake Qt6::qmake IMPORTED_LOCATION)
 get_filename_component(_qtbin "${_qmake}" DIRECTORY)
