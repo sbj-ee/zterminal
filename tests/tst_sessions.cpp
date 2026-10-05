@@ -3,9 +3,11 @@
 #include "CommandLine.hpp"
 #include "Session.hpp"
 #include "SessionStore.hpp"
+#include "SessionExport.hpp"
 
 #include <QDir>
 #include <QFile>
+#include <QJsonObject>
 #include <QFileInfo>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -322,6 +324,118 @@ private slots:
             QCOMPARE(r.baudRate, args.size() == 3 ? args.at(2).toInt() : 9600);
             QCOMPARE(r.displayName(), QStringLiteral("serial ") + args.at(1));
         }
+    }
+
+    // ---- JSON export / import -------------------------------------------
+    void exportJsonRoundTripAndNoSecrets()
+    {
+        SessionConfig ssh = sshSession();
+        ssh.useStoredPassword = true;
+        ssh.autoLog = true;
+        ssh.autoReconnect = true;
+        ssh.keepaliveInterval = 15;
+        ssh.keepaliveCountMax = 4;
+
+        SessionConfig serial;
+        serial.name = QStringLiteral("console-1");
+        serial.type = SessionConfig::Type::Serial;
+        serial.serialDevice = QStringLiteral("/dev/ttyUSB0");
+        serial.baudRate = 115200;
+        serial.loginUser = QStringLiteral("cisco");
+        serial.localEcho = true;
+        serial.charDelayMs = 5;
+
+        SessionConfig local;
+        local.name = QStringLiteral("Local");
+        local.fontFamily = QStringLiteral("monospace");
+        local.fontSize = 12;
+
+        const QByteArray json = sessionsToExportJson({ssh, serial, local});
+        QVERIFY(json.contains(R"("format": "zterminal-sessions")") || json.contains(R"("format":"zterminal-sessions")"));
+        QVERIFY(json.contains(R"("formatVersion": 1)") || json.contains(R"("formatVersion":1)"));
+        // Secrets must never appear — even if someone stuffed one into a field name elsewhere.
+        const QByteArray lower = json.toLower();
+        QVERIFY(!lower.contains("password\":"));
+        QVERIFY(!lower.contains("hunter"));
+        QVERIFY(!lower.contains("secret\":"));
+        QVERIFY(json.contains(R"("passwordStored": true)") || json.contains(R"("passwordStored":true)"));
+
+        QString err;
+        const auto doc = sessionsFromExportJson(json, &err);
+        QVERIFY2(doc, qPrintable(err));
+        QCOMPARE(doc->formatVersion, kSessionsExportFormatVersion);
+        QCOMPARE(doc->sessions.size(), 3);
+        QCOMPARE(doc->sessions.at(0), ssh);
+        QCOMPARE(doc->sessions.at(1), serial);
+        QCOMPARE(doc->sessions.at(2), local);
+
+        // Per-session helpers.
+        QCOMPARE(sessionFromJson(sessionToJson(ssh)).value(), ssh);
+        QCOMPARE(sessionFromJson(sessionToJson(serial)).value(), serial);
+        QCOMPARE(sessionFromJson(sessionToJson(local)).value(), local);
+    }
+
+    void exportImportViaStore()
+    {
+        QTemporaryDir dir;
+        SessionStore store(dir.filePath(QStringLiteral("sessions")));
+        SessionConfig a = sshSession();
+        a.useStoredPassword = true;
+        SessionConfig b;
+        b.name = QStringLiteral("lab box");
+        QVERIFY(store.save(a));
+        QVERIFY(store.save(b));
+
+        const QString path = dir.filePath(QStringLiteral("out.json"));
+        QString err;
+        QVERIFY2(exportSessionsToFile(store, path, &err), qPrintable(err));
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray bytes = f.readAll();
+        QVERIFY(!bytes.toLower().contains("pass\":") || bytes.contains("passwordStored"));
+        // No plaintext password value keys.
+        QVERIFY(!QString::fromUtf8(bytes).contains(QStringLiteral("\"password\"")));
+
+        SessionStore dest(dir.filePath(QStringLiteral("imported")));
+        QVERIFY2(importSessionsFromFile(dest, path, SessionImportConflict::Overwrite, &err), qPrintable(err));
+        QCOMPARE(dest.names().size(), 2);
+        QCOMPARE(*dest.load(a.name), a);
+        QCOMPARE(*dest.load(b.name), b);
+
+        // Skip policy leaves an existing session alone.
+        SessionConfig changed = a;
+        changed.host = QStringLiteral("9.9.9.9");
+        QVERIFY(dest.save(changed));
+        const auto r = importSessionsFromJson(dest, bytes, SessionImportConflict::Skip, &err);
+        QCOMPARE(r.skipped, 2); // both names already exist
+        QCOMPARE(r.imported, 0);
+        QCOMPARE(r.overwritten, 0);
+        QCOMPARE(dest.load(a.name)->host, QStringLiteral("9.9.9.9"));
+
+        const auto r2 = importSessionsFromJson(dest, bytes, SessionImportConflict::Overwrite, &err);
+        QCOMPARE(r2.overwritten, 2);
+        QCOMPARE(dest.load(a.name)->host, a.host);
+    }
+
+    void exportRejectsBadDocuments()
+    {
+        QString err;
+        QVERIFY(!sessionsFromExportJson("{}", &err));
+        QVERIFY(err.contains(QStringLiteral("zterminal-sessions")));
+        QVERIFY(!sessionsFromExportJson(R"({"format":"zterminal-sessions","formatVersion":99,"sessions":[]})", &err));
+        QVERIFY(err.contains(QStringLiteral("formatVersion")));
+        QVERIFY(!sessionsFromExportJson(R"({"format":"zterminal-sessions","formatVersion":1})", &err));
+        QVERIFY(err.contains(QStringLiteral("sessions")));
+        QVERIFY(!sessionFromJson(QJsonObject{}, &err));
+        QVERIFY(!sessionFromJson(QJsonObject{{QStringLiteral("name"), QStringLiteral("-bad")}}, &err));
+    }
+
+    void defaultExportFileNameLooksRight()
+    {
+        const QString n = defaultSessionsExportFileName();
+        QVERIFY(n.startsWith(QStringLiteral("zterminal-sessions-")));
+        QVERIFY(n.endsWith(QStringLiteral(".json")));
+        QCOMPARE(n.size(), QStringLiteral("zterminal-sessions-YYYYMMDD.json").size());
     }
 };
 

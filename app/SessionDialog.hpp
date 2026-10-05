@@ -17,7 +17,7 @@ class QWidget;
 
 namespace zterminal {
 
-// PuTTY-style session dialog: saved sessions on the left (Load / Save / Delete),
+// PuTTY-style session dialog: saved sessions on the left (Load / Save / Delete / Export / Import),
 // connection settings on the right, Open starts the session in a new window.
 class SessionDialog : public QDialog
 {
@@ -34,6 +34,9 @@ public:
     bool loadSelected();
     bool saveCurrent();
     bool deleteSelected();
+    // Export/import all saved sessions as JSON (no vault secrets).
+    bool exportSessions();
+    bool importSessions();
     // Validates; on success accept()s.
     bool openSession();
 
@@ -55,6 +58,8 @@ private:
     QPushButton *m_load = nullptr;
     QPushButton *m_save = nullptr;
     QPushButton *m_delete = nullptr;
+    QPushButton *m_export = nullptr;
+    QPushButton *m_import = nullptr;
     QComboBox *m_type = nullptr;
     QWidget *m_sshBox = nullptr;
     QLineEdit *m_host = nullptr;

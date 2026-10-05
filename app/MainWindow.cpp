@@ -139,6 +139,10 @@ void MainWindow::buildMenus()
     connect(addAct(file, QStringLiteral("saveSession"), QStringLiteral("&Save Session\u2026"),
                    QKS(QStringLiteral("Ctrl+Shift+S"))),
             &QAction::triggered, this, &MainWindow::saveSessionInteractive);
+    connect(addAct(file, QStringLiteral("exportSessions"), QStringLiteral("&Export Sessions\u2026")),
+            &QAction::triggered, this, &MainWindow::exportSessionsInteractive);
+    connect(addAct(file, QStringLiteral("importSessions"), QStringLiteral("&Import Sessions\u2026")),
+            &QAction::triggered, this, &MainWindow::importSessionsInteractive);
     file->addSeparator();
     // Tabs (Ctrl+Shift variants and Ctrl+PgUp/PgDn: plain Ctrl+letter keys stay with the session).
     connect(addAct(file, QStringLiteral("newTab"), QStringLiteral("New &Tab"), QKS(QStringLiteral("Ctrl+Shift+T"))),
@@ -708,6 +712,20 @@ void MainWindow::showSessionDialog(bool focusSaved)
             QMessageBox::warning(this, QStringLiteral("Open Session"), err);
         }
     }
+}
+
+
+void MainWindow::exportSessionsInteractive()
+{
+    // Reuse the dialog's export flow (file picker + status); no need to Open.
+    SessionDialog dlg(m_store, SessionConfig{}, this);
+    dlg.exportSessions();
+}
+
+void MainWindow::importSessionsInteractive()
+{
+    SessionDialog dlg(m_store, SessionConfig{}, this);
+    dlg.importSessions();
 }
 
 bool MainWindow::openInNewTab(const SessionConfig &cfg, QString *error)

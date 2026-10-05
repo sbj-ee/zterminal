@@ -243,7 +243,7 @@ private slots:
     {
         LaunchRequest req; // local shell
         MainWindow w(req, {});
-        for (const char *n : {"newSession", "openSavedSession", "saveSession", "duplicateSession", "restartSession"}) {
+        for (const char *n : {"newSession", "openSavedSession", "saveSession", "exportSessions", "importSessions", "duplicateSession", "restartSession"}) {
             QVERIFY2(w.action(QString::fromLatin1(n)) && w.action(QString::fromLatin1(n))->isEnabled(), n);
         }
         FakeSsh fake;

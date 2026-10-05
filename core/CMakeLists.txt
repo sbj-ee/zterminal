@@ -10,6 +10,7 @@ add_library(zterminal_core STATIC
   CommandLine.cpp CommandLine.hpp
   Session.cpp Session.hpp
   SessionStore.cpp SessionStore.hpp
+  SessionExport.cpp SessionExport.hpp
   SerialBackend.cpp SerialBackend.hpp
   SecureBuffer.cpp SecureBuffer.hpp
   Vault.cpp Vault.hpp
