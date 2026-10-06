@@ -95,23 +95,23 @@ for Messages), so mail stays readable in every theme.
 
 One per theme per app (offline sample data). The files live in each repo's
 `docs/screenshots/` (zmail-*.png in zmail, zterminal-*.png in zterminal); the
-links are pinned to the commits that added them so this page stays identical
-in both repos.
+links point at each repo's main branch so this page stays identical in
+both repos.
 
 ### Boilermakers
 
-![zmail in the Boilermakers theme](https://raw.githubusercontent.com/sbj-ee/zmail/837581ab4bfe72872fc6f72236461bffa7795e46/docs/screenshots/zmail-boilermakers.png)
+![zmail in the Boilermakers theme](https://raw.githubusercontent.com/sbj-ee/zmail/main/docs/screenshots/zmail-boilermakers.png)
 
-![zterminal in the Boilermakers theme](https://raw.githubusercontent.com/sbj-ee/zterminal/5883a30e57605965c4a1abe1e4b3dc4605e8fb4a/docs/screenshots/zterminal-boilermakers.png)
+![zterminal in the Boilermakers theme](https://raw.githubusercontent.com/sbj-ee/zterminal/main/docs/screenshots/zterminal-boilermakers.png)
 
 ### Badgers
 
-![zmail in the Badgers theme](https://raw.githubusercontent.com/sbj-ee/zmail/837581ab4bfe72872fc6f72236461bffa7795e46/docs/screenshots/zmail-badgers.png)
+![zmail in the Badgers theme](https://raw.githubusercontent.com/sbj-ee/zmail/main/docs/screenshots/zmail-badgers.png)
 
-![zterminal in the Badgers theme](https://raw.githubusercontent.com/sbj-ee/zterminal/5883a30e57605965c4a1abe1e4b3dc4605e8fb4a/docs/screenshots/zterminal-badgers.png)
+![zterminal in the Badgers theme](https://raw.githubusercontent.com/sbj-ee/zterminal/main/docs/screenshots/zterminal-badgers.png)
 
 ### Packers
 
-![zmail in the Packers theme](https://raw.githubusercontent.com/sbj-ee/zmail/837581ab4bfe72872fc6f72236461bffa7795e46/docs/screenshots/zmail-packers.png)
+![zmail in the Packers theme](https://raw.githubusercontent.com/sbj-ee/zmail/main/docs/screenshots/zmail-packers.png)
 
-![zterminal in the Packers theme](https://raw.githubusercontent.com/sbj-ee/zterminal/5883a30e57605965c4a1abe1e4b3dc4605e8fb4a/docs/screenshots/zterminal-packers.png)
+![zterminal in the Packers theme](https://raw.githubusercontent.com/sbj-ee/zterminal/main/docs/screenshots/zterminal-packers.png)
