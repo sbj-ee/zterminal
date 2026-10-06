@@ -45,7 +45,7 @@ alone can't push malware to users.
 5. Check a release by hand once:
 
    ```sh
-   minisign -Vm SHA256SUMS -P RW...your-public-key...
+   minisign -Vm SHA256SUMS -P RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9
    ```
 
 ## Transition from 1.0.x
@@ -60,3 +60,11 @@ every update is signature-checked. Ask users to verify that first release with
 Generate a new key pair, update the secrets and `core/UpdateSigningKey.cpp`,
 and release. Clients that still have the old key can't verify releases signed
 with the new key, so tell users to install that release by hand.
+
+## Current release key
+
+Key ID `32960BBA77B36F1F`:
+
+```
+RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9
+```

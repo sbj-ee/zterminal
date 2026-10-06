@@ -126,8 +126,8 @@ Download the assets for [the latest release](https://github.com/sbj-ee/zterminal
 and, from the first signed release on, `SHA256SUMS.minisig`).
 
 ```sh
-# Verify the signature (public key: docs/RELEASING.md), then the package
-minisign -Vm SHA256SUMS -P <release public key>
+# Verify the signature with the release public key, then the package
+minisign -Vm SHA256SUMS -P RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9
 sha256sum -c --ignore-missing SHA256SUMS          # Linux
 shasum -a 256 -c --ignore-missing SHA256SUMS      # macOS
 ```
