@@ -6,7 +6,7 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.0.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.1.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, and in-app updates.
 See [docs/PLAN.md](docs/PLAN.md) for design notes.
 
@@ -20,6 +20,13 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
 - **xterm-style emulation** via libvterm: 16 / 256 / truecolor, bold, italic,
   underline, reverse, strike, alternate screen, wide characters, bracketed paste,
   and mouse modes 1000/1002/1003/1006.
+- **Colour schemes:** xterm, PuTTY, Solarized Dark, and the brand themes
+  **Boilermakers** (Purdue gold on black), **Badgers** (white on UW black, Badger
+  Red accents) and **Packers** (white on Packers green, gold accents). Pick one in
+  Settings → Preferences, View → Color Scheme, or the session dialog per saved
+  session. The brand palette is shared with [zmail](https://github.com/sbj-ee/zmail):
+  see [docs/THEMES.md](docs/THEMES.md) and the
+  [screenshots](docs/brand-themes.png).
 - **Blinking vertical-bar cursor** by default; programs can still change the shape
   and blink via terminal sequences (DECSCUSR / libvterm cursor props).
 - **Scrollback:** 100,000 lines per tab by default (or Unlimited in Preferences),
@@ -70,7 +77,7 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
 ## Install
 
 Download the assets for [the latest release](https://github.com/sbj-ee/zterminal/releases/latest)
-(`zterminal_1.0.0_amd64.deb` or `zterminal-1.0.0-Darwin.dmg`, plus `SHA256SUMS`).
+(`zterminal_1.1.0_amd64.deb` or `zterminal-1.1.0-Darwin.dmg`, plus `SHA256SUMS`).
 
 ```sh
 # Verify the package (Linux or macOS)
@@ -81,7 +88,7 @@ shasum -a 256 -c SHA256SUMS      # macOS
 **Linux:**
 
 ```sh
-sudo apt install ./zterminal_1.0.0_amd64.deb
+sudo apt install ./zterminal_1.1.0_amd64.deb
 # Serial consoles: sudo usermod -aG dialout $USER   # then log out and back in
 ```
 

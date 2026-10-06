@@ -5,6 +5,10 @@
 #include <QString>
 #include <array>
 
+namespace sbj::brand {
+struct Theme;
+}
+
 namespace zterminal {
 
 // The 16 ANSI colours plus default foreground/background/cursor/selection.
@@ -19,7 +23,12 @@ struct ColorScheme {
     QRgb selectionBackground = 0;
     QRgb selectionForeground = 0;
 
+    // xterm, PuTTY, Solarized Dark, then the shared brand themes
+    // (Boilermakers, Badgers, Packers; see BrandThemes.h / docs/THEMES.md).
     static QList<ColorScheme> builtIn();
+    // Terminal scheme for a shared brand theme: its background/foreground,
+    // cursor = accent, selection = selection on selectionText, its 16 ANSI colours.
+    static ColorScheme fromBrandTheme(const sbj::brand::Theme &t);
     // Falls back to the first built-in scheme for an unknown id.
     static ColorScheme byId(const QString &id);
 };

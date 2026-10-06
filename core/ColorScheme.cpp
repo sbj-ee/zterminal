@@ -1,6 +1,31 @@
 #include "ColorScheme.hpp"
 
+#include "BrandThemes.h"
+
 namespace zterminal {
+
+namespace {
+QRgb rgb(std::uint32_t v)
+{
+    return qRgb(int((v >> 16) & 0xff), int((v >> 8) & 0xff), int(v & 0xff));
+}
+} // namespace
+
+ColorScheme ColorScheme::fromBrandTheme(const sbj::brand::Theme &t)
+{
+    ColorScheme s;
+    s.id = QString::fromLatin1(t.id.data(), qsizetype(t.id.size()));
+    s.name = QString::fromLatin1(t.name.data(), qsizetype(t.name.size()));
+    for (size_t i = 0; i < s.ansi.size(); ++i) {
+        s.ansi[i] = rgb(t.ansi[i]);
+    }
+    s.foreground = rgb(t.foreground);
+    s.background = rgb(t.background);
+    s.cursor = rgb(t.accent);
+    s.selectionBackground = rgb(t.selection);
+    s.selectionForeground = rgb(t.selectionText);
+    return s;
+}
 
 QList<ColorScheme> ColorScheme::builtIn()
 {
@@ -47,6 +72,12 @@ QList<ColorScheme> ColorScheme::builtIn()
     sol.selectionBackground = qRgb(147, 161, 161);
     sol.selectionForeground = qRgb(0, 43, 54);
     list << sol;
+
+    // Boilermakers, Badgers, Packers: the brand themes shared with zmail
+    // (core/BrandThemes.h, docs/THEMES.md).
+    for (const sbj::brand::Theme &t : sbj::brand::kThemes) {
+        list << fromBrandTheme(t);
+    }
 
     return list;
 }

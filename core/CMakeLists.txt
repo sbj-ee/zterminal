@@ -4,7 +4,7 @@ add_library(zterminal_core STATIC
   Pty.cpp Pty.hpp
   Terminal.cpp Terminal.hpp
   Selection.cpp Selection.hpp
-  ColorScheme.cpp ColorScheme.hpp
+  BrandThemes.h ColorScheme.cpp ColorScheme.hpp
   MouseSettings.cpp MouseSettings.hpp
   WindowTitle.cpp WindowTitle.hpp
   CommandLine.cpp CommandLine.hpp
