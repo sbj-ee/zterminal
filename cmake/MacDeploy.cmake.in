@@ -1,5 +1,5 @@
 # Generated from cmake/MacDeploy.cmake.in. Runs at install time (cpack) on the
-# installed zterminal.app: macdeployqt, drop build rpaths, ad-hoc sign, verify.
+# installed zterminal.app: macdeployqt, drop build rpaths, ad-hoc sign (nested then app, no hardened runtime), verify.
 set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/zterminal.app")
 if(NOT EXISTS "${_app}/Contents/MacOS/zterminal")
   message(FATAL_ERROR "zterminal deploy: ${_app} not found")
@@ -98,11 +98,59 @@ foreach(_f IN LISTS _machos)
   endforeach()
 endforeach()
 
-# Hardened runtime (--options runtime) even for the ad-hoc signature: no
-# DYLD_* injection, library validation, no unsigned executable memory. A
-# Developer ID signature + notarization (docs/RELEASING.md) needs Stephen's
-# Apple account and replaces "-" with the identity.
-message(STATUS "zterminal deploy: ad-hoc codesign (hardened runtime)")
-_run(codesign --force --deep --options runtime --timestamp=none -s - "${_app}")
+# Ad-hoc codesign of every nested Mach-O with the SAME identity as the app,
+# then the .app last. Do NOT pass --options runtime for ad-hoc builds:
+# hardened runtime turns on library validation, which requires matching Team
+# IDs, and ad-hoc signatures have none — dyld then rejects bundled Qt
+# frameworks (QtSerialPort etc.) with "different Team IDs" (v1.3.0 crash on
+# end-user Macs; CI on the signing runner can still launch). v1.2.0 signed
+# without --options runtime and worked. Developer ID + notarization can add
+# hardened runtime later (docs/RELEASING.md / docs/HARDENING.md).
+message(STATUS "zterminal deploy: ad-hoc codesign (nested then app; no hardened runtime)")
+
+# 1) Loose dylibs under Frameworks/ and PlugIns/ (leaf code first).
+file(GLOB _dylibs
+  "${_app}/Contents/Frameworks/*.dylib"
+  "${_app}/Contents/PlugIns/*/*.dylib"
+  "${_app}/Contents/PlugIns/*/*/*.dylib")
+list(SORT _dylibs)
+foreach(_f IN LISTS _dylibs)
+  if(IS_SYMLINK "${_f}")
+    continue()
+  endif()
+  message(STATUS "zterminal deploy: codesign ${_f}")
+  _run(codesign --force --timestamp=none -s - "${_f}")
+endforeach()
+
+# 2) Each .framework bundle (codesign signs the versioned binary + CodeResources).
+file(GLOB _frameworks "${_app}/Contents/Frameworks/*.framework")
+list(SORT _frameworks)
+foreach(_fw IN LISTS _frameworks)
+  message(STATUS "zterminal deploy: codesign framework ${_fw}")
+  _run(codesign --force --timestamp=none -s - "${_fw}")
+endforeach()
+
+# 3) Helper executables in MacOS/ other than the main binary (askpass).
+file(GLOB _helpers "${_app}/Contents/MacOS/*")
+foreach(_h IN LISTS _helpers)
+  if(IS_SYMLINK "${_h}")
+    continue()
+  endif()
+  get_filename_component(_hn "${_h}" NAME)
+  if(_hn STREQUAL "zterminal")
+    continue()
+  endif()
+  execute_process(COMMAND file -b "${_h}" OUTPUT_VARIABLE _kind)
+  if(NOT _kind MATCHES "Mach-O")
+    continue()
+  endif()
+  message(STATUS "zterminal deploy: codesign helper ${_h}")
+  _run(codesign --force --timestamp=none -s - "${_h}")
+endforeach()
+
+# 4) App bundle last (main binary + bundle CodeResources). No --deep: nested
+# code was signed above with the same identity. No --options runtime (see top).
+message(STATUS "zterminal deploy: codesign app ${_app}")
+_run(codesign --force --timestamp=none -s - "${_app}")
 _run(codesign --verify --deep --strict --verbose=2 "${_app}")
 _run(bash "@ZTERMINAL_CHECK_BUNDLE@" "${_app}")

@@ -5,7 +5,7 @@
 #     where the compiler supports them
 #   - _FORTIFY_SOURCE=3 (Linux) / 2 (macOS) in optimised builds (it needs -O)
 #   - Linux: full RELRO + immediate binding (-z relro -z now), non-executable stack
-# macOS hardened runtime is applied when the bundle is signed (MacDeploy.cmake.in).
+# macOS: ad-hoc bundle signing is in MacDeploy.cmake.in (no hardened runtime until Developer ID).
 option(ZTERMINAL_HARDENING "Build with compiler/linker hardening flags" ON)
 
 if(NOT ZTERMINAL_HARDENING OR NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

@@ -136,18 +136,20 @@ jobs:
           test -x "$mnt/zterminal.app/Contents/MacOS/zterminal-askpass"
           tools/macos/check-bundle.sh "$mnt/zterminal.app"
           codesign --verify --deep --strict --verbose=2 "$mnt/zterminal.app"
-          codesign -dv "$mnt/zterminal.app" 2>&1 | tee /tmp/zt-sig.txt | grep -E "Identifier|Signature|Format|flags"
-          # Hardened runtime must be on (flags=...runtime).
-          grep -q 'runtime' /tmp/zt-sig.txt
-          # ...and the hardened, ad-hoc signed bundle must still load its
-          # bundled Qt frameworks and platform plugin (library validation).
+          codesign -dv --verbose=4 "$mnt/zterminal.app" 2>&1 | tee /tmp/zt-sig.txt | grep -E "Identifier|Signature|Format|flags|TeamIdentifier"
+          # Ad-hoc releases must NOT use hardened runtime: library validation
+          # then rejects nested Qt frameworks (empty Team IDs → "different Team
+          # IDs" crash). check-bundle.sh also enforces this.
+          grep -qi 'Signature=adhoc' /tmp/zt-sig.txt
+          ! grep -Eq 'flags=[^ ]*runtime' /tmp/zt-sig.txt
+          # Launch smoke test: bundled Qt (incl. QtSerialPort) must load.
           "$mnt/zterminal.app/Contents/MacOS/zterminal" --version
           "$mnt/zterminal.app/Contents/MacOS/zterminal" > /tmp/zt-run.log 2>&1 &
           pid=$!
           sleep 8
           if ! kill -0 "$pid" 2>/dev/null; then
             cat /tmp/zt-run.log
-            echo "::error::zterminal.app exited at launch (hardened runtime / library validation?)"
+            echo "::error::zterminal.app exited at launch (codesign / library validation?)"
             exit 1
           fi
           kill "$pid" || true

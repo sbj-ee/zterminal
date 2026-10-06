@@ -16,15 +16,24 @@ On by default for every target (`-DZTERMINAL_HARDENING=OFF` to skip):
 Check a Linux build with `readelf -d build/app/zterminal | grep -E 'BIND_NOW|FLAGS'`,
 `readelf -h … | grep DYN` (PIE) and `readelf -lW … | grep GNU_RELRO`.
 
-macOS: the bundle is signed with the **hardened runtime** (`codesign --options
-runtime`, `cmake/MacDeploy.cmake.in`). It is still an ad-hoc signature. CI
-checks that the flag is set and that the signed app launches (library
-validation accepts the bundled Qt frameworks). A **Developer ID** signature and
-**notarization** need Stephen's Apple Developer account; until then Gatekeeper
-still asks on first launch. To add them later: import the Developer ID
-Application certificate into the runner keychain (a secret), replace `-` with
-the identity, add `--timestamp`, then `xcrun notarytool submit --wait` and
-`xcrun stapler staple` the .dmg.
+macOS signing (`cmake/MacDeploy.cmake.in`): every nested framework, dylib,
+plugin and helper is ad-hoc signed with the **same** identity (`codesign -s -`),
+then the `.app` last. Ad-hoc builds intentionally **omit** `--options runtime`
+(hardened runtime). Hardened runtime turns on library validation, which
+requires matching Team IDs; ad-hoc signatures have none, so dyld rejects
+bundled Qt frameworks (e.g. QtSerialPort) with "different Team IDs" — that was
+the v1.3.0 Mac launch crash. v1.2.0 signed without hardened runtime and worked.
+`tools/macos/check-bundle.sh` fails CI if nested Team IDs / Signature kinds
+diverge, or if ad-hoc + hardened runtime creeps back in. CI still launches the
+signed app as a smoke test.
+
+A **Developer ID** signature and **notarization** need Stephen's Apple
+Developer account; until then Gatekeeper still asks on first launch. To add
+them later: import the Developer ID Application certificate into the runner
+keychain (a secret), replace `-` with the identity, add `--options runtime`
+and `--timestamp`, then `xcrun notarytool submit --wait` and
+`xcrun stapler staple` the .dmg. With a real Team ID, hardened runtime is fine
+because every nested binary shares that Team ID.
 
 ## Sanitizers
 
