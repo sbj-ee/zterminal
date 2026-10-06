@@ -42,6 +42,8 @@ add_dependencies(tst_reconnect zterminal-askpass)
 set_tests_properties(tst_reconnect PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_reconnect;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
   TIMEOUT 180)
+zterminal_add_test(tst_minisign zterminal_core)
+target_compile_definitions(tst_minisign PRIVATE ZTERMINAL_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
 zterminal_add_test(tst_update zterminal_ui)
 target_compile_definitions(tst_update PRIVATE ZTERMINAL_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
 set_tests_properties(tst_update PROPERTIES TIMEOUT 120)

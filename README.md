@@ -68,10 +68,17 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   reconnects.
 - **Updates:** Help → Check for Updates, plus a quiet startup check at most once
   a day. On a newer GitHub Release: Install / Later / Skip.
-  - **Linux:** downloads `zterminal_<ver>_amd64.deb` + `SHA256SUMS`, refuses on
-    checksum mismatch, runs `pkexec apt install`, offers restart.
-  - **macOS:** downloads `zterminal-<ver>-Darwin.dmg` + `SHA256SUMS`, verifies,
-    opens the disk image for a drag-to-Applications install (no automated replace).
+  Nothing is installed unless `SHA256SUMS` carries a valid minisign signature
+  (`SHA256SUMS.minisig`) from the release key built into the app, and the
+  package matches it.
+  - **Linux:** downloads `SHA256SUMS` + `.minisig`, then
+    `zterminal_<ver>_amd64.deb`; runs `/usr/bin/pkexec /usr/bin/apt install`
+    on a re-verified private copy, offers restart.
+  - **macOS:** same checks for `zterminal-<ver>-Darwin.dmg`, then opens the
+    disk image for a drag-to-Applications install (no automated replace).
+  - **Upgrading from 1.0.x:** 1.0.x only checks SHA-256, so install the first
+    signed release by hand once (verify it as below); updates after that are
+    signature-checked.
 - **Zorro-Z app icon** (terminal window + Z) on Linux hicolor icons and in the
   macOS `.app` bundle (`zterminal.icns`).
 
@@ -114,12 +121,14 @@ filled in are in [docs/THEMES.md](docs/THEMES.md).
 ## Install
 
 Download the assets for [the latest release](https://github.com/sbj-ee/zterminal/releases/latest)
-(`zterminal_1.2.0_amd64.deb` or `zterminal-1.2.0-Darwin.dmg`, plus `SHA256SUMS`).
+(`zterminal_1.2.0_amd64.deb` or `zterminal-1.2.0-Darwin.dmg`, plus `SHA256SUMS`
+and, from the first signed release on, `SHA256SUMS.minisig`).
 
 ```sh
-# Verify the package (Linux or macOS)
-sha256sum -c SHA256SUMS          # Linux
-shasum -a 256 -c SHA256SUMS      # macOS
+# Verify the signature (public key: docs/RELEASING.md), then the package
+minisign -Vm SHA256SUMS -P <release public key>
+sha256sum -c --ignore-missing SHA256SUMS          # Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS      # macOS
 ```
 
 **Linux:**
@@ -244,7 +253,8 @@ cd build && cpack -G DragNDrop    # macOS  -> zterminal-<version>-Darwin.dmg
 
 Pushing a `vX.Y.Z` tag that matches `project(zterminal VERSION …)` runs
 `.github/workflows/release.yml`, which builds and publishes both packages plus
-`SHA256SUMS`.
+`SHA256SUMS` and its minisign signature. Signing needs a one-time key setup:
+see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Version bumps
 

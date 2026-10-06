@@ -48,15 +48,22 @@ public:
 
     // Tests: the version we pretend to run (default kVersionString).
     void setCurrentVersionForTests(const QString &v) { m_currentVersion = v; }
-    // Tests: run this program instead of `pkexec apt install -y ./<deb>`; the
-    // .deb's file name is appended to args. Also skips the /usr/bin check.
+    // Tests: run this program instead of `pkexec apt install -y <deb>`; the
+    // staged package's absolute path is appended to args. Also skips the
+    // /usr/bin check.
     void setInstallerForTests(const QString &program, const QStringList &args);
     // Tests: called instead of relaunching + quitting.
     void setRestartHandlerForTests(std::function<void()> fn) { m_restartHandler = std::move(fn); }
     void resetForTests();
 
     // The install command for a downloaded package (program, args); exposed for tests.
-    static QStringList installCommand(const QString &debFileName);
+    // Absolute paths only: {"/usr/bin/pkexec", "/usr/bin/apt", "install", "-y", <absolute .deb path>}.
+    static QStringList installCommand(const QString &debPath);
+    // Copies the verified package into a fresh private (0700) directory and
+    // re-checks its SHA-256 against `sha256` right before it is handed to the
+    // installer. Returns the copy's absolute path, or empty (with *error).
+    static QString stageVerifiedPackage(const QString &path, const QString &sha256, QTemporaryDir &into,
+                                        QString *error);
     // Total live sessions in every open zterminal window of this process.
     static int liveSessionCount(int *windows = nullptr);
 
@@ -86,6 +93,7 @@ private:
     QPointer<QProgressDialog> m_progress;
     QProcess *m_installer = nullptr;
     std::unique_ptr<QTemporaryDir> m_tmp;
+    std::unique_ptr<QTemporaryDir> m_installDir; // private copy handed to the installer
     ReleaseInfo m_release;
     QString m_debPath;
     QString m_currentVersion;

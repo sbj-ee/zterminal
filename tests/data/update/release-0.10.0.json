@@ -26,6 +26,12 @@
       "size": 93,
       "content_type": "text/plain",
       "browser_download_url": "@BASE@/download/v0.10.0/SHA256SUMS"
+    },
+    {
+      "name": "SHA256SUMS.minisig",
+      "size": 300,
+      "content_type": "text/plain",
+      "browser_download_url": "@BASE@/download/v0.10.0/SHA256SUMS.minisig"
     }
   ]
 }

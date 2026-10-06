@@ -2,6 +2,7 @@
 
 #include <QtGlobal>
 
+#include "Minisign.hpp"
 #include "version.hpp"
 
 #include <QDateTime>
@@ -37,8 +38,13 @@ UpdateChecker::UpdateChecker(QObject *parent)
     : QObject(parent)
     , m_nam(new QNetworkAccessManager(this))
 {
+    m_url = QUrl(defaultApiUrl());
+#if defined(ZTERMINAL_DEV_OVERRIDES)
     const QByteArray env = qgetenv("ZTERMINAL_UPDATE_URL");
-    m_url = QUrl(env.isEmpty() ? defaultApiUrl() : QString::fromUtf8(env));
+    if (!env.isEmpty()) {
+        m_url = QUrl(QString::fromUtf8(env));
+    }
+#endif
 }
 
 UpdateChecker::~UpdateChecker()
@@ -163,9 +169,19 @@ void UpdateDownloader::start(const ReleaseInfo &release, const QString &dir)
     }
     m_cancelled = false;
     m_dir = dir;
+    m_sumsBytes.clear();
+    m_verifiedSha.clear();
     const auto pkg = release.packageAsset();
     const auto sums = release.checksumAsset();
-    if (!pkg || !sums) {
+    const auto sig = release.signatureAsset();
+    if (updateSigningPublicKey().isEmpty()) {
+        const QString msg = QStringLiteral("This build of zterminal has no update-signing key, so it can't verify "
+                                           "downloads and won't install them. Download %1 from the release page.")
+                                .arg(release.tag);
+        QMetaObject::invokeMethod(this, [this, msg] { emit finished(false, QString(), msg); }, Qt::QueuedConnection);
+        return;
+    }
+    if (!pkg || !sums || !sig) {
         QStringList missing;
         if (!pkg) {
 #if defined(Q_OS_MACOS)
@@ -177,6 +193,9 @@ void UpdateDownloader::start(const ReleaseInfo &release, const QString &dir)
         if (!sums) {
             missing << QStringLiteral("SHA256SUMS");
         }
+        if (!sig) {
+            missing << QStringLiteral("SHA256SUMS.minisig (its signature)");
+        }
         // Report asynchronously, like every other outcome.
         const QString msg = QStringLiteral("Release %1 is missing %2, so it can't be installed automatically.")
                                 .arg(release.tag, missing.join(QStringLiteral(" and ")));
@@ -185,6 +204,7 @@ void UpdateDownloader::start(const ReleaseInfo &release, const QString &dir)
     }
     m_deb = *pkg;
     m_sums = *sums;
+    m_sig = *sig;
     m_stage = 1;
     fetch(m_sums, QDir(m_dir).filePath(m_sums.name));
 }
@@ -260,23 +280,44 @@ void UpdateDownloader::onFinished()
     }
     m_file->write(reply->readAll());
     m_file->close();
+    auto readBack = [](const QString &path) {
+        QFile f(path);
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
     if (m_stage == 1) {
+        m_sumsBytes = readBack(m_file->fileName());
         m_stage = 2;
+        fetch(m_sig, QDir(m_dir).filePath(m_sig.name));
+        return;
+    }
+    if (m_stage == 2) {
+        // Check the signature before fetching the package at all.
+        QString keyError;
+        const auto key = MinisignPublicKey::parse(updateSigningPublicKey(), &keyError);
+        if (!key) {
+            fail(QStringLiteral("The built-in update-signing key is invalid (%1), so nothing was installed.").arg(keyError));
+            return;
+        }
+        const MinisignResult sig = verifyMinisign(m_sumsBytes, readBack(m_file->fileName()), *key);
+        if (!sig.ok) {
+            m_sumsBytes.clear();
+            fail(QStringLiteral("The release's SHA256SUMS signature is not valid (%1), so nothing was downloaded "
+                                "or installed.")
+                     .arg(sig.error));
+            return;
+        }
+        m_stage = 3;
         fetch(m_deb, QDir(m_dir).filePath(m_deb.name));
         return;
     }
-    // Both files present: verify before anyone may install it.
+    // Package present: verify it against the signed SHA256SUMS (in memory).
     const QString debPath = m_file->fileName();
-    QFile sumsFile(QDir(m_dir).filePath(m_sums.name));
-    QByteArray sums;
-    if (sumsFile.open(QIODevice::ReadOnly)) {
-        sums = sumsFile.readAll();
-    }
-    const ChecksumResult check = verifyChecksum(debPath, sums, m_deb.name);
+    const ChecksumResult check = verifyChecksum(debPath, m_sumsBytes, m_deb.name);
     if (!check.ok()) {
         fail(check.message()); // also deletes the unverified package
         return;
     }
+    m_verifiedSha = check.expected;
     delete m_file;
     m_file = nullptr;
     m_stage = 0;

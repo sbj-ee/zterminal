@@ -2,11 +2,13 @@
 
 #include <QtGlobal>
 
+#include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QLocale>
 #include <QPushButton>
 #include <QTextBrowser>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace zterminal {
@@ -29,7 +31,7 @@ UpdateDialog::UpdateDialog(const ReleaseInfo &release, const QString &currentVer
     if (release.prerelease) {
         sub += QStringLiteral(" <b>This is a pre-release.</b>");
     }
-    if (!release.htmlUrl.isEmpty()) {
+    if (isTrustedReleasePageUrl(release.htmlUrl)) {
         sub += QStringLiteral(" <a href=\"%1\">Release page</a>").arg(release.htmlUrl.toHtmlEscaped());
     }
     auto *subLabel = new QLabel(sub);
@@ -40,23 +42,29 @@ UpdateDialog::UpdateDialog(const ReleaseInfo &release, const QString &currentVer
 
     m_notes = new QTextBrowser;
     m_notes->setObjectName(QStringLiteral("releaseNotes"));
-    m_notes->setOpenExternalLinks(true);
+    // Links in the notes open in the browser only if they are https.
+    m_notes->setOpenLinks(false);
+    connect(m_notes, &QTextBrowser::anchorClicked, this, [](const QUrl &url) {
+        if (url.scheme() == QLatin1String("https")) {
+            QDesktopServices::openUrl(url);
+        }
+    });
     m_notes->setMarkdown(release.notes.trimmed().isEmpty() ? QStringLiteral("*No release notes.*") : release.notes);
     m_notes->setMinimumSize(520, 240);
     layout->addWidget(m_notes, 1);
 
     const auto pkg = release.packageAsset();
-    const bool installable = pkg && release.checksumAsset();
+    const bool installable = pkg && release.checksumAsset() && release.signatureAsset();
     auto *how = new QLabel;
     how->setObjectName(QStringLiteral("updateInstallNote"));
     how->setWordWrap(true);
     if (installable) {
 #if defined(Q_OS_MACOS)
-        how->setText(QStringLiteral("<small>Install downloads %1 and SHA256SUMS, verifies the SHA256, then opens "
+        how->setText(QStringLiteral("<small>Install downloads %1 and the signed SHA256SUMS, checks the signature and the SHA256, then opens "
                                     "the disk image so you can drag <tt>zterminal.app</tt> to Applications.</small>")
                          .arg(pkg->name.toHtmlEscaped()));
 #else
-        how->setText(QStringLiteral("<small>Install downloads %1 and SHA256SUMS, checks the SHA256, then runs "
+        how->setText(QStringLiteral("<small>Install downloads %1 and the signed SHA256SUMS, checks the signature and the SHA256, then runs "
                                     "<tt>pkexec apt install</tt> (you'll be asked for your password).</small>")
                          .arg(pkg->name.toHtmlEscaped()));
 #endif
@@ -66,7 +74,7 @@ UpdateDialog::UpdateDialog(const ReleaseInfo &release, const QString &currentVer
 #else
         const QString expected = QStringLiteral("zterminal_%1_amd64.deb").arg(release.versionString());
 #endif
-        how->setText(QStringLiteral("<small>This release has no %1 package with a SHA256SUMS file, so it can't be "
+        how->setText(QStringLiteral("<small>This release has no %1 package with a signed SHA256SUMS file, so it can't be "
                                     "installed from here. Download it from the release page.</small>")
                          .arg(expected));
     }

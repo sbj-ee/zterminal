@@ -23,6 +23,8 @@ add_library(zterminal_core STATIC
   Scrollback.cpp Scrollback.hpp
   PasteGuard.cpp PasteGuard.hpp
   Update.cpp Update.hpp
+  UpdateSigningKey.cpp
+  Minisign.cpp Minisign.hpp
   UpdateChecker.cpp UpdateChecker.hpp
 )
 target_include_directories(zterminal_core PUBLIC
