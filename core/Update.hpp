@@ -63,7 +63,8 @@ struct ReleaseInfo {
     std::optional<ReleaseAsset> dmgAsset() const;
     // Platform package: .deb on Linux, .dmg on macOS.
     std::optional<ReleaseAsset> packageAsset() const;
-    std::optional<ReleaseAsset> checksumAsset() const; // "SHA256SUMS"
+    std::optional<ReleaseAsset> checksumAsset() const;  // "SHA256SUMS"
+    std::optional<ReleaseAsset> signatureAsset() const; // "SHA256SUMS.minisig"
     QString versionString() const { return version.toString(); }
 };
 
@@ -80,6 +81,17 @@ struct ChecksumResult {
 QString checksumFor(const QByteArray &sha256sums, const QString &fileName);
 QString sha256OfFile(const QString &path); // lower-case hex, empty if unreadable
 ChecksumResult verifyChecksum(const QString &filePath, const QByteArray &sha256sums, const QString &fileName);
+
+// The release page we may open in a browser: https://github.com/sbj-ee/zterminal/releases/...
+// (the URL comes from the API response, so don't open anything else).
+bool isTrustedReleasePageUrl(const QString &url);
+
+// Updates are only installed when SHA256SUMS carries a valid minisign
+// signature (SHA256SUMS.minisig) by the release key: base64 public key line,
+// compiled in (core/UpdateSigningKey.cpp). Empty: this build can't verify
+// updates, and Install refuses.
+QString updateSigningPublicKey();
+void setUpdateSigningPublicKeyForTests(const QString &base64); // empty: back to the built-in key
 
 // Persistent state: ~/.config/zterminal/update-state.ini (not zterminal.ini, so
 // writing the last-check time doesn't make every window reload its settings).

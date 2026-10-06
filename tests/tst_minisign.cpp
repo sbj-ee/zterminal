@@ -1,0 +1,121 @@
+// Minisign signature verification (SHA256SUMS.minisig): real minisign output,
+// tampering, wrong keys, malformed files.
+#include "Minisign.hpp"
+#include "MinisignTestSigner.hpp"
+
+#include <QFile>
+#include <QTest>
+
+#include <cstring>
+
+using namespace zterminal;
+
+namespace {
+QByteArray data(const QString &name)
+{
+    QFile f(QStringLiteral(ZTERMINAL_TEST_DATA "/minisign/") + name);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+} // namespace
+
+class TstMinisign : public QObject
+{
+    Q_OBJECT
+private slots:
+    void realMinisignOutput()
+    {
+        const auto key = MinisignPublicKey::parse(QString::fromLatin1(data(QStringLiteral("test.pub"))));
+        QVERIFY(key);
+        QCOMPARE(key->keyIdHex(), QStringLiteral("452E2115C846828B")); // as in the .pub comment
+        const QByteArray sums = data(QStringLiteral("SHA256SUMS"));
+        QVERIFY(!sums.isEmpty());
+        const MinisignResult r = verifyMinisign(sums, data(QStringLiteral("SHA256SUMS.minisig")), *key);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.trustedComment, QStringLiteral("timestamp:0 file:SHA256SUMS hashed"));
+        // Legacy (non-prehashed "Ed") signatures too.
+        const MinisignResult l =
+            verifyMinisign(data(QStringLiteral("SHA256SUMS.legacy")), data(QStringLiteral("SHA256SUMS.legacy.minisig")), *key);
+        QVERIFY2(l.ok, qPrintable(l.error));
+        // One changed byte in the file.
+        QByteArray evil = sums;
+        evil[0] = evil[0] == 'a' ? 'c' : 'a';
+        QVERIFY(!verifyMinisign(evil, data(QStringLiteral("SHA256SUMS.minisig")), *key).ok);
+        // The bare base64 line works as a key as well.
+        QVERIFY(MinisignPublicKey::parse(QStringLiteral("RWSLgkbIFSEuRS5xAEv9bP6Ma6NWSf7wuuDwLKeT++2GUiloG7OAZjVS")));
+    }
+
+    void generatedKey()
+    {
+        MinisignTestKey k;
+        const auto key = MinisignPublicKey::parse(k.publicKeyBase64());
+        QVERIFY(key);
+        const QByteArray msg = "0123  zterminal_1.2.0_amd64.deb\n";
+        QVERIFY(verifyMinisign(msg, k.sign(msg), *key).ok);
+        QVERIFY(verifyMinisign(msg, k.sign(msg, "legacy", false), *key).ok);
+        QVERIFY(verifyMinisign(msg, k.sign(msg).replace('\n', "\r\n"), *key).ok); // CRLF tolerated
+    }
+
+    void tamperingIsRejected()
+    {
+        MinisignTestKey k;
+        MinisignTestKey other;
+        const auto key = *MinisignPublicKey::parse(k.publicKeyBase64());
+        const QByteArray msg = "abc  zterminal_1.2.0_amd64.deb\n";
+        const QByteArray sig = k.sign(msg);
+        QList<QByteArray> lines = sig.split('\n');
+
+        // Different file.
+        QCOMPARE(verifyMinisign(msg + "x", sig, key).error, QStringLiteral("the signature does not match the file"));
+        // Trusted comment edited (the global signature covers it).
+        QByteArray edited = sig;
+        edited.replace("file:SHA256SUMS", "file:SHA256SUMX");
+        QCOMPARE(verifyMinisign(msg, edited, key).error, QStringLiteral("the signature's trusted comment was altered"));
+        // Untrusted comment may change freely.
+        QByteArray untrusted = sig;
+        untrusted.replace("signature from minisign secret key", "anything");
+        QVERIFY(verifyMinisign(msg, untrusted, key).ok);
+        // Signed by another key (different key id).
+        QCOMPARE(verifyMinisign(msg, other.sign(msg), key).error,
+                 QStringLiteral("the signature was made with a different key"));
+        // Another key that claims our key id.
+        std::memcpy(other.keyId, k.keyId, 8);
+        QCOMPARE(verifyMinisign(msg, other.sign(msg), key).error, QStringLiteral("the signature does not match the file"));
+        // Prehash flag flipped (ED <-> Ed) breaks the signature.
+        QByteArray bin = QByteArray::fromBase64(lines.at(1));
+        bin[1] = 'd';
+        QByteArray flipped = lines.at(0) + "\n" + bin.toBase64() + "\n" + lines.at(2) + "\n" + lines.at(3) + "\n";
+        QVERIFY(!verifyMinisign(msg, flipped, key).ok);
+    }
+
+    void malformed_data()
+    {
+        QTest::addColumn<QByteArray>("sig");
+        QTest::newRow("empty") << QByteArray();
+        QTest::newRow("garbage") << QByteArray("hello\nworld\n");
+        QTest::newRow("three lines") << QByteArray("untrusted comment: x\nRUQ=\ntrusted comment: y\n");
+        QTest::newRow("bad base64") << QByteArray("untrusted comment: x\n!!!!\ntrusted comment: y\nAAAA\n");
+        QTest::newRow("short sig") << QByteArray("untrusted comment: x\nRUQAAAA=\ntrusted comment: y\nAAAA\n");
+        QTest::newRow("no trusted prefix")
+            << QByteArray("untrusted comment: x\n" + QByteArray(74, 'E').toBase64() + "\ncomment: y\nAAAA\n");
+    }
+    void malformed()
+    {
+        QFETCH(QByteArray, sig);
+        MinisignTestKey k;
+        const auto key = *MinisignPublicKey::parse(k.publicKeyBase64());
+        const MinisignResult r = verifyMinisign("x", sig, key);
+        QVERIFY(!r.ok);
+        QVERIFY(!r.error.isEmpty());
+    }
+
+    void badPublicKeys()
+    {
+        QVERIFY(!MinisignPublicKey::parse(QString()));
+        QVERIFY(!MinisignPublicKey::parse(QStringLiteral("not base64 !!")));
+        QVERIFY(!MinisignPublicKey::parse(QString::fromLatin1(QByteArray(42, 'x').toBase64()))); // no "Ed"
+        QVERIFY(!MinisignPublicKey::parse(QString::fromLatin1(("Ed" + QByteArray(30, 'x')).toBase64()))); // short
+    }
+};
+
+QTEST_GUILESS_MAIN(TstMinisign)
+#include "tst_minisign.moc"

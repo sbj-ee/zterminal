@@ -1,5 +1,7 @@
 #include "Update.hpp"
 
+#include <QUrl>
+
 #include "ConfigPaths.hpp"
 
 #include <QtGlobal>
@@ -222,6 +224,24 @@ std::optional<ReleaseAsset> ReleaseInfo::checksumAsset() const
         }
     }
     return std::nullopt;
+}
+
+std::optional<ReleaseAsset> ReleaseInfo::signatureAsset() const
+{
+    for (const ReleaseAsset &a : assets) {
+        if (a.name == QLatin1String("SHA256SUMS.minisig")) {
+            return a;
+        }
+    }
+    return std::nullopt;
+}
+
+bool isTrustedReleasePageUrl(const QString &url)
+{
+    const QUrl u(url, QUrl::StrictMode);
+    return u.isValid() && u.scheme() == QLatin1String("https") && u.host() == QLatin1String("github.com")
+        && u.port() == -1 && u.userInfo().isEmpty()
+        && u.path().startsWith(QLatin1String("/sbj-ee/zterminal/releases/"));
 }
 
 QString checksumFor(const QByteArray &sha256sums, const QString &fileName)

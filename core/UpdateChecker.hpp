@@ -30,7 +30,9 @@ public:
     explicit UpdateChecker(QObject *parent = nullptr);
     ~UpdateChecker() override;
 
-    // Default: defaultApiUrl(), or $ZTERMINAL_UPDATE_URL (tests, mirrors).
+    // Default: defaultApiUrl(). Builds with ZTERMINAL_DEV_OVERRIDES (debug
+    // only) also honour $ZTERMINAL_UPDATE_URL; release builds never read it.
+    // setApiUrl is for tests.
     void setApiUrl(const QUrl &url) { m_url = url; }
     QUrl apiUrl() const { return m_url; }
     void setTimeoutMs(int ms) { m_timeoutMs = ms; }
@@ -55,9 +57,12 @@ private:
     int m_timeoutMs = 5000;
 };
 
-// Downloads a release's .deb and SHA256SUMS into `dir` and verifies the
-// package before reporting success. Refuses (finished(false, ...)) when an
-// asset is missing, a download fails, or the checksum doesn't match.
+// Downloads a release's SHA256SUMS, SHA256SUMS.minisig and package into
+// `dir`. SHA256SUMS must carry a valid minisign signature by the release key
+// (updateSigningPublicKey()) before the package is even fetched, and the
+// package must match it. Refuses (finished(false, ...)) when the build has no
+// key, an asset is missing, a download fails, the signature is invalid or
+// the checksum doesn't match.
 class UpdateDownloader : public QObject {
     Q_OBJECT
 public:
@@ -68,6 +73,9 @@ public:
     void cancel();
     bool isRunning() const { return m_reply != nullptr; }
     void setStallTimeoutMs(int ms) { m_stallMs = ms; }
+    // After a successful finished(): the package's SHA-256 from the signed
+    // SHA256SUMS (held in memory, for re-checking right before install).
+    QString verifiedSha256() const { return m_verifiedSha; }
 
 signals:
     // bytesTotal is -1 when unknown.
@@ -86,9 +94,12 @@ private:
     QFile *m_file = nullptr;
     ReleaseAsset m_deb;
     ReleaseAsset m_sums;
+    ReleaseAsset m_sig;
+    QByteArray m_sumsBytes; // verified SHA256SUMS, in memory
+    QString m_verifiedSha;
     QString m_dir;
     QString m_current; // asset being downloaded
-    int m_stage = 0;   // 0 idle, 1 SHA256SUMS, 2 .deb
+    int m_stage = 0;   // 0 idle, 1 SHA256SUMS, 2 SHA256SUMS.minisig, 3 package
     int m_stallMs = 30000;
     bool m_cancelled = false;
 };

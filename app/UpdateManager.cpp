@@ -14,7 +14,6 @@
 #include <QProcess>
 #include <QProgressDialog>
 #include <QPushButton>
-#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
@@ -23,7 +22,10 @@ namespace zterminal {
 
 namespace {
 const QString kInstalledBinary = QStringLiteral("/usr/bin/zterminal");
-}
+// Absolute paths: never whatever "pkexec"/"apt" $PATH finds first.
+const QString kPkexec = QStringLiteral("/usr/bin/pkexec");
+const QString kApt = QStringLiteral("/usr/bin/apt");
+} // namespace
 
 UpdateManager &UpdateManager::instance()
 {
@@ -72,6 +74,7 @@ void UpdateManager::resetForTests()
     m_checker->abort();
     m_downloader->cancel();
     m_tmp.reset();
+    m_installDir.reset();
     m_release = {};
     m_debPath.clear();
     m_lastMessage.clear();
@@ -79,11 +82,37 @@ void UpdateManager::resetForTests()
     m_stage = Stage::Idle;
 }
 
-QStringList UpdateManager::installCommand(const QString &debFileName)
+QStringList UpdateManager::installCommand(const QString &debPath)
 {
-    // "./" makes apt treat the argument as a file, not a package name.
-    return {QStringLiteral("pkexec"), QStringLiteral("apt"), QStringLiteral("install"), QStringLiteral("-y"),
-            QStringLiteral("./") + debFileName};
+    // An absolute path makes apt treat the argument as a file, not a package name.
+    return {kPkexec, kApt, QStringLiteral("install"), QStringLiteral("-y"), QFileInfo(debPath).absoluteFilePath()};
+}
+
+QString UpdateManager::stageVerifiedPackage(const QString &path, const QString &sha256, QTemporaryDir &into,
+                                            QString *error)
+{
+    auto fail = [error](const QString &why) {
+        if (error) {
+            *error = why;
+        }
+        return QString();
+    };
+    if (!into.isValid()) {
+        return fail(QStringLiteral("Couldn't create a private folder for the package."));
+    }
+    // QTemporaryDir creates it 0700; make sure.
+    QFile::setPermissions(into.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    const QString dest = QDir(into.path()).filePath(QFileInfo(path).fileName());
+    if (!QFile::copy(path, dest)) {
+        return fail(QStringLiteral("Couldn't copy the package to %1.").arg(into.path()));
+    }
+    QFile::setPermissions(dest, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup
+                                    | QFileDevice::ReadOther);
+    if (sha256.isEmpty() || sha256OfFile(dest) != sha256.toLower()) {
+        QFile::remove(dest);
+        return fail(QStringLiteral("The package changed after it was verified, so it was not installed."));
+    }
+    return QFileInfo(dest).absoluteFilePath();
 }
 
 int UpdateManager::liveSessionCount(int *windows)
@@ -248,19 +277,33 @@ void UpdateManager::onDownloadFinished(bool ok, const QString &debPath, const QS
 void UpdateManager::runInstaller()
 {
     const QString pkgName = QFileInfo(m_debPath).fileName();
+    // Hand the installer a private copy, re-verified against the signed hash
+    // at the last moment.
+    m_installDir = std::make_unique<QTemporaryDir>(QDir::tempPath() + QStringLiteral("/zterminal-install-XXXXXX"));
+    QString stageError;
+    const QString staged = stageVerifiedPackage(m_debPath, m_downloader->verifiedSha256(), *m_installDir, &stageError);
+    if (staged.isEmpty()) {
+        m_installDir.reset();
+        m_tmp.reset();
+        setStage(Stage::Idle);
+        m_lastMessage = stageError;
+        message(QStringLiteral("Update Not Installed"), stageError, true);
+        emit installFinished(false, stageError);
+        return;
+    }
     QString program;
     QStringList args;
     if (!m_testProgram.isEmpty()) {
         program = m_testProgram;
         args = m_testArgs;
-        args << pkgName;
+        args << staged;
     } else {
 #if defined(Q_OS_MACOS)
         // macOS: open the verified .dmg so the user can drag zterminal.app to
         // Applications. Automated replacement of a signed app bundle is out of
         // scope (no pkexec/apt equivalent here).
         setStage(Stage::Installing);
-        const QUrl dmgUrl = QUrl::fromLocalFile(m_debPath);
+        const QUrl dmgUrl = QUrl::fromLocalFile(staged);
         if (!QDesktopServices::openUrl(dmgUrl)) {
             fallback(QStringLiteral("Couldn't open %1. Open it from Finder and drag zterminal.app to Applications.")
                          .arg(m_debPath));
@@ -283,8 +326,8 @@ void UpdateManager::runInstaller()
                          .arg(QCoreApplication::applicationFilePath()));
             return;
         }
-        const QStringList cmd = installCommand(pkgName);
-        if (QStandardPaths::findExecutable(cmd.at(0)).isEmpty() || QStandardPaths::findExecutable(cmd.at(1)).isEmpty()) {
+        const QStringList cmd = installCommand(staged);
+        if (!QFileInfo(cmd.at(0)).isExecutable() || !QFileInfo(cmd.at(1)).isExecutable()) {
             fallback(QStringLiteral("pkexec or apt isn't available, so the package can't be installed from here."));
             return;
         }
@@ -304,7 +347,7 @@ void UpdateManager::runInstaller()
     m_progress->open();
 
     m_installer = new QProcess(this);
-    m_installer->setWorkingDirectory(QFileInfo(m_debPath).absolutePath());
+    m_installer->setWorkingDirectory(m_installDir->path());
     m_installer->setProcessChannelMode(QProcess::MergedChannels);
     connect(m_installer, &QProcess::finished, this, [this](int code, QProcess::ExitStatus st) {
         onInstallerFinished(code, st == QProcess::CrashExit);
@@ -346,6 +389,7 @@ void UpdateManager::onInstallerFinished(int exitCode, bool crashed)
     setStage(Stage::Done);
     m_lastMessage = QStringLiteral("zterminal %1 was installed.").arg(m_release.tag);
     m_tmp.reset(); // remove the downloaded package
+    m_installDir.reset();
     emit installFinished(true, m_lastMessage);
     offerRestart();
 }
@@ -415,7 +459,7 @@ void UpdateManager::fallback(const QString &why)
             .arg(why, m_debPath);
 #endif
     m_lastMessage = text;
-    if (!m_release.htmlUrl.isEmpty() && m_testProgram.isEmpty()) {
+    if (isTrustedReleasePageUrl(m_release.htmlUrl) && m_testProgram.isEmpty()) {
         QDesktopServices::openUrl(QUrl(m_release.htmlUrl));
     }
     message(QStringLiteral("Update Not Installed"), text, true);

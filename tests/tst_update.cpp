@@ -3,6 +3,7 @@
 // (check -> dialog -> download -> verify -> install -> restart) against a mock
 // GitHub served from a local QTcpServer. Nothing here touches the network or apt.
 #include "AppSettings.hpp"
+#include "MinisignTestSigner.hpp"
 #include "MainWindow.hpp"
 #include "PreferencesDialog.hpp"
 #include "Update.hpp"
@@ -16,6 +17,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QLabel>
 #include <QMessageBox>
 #include <QNetworkProxy>
@@ -151,9 +153,12 @@ class TstUpdate : public QObject
 {
     Q_OBJECT
     const QByteArray debBytes = QByteArray("!<arch>\nfake zterminal package\n").repeated(128);
+    MinisignTestKey signKey;  // the "release key" for these tests
+    MinisignTestKey otherKey; // someone else's
 
-    // Serve the 0.10.0 release with a correct (or wrong) SHA256SUMS.
-    void serveRelease(MockGitHub &gh, bool goodSum = true)
+    // Serve the 0.10.0 release with a correct (or wrong) SHA256SUMS, signed
+    // by the release key (or by another key).
+    void serveRelease(MockGitHub &gh, bool goodSum = true, bool goodSignature = true)
     {
         gh.routes[QStringLiteral("/latest")].body = fixture(QStringLiteral("release-0.10.0.json"), gh.base());
         gh.routes[QStringLiteral("/download/v0.10.0/zterminal_0.10.0_amd64.deb")].body = debBytes;
@@ -162,6 +167,9 @@ class TstUpdate : public QObject
         gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS")].body =
             sum + "  zterminal_0.10.0_amd64.deb\n" + sum + "  zterminal-0.10.0-Darwin.dmg\n"
             + QByteArray(64, 'a') + "  other.tar.gz\n";
+        const QByteArray &sums = gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS")].body;
+        gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS.minisig")].body =
+            goodSignature ? signKey.sign(sums) : otherKey.sign(sums);
     }
 
     static QString platformPackageName()
@@ -191,6 +199,7 @@ private slots:
     {
         QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
         AppSettings{}.save();
+        setUpdateSigningPublicKeyForTests(signKey.publicKeyBase64());
     }
 
     void semverCompare_data()
@@ -250,7 +259,9 @@ private slots:
         QVERIFY(r->notes.contains(QStringLiteral("Auto-update")));
         QCOMPARE(r->htmlUrl, QStringLiteral("https://github.com/sbj-ee/zterminal/releases/tag/v0.10.0"));
         QVERIFY(r->publishedAt.isValid());
-        QCOMPARE(r->assets.size(), 3);
+        QCOMPARE(r->assets.size(), 4);
+        QVERIFY(r->signatureAsset());
+        QCOMPARE(r->signatureAsset()->name, QStringLiteral("SHA256SUMS.minisig"));
         QVERIFY(r->debAsset());
         QCOMPARE(r->debAsset()->name, QStringLiteral("zterminal_0.10.0_amd64.deb"));
         QCOMPARE(r->debAsset()->size, qint64(4096));
@@ -486,7 +497,72 @@ private slots:
         QCOMPARE(deb, dir.filePath(platformPackageName()));
         QCOMPARE(sha256OfFile(deb).toLatin1(), sha256Hex(debBytes));
         QVERIFY(QFile::exists(dir.filePath(QStringLiteral("SHA256SUMS"))));
+        QVERIFY(QFile::exists(dir.filePath(QStringLiteral("SHA256SUMS.minisig"))));
+        QCOMPARE(d.verifiedSha256().toLatin1(), sha256Hex(debBytes));
         QVERIFY(!prog.isEmpty());
+
+        // Item 5: SHA256SUMS signed by another key: refused before the package
+        // is even requested.
+        {
+            serveRelease(gh, /*goodSum=*/true, /*goodSignature=*/false);
+            gh.requests.clear();
+            QTemporaryDir d3;
+            d.start(*rel, d3.path());
+            QVERIFY(done.wait(5000));
+            args = done.takeFirst();
+            QVERIFY(!args.at(0).toBool());
+            QVERIFY2(args.at(2).toString().contains(QStringLiteral("signature is not valid")), qPrintable(args.at(2).toString()));
+            for (const QString &req : gh.requests) {
+                QVERIFY2(!req.contains(platformPackageName()), qPrintable(req));
+            }
+            QVERIFY(!QFile::exists(d3.filePath(platformPackageName())));
+        }
+        // A SHA256SUMS swapped after signing (attacker rewrote the hashes).
+        {
+            serveRelease(gh);
+            gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS")].body.replace("other.tar.gz", "other.tar.gx");
+            QTemporaryDir d4;
+            d.start(*rel, d4.path());
+            QVERIFY(done.wait(5000));
+            args = done.takeFirst();
+            QVERIFY(!args.at(0).toBool());
+            QVERIFY(args.at(2).toString().contains(QStringLiteral("does not match the file")));
+        }
+        // Unsigned release (no SHA256SUMS.minisig asset): refused, nothing fetched.
+        {
+            QByteArray json = fixture(QStringLiteral("release-0.10.0.json"), gh.base());
+            json.replace("\"SHA256SUMS.minisig\"", "\"SHA256SUMS.asc\"");
+            const auto unsigned_ = ReleaseInfo::fromJson(json);
+            QVERIFY(unsigned_ && !unsigned_->signatureAsset());
+            const int before = gh.requests.size();
+            QTemporaryDir d5;
+            d.start(*unsigned_, d5.path());
+            QVERIFY(done.wait(5000));
+            args = done.takeFirst();
+            QVERIFY(!args.at(0).toBool());
+            QVERIFY(args.at(2).toString().contains(QStringLiteral("SHA256SUMS.minisig")));
+            QCOMPARE(gh.requests.size(), before);
+        }
+        // A build without a signing key never installs.
+        {
+            setUpdateSigningPublicKeyForTests(QString());
+            const bool builtInKey = !updateSigningPublicKey().isEmpty();
+            serveRelease(gh);
+            const int before = gh.requests.size();
+            QTemporaryDir d6;
+            d.start(*rel, d6.path());
+            QVERIFY(done.wait(5000));
+            args = done.takeFirst();
+            setUpdateSigningPublicKeyForTests(signKey.publicKeyBase64());
+            if (!builtInKey) {
+                QVERIFY(!args.at(0).toBool());
+                QVERIFY(args.at(2).toString().contains(QStringLiteral("no update-signing key")));
+                QCOMPARE(gh.requests.size(), before);
+            } else {
+                QVERIFY(!args.at(0).toBool()); // the real key didn't sign this test release
+            }
+        }
+        serveRelease(gh);
 
         // Mismatch: refused, and the unverified package is deleted.
         serveRelease(gh, /*goodSum=*/false);
@@ -550,8 +626,77 @@ private slots:
 
     void installCommandLine()
     {
-        QCOMPARE(UpdateManager::installCommand(QStringLiteral("zterminal_0.10.0_amd64.deb")),
-                 (QStringList{"pkexec", "apt", "install", "-y", "./zterminal_0.10.0_amd64.deb"}));
+        QCOMPARE(UpdateManager::installCommand(QStringLiteral("/tmp/zterminal-install-x/zterminal_0.10.0_amd64.deb")),
+                 (QStringList{"/usr/bin/pkexec", "/usr/bin/apt", "install", "-y",
+                              "/tmp/zterminal-install-x/zterminal_0.10.0_amd64.deb"}));
+        // Relative names become absolute (apt must see a file, not a package name).
+        QVERIFY(QFileInfo(UpdateManager::installCommand(QStringLiteral("z.deb")).last()).isAbsolute());
+    }
+
+    // The installer gets a private copy, re-hashed right before it runs.
+    void stagingRechecksHash()
+    {
+        QTemporaryDir dl;
+        const QString pkg = dl.filePath(QStringLiteral("zterminal_0.10.0_amd64.deb"));
+        {
+            QFile f(pkg);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(debBytes);
+        }
+        const QString sha = QString::fromLatin1(sha256Hex(debBytes));
+        QTemporaryDir into(QDir::tempPath() + QStringLiteral("/zterminal-install-XXXXXX"));
+        QString err;
+        const QString staged = UpdateManager::stageVerifiedPackage(pkg, sha, into, &err);
+        QVERIFY2(!staged.isEmpty(), qPrintable(err));
+        QVERIFY(QFileInfo(staged).isAbsolute());
+        QVERIFY(staged.startsWith(into.path()));
+        QCOMPARE(QFileInfo(into.path()).permissions() & (QFileDevice::ReadGroup | QFileDevice::ReadOther
+                                                         | QFileDevice::WriteGroup | QFileDevice::WriteOther
+                                                         | QFileDevice::ExeGroup | QFileDevice::ExeOther),
+                 QFileDevice::Permissions());
+        // Swapped after verification: refused, no copy left.
+        {
+            QFile f(pkg);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("evil");
+        }
+        QTemporaryDir into2;
+        QVERIFY(UpdateManager::stageVerifiedPackage(pkg, sha, into2, &err).isEmpty());
+        QVERIFY(err.contains(QStringLiteral("changed after it was verified")));
+        QVERIFY(QDir(into2.path()).isEmpty());
+        QVERIFY(UpdateManager::stageVerifiedPackage(pkg, QString(), into2, &err).isEmpty());
+    }
+
+    void releasePageUrlIsChecked()
+    {
+        QVERIFY(isTrustedReleasePageUrl(QStringLiteral("https://github.com/sbj-ee/zterminal/releases/tag/v1.0.0")));
+        QVERIFY(!isTrustedReleasePageUrl(QStringLiteral("http://github.com/sbj-ee/zterminal/releases/tag/v1.0.0")));
+        QVERIFY(!isTrustedReleasePageUrl(QStringLiteral("https://github.com.evil/sbj-ee/zterminal/releases/x")));
+        QVERIFY(!isTrustedReleasePageUrl(QStringLiteral("https://evil@github.com/sbj-ee/zterminal/releases/x")));
+        QVERIFY(!isTrustedReleasePageUrl(QStringLiteral("https://github.com/other/zterminal/releases/x")));
+        QVERIFY(!isTrustedReleasePageUrl(QStringLiteral("file:///etc/passwd")));
+        QVERIFY(!isTrustedReleasePageUrl(QString()));
+        // An untrusted html_url gets no link in the dialog.
+        QByteArray json = fixture(QStringLiteral("release-0.10.0.json"));
+        json.replace("https://github.com/sbj-ee/zterminal/releases/tag/v0.10.0", "file:///etc/passwd");
+        const auto rel = ReleaseInfo::fromJson(json);
+        QVERIFY(rel);
+        UpdateDialog dlg(*rel, QStringLiteral("0.9.0"));
+        QVERIFY(!dlg.findChild<QLabel *>(QStringLiteral("updateSubheading"))->text().contains(QStringLiteral("href")));
+    }
+
+    void updateUrlOverrideOnlyInDevBuilds()
+    {
+        qputenv("ZTERMINAL_UPDATE_URL", "http://127.0.0.1:1/evil");
+        UpdateChecker c;
+#if defined(ZTERMINAL_DEV_OVERRIDES)
+        QCOMPARE(c.apiUrl(), QUrl(QStringLiteral("http://127.0.0.1:1/evil")));
+#else
+        QCOMPARE(c.apiUrl(), QUrl(UpdateChecker::defaultApiUrl()));
+#endif
+        qunsetenv("ZTERMINAL_UPDATE_URL");
+        QCOMPARE(UpdateChecker::defaultApiUrl(),
+                 QStringLiteral("https://api.github.com/repos/sbj-ee/zterminal/releases/latest"));
     }
 
     // Help > Check for Updates when up to date / failing reports it; Skip is remembered.
@@ -648,10 +793,11 @@ private slots:
         UpdateManager &m = freshManager(gh);
         QTemporaryDir out;
         const QString marker = out.filePath(QStringLiteral("installed"));
-        // "$0" is the .deb name (appended); cwd must be the download dir.
+        // "$0" is the staged package's absolute path (appended); cwd is its private dir.
         m.setInstallerForTests(QStringLiteral("/bin/sh"),
                                {QStringLiteral("-c"),
-                                QStringLiteral("test -f \"$0\" && test -f SHA256SUMS && pwd > '%1' && echo \"$0\" >> '%1'")
+                                QStringLiteral("test -f \"$0\" && pwd > '%1' && echo \"$0\" >> '%1' && "
+                                               "ls -ld . | cut -c1-10 >> '%1'")
                                     .arg(marker)});
         int restarts = 0;
         m.setRestartHandlerForTests([&restarts]() { ++restarts; });
@@ -676,8 +822,10 @@ private slots:
         QFile mk(marker);
         QVERIFY(mk.open(QIODevice::ReadOnly));
         const QStringList lines = QString::fromUtf8(mk.readAll()).trimmed().split(QLatin1Char('\n'));
-        QCOMPARE(lines.value(1), platformPackageName());
-        QVERIFY(lines.value(0).contains(QStringLiteral("zterminal-update-")));
+        QVERIFY2(lines.value(1).startsWith(QLatin1Char('/')), qPrintable(lines.value(1)));
+        QVERIFY(lines.value(1).endsWith(QLatin1Char('/') + platformPackageName()));
+        QVERIFY(lines.value(0).contains(QStringLiteral("zterminal-install-")));
+        QCOMPARE(lines.value(2), QStringLiteral("drwx------"));
         QTRY_VERIFY(findTop<QMessageBox>("updateRestart"));
         QMessageBox *box = findTop<QMessageBox>("updateRestart");
         QVERIFY2(box->text().contains(QStringLiteral("1 live session is open in 1 window")), qPrintable(box->text()));

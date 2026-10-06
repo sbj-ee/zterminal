@@ -1,11 +1,12 @@
 # Publish a release when a v* tag is pushed (e.g. `git push origin v1.0.0`):
 # build + test on Ubuntu 24.04 and macOS 14, package .deb + .dmg, write
-# SHA256SUMS (lists both assets so the Linux updater still finds its .deb line)
-# and create the GitHub Release.
+# SHA256SUMS (lists both assets so the Linux updater still finds its .deb line),
+# sign it with minisign (SHA256SUMS.minisig) and create the GitHub Release.
 #
 # In-app updater:
-#   Linux: downloads zterminal_<version>_amd64.deb + SHA256SUMS, pkexec apt install
-#   macOS: downloads zterminal-<version>-Darwin.dmg + SHA256SUMS, opens the .dmg
+#   Linux: downloads SHA256SUMS + .minisig (signature checked) + zterminal_<version>_amd64.deb,
+#          pkexec apt install
+#   macOS: downloads SHA256SUMS + .minisig + zterminal-<version>-Darwin.dmg, opens the .dmg
 #          for a drag-to-Applications install (no automated replace).
 name: Release
 
@@ -147,9 +148,13 @@ jobs:
         with:
           path: dist
 
-      - name: Assemble SHA256SUMS and create release
+      - name: Assemble and sign SHA256SUMS, create release
         env:
           GH_TOKEN: ${{ github.token }}
+          # minisign secret key (the whole minisign.key file) and its password;
+          # see docs/RELEASING.md. The release fails without them.
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -163,10 +168,36 @@ jobs:
           } > out/SHA256SUMS
           cat out/SHA256SUMS
           (cd out && sha256sum -c SHA256SUMS)
+
+          # Sign SHA256SUMS. The app installs nothing without a valid
+          # SHA256SUMS.minisig from the key compiled into it.
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::Secret MINISIGN_SECRET_KEY is not set: refusing to publish an unsigned release (see docs/RELEASING.md)"
+            exit 1
+          fi
+          sudo apt-get install -y -qq minisign
+          key="$RUNNER_TEMP/minisign.key"
+          (umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key")
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "${MINISIGN_PASSWORD:-}" \
+            | minisign -S -s "$key" -m out/SHA256SUMS -t "zterminal $GITHUB_REF_NAME SHA256SUMS"
+          rm -f "$key"
+          # Check it against the public key compiled into this commit, so a
+          # release the app can't verify never goes out.
+          pub=$(gh api "repos/$GITHUB_REPOSITORY/contents/core/UpdateSigningKey.cpp?ref=$GITHUB_SHA" \
+                  -H "Accept: application/vnd.github.raw" \
+                | sed -n 's/.*kUpdateSigningPublicKey\[\] = "\(RW[A-Za-z0-9+/=]*\)".*/\1/p')
+          if [ -z "$pub" ]; then
+            echo "::error::core/UpdateSigningKey.cpp has no public key yet: paste the minisign public key first (docs/RELEASING.md)"
+            exit 1
+          fi
+          minisign -V -P "$pub" -m out/SHA256SUMS -x out/SHA256SUMS.minisig
+
           gh release create "$GITHUB_REF_NAME" \
             "out/zterminal_${version}_amd64.deb" \
             "out/zterminal-${version}-Darwin.dmg" \
             out/SHA256SUMS \
+            out/SHA256SUMS.minisig \
             --repo "$GITHUB_REPOSITORY" \
             --title "zterminal $version" \
             --generate-notes \
