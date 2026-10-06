@@ -27,14 +27,14 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   Settings → Preferences, View → Color Scheme, or the session dialog per saved
   session. The brand palette is shared with [zmail](https://github.com/sbj-ee/zmail):
   see [docs/THEMES.md](docs/THEMES.md) and the
-  [screenshots](docs/brand-themes.png).
+  [screenshots](#themes).
 - **Theme editor** (Settings → Theme Editor…, or the bottom of View → Color Scheme):
   duplicate any scheme (brand ones too), edit the palette roles, the 16 ANSI
   colours, cursor/selection colours, cursor style and blink, and optionally the
   terminal font and size, with a live preview. Save, rename, delete, apply,
   import and export. Custom themes are `*.ztheme.json` files in
   `~/.config/zterminal/themes/` (format shared with zmail, see
-  [docs/THEMES.md](docs/THEMES.md#theme-files)); zmail's themes in
+  [docs/THEMES.md](docs/THEMES.md#theme-files-custom-themes)); zmail's themes in
   `~/.config/zmail/themes/` are listed read-only, with the ANSI colours derived.
 - **Blinking vertical-bar cursor** by default; programs can still change the shape
   and blink via terminal sequences (DECSCUSR / libvterm cursor props).
@@ -74,6 +74,34 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
     opens the disk image for a drag-to-Applications install (no automated replace).
 - **Zorro-Z app icon** (terminal window + Z) on Linux hicolor icons and in the
   macOS `.app` bundle (`zterminal.icns`).
+
+## Themes
+
+The Boilermakers, Badgers and Packers colour schemes (offline sample session):
+
+| Boilermakers | Badgers | Packers |
+|---|---|---|
+| ![zterminal in the Boilermakers theme](docs/screenshots/zterminal-boilermakers.png) | ![zterminal in the Badgers theme](docs/screenshots/zterminal-badgers.png) | ![zterminal in the Packers theme](docs/screenshots/zterminal-packers.png) |
+
+The Theme Editor (Settings → Theme Editor…) editing a custom theme, with the
+palette roles, the 16 ANSI colours, cursor and font settings and a live
+preview:
+
+![The Theme Editor with a custom theme (Badgers Night) and its live preview](docs/screenshots/theme-editor.png)
+
+**Shared with zmail.** The themes work the same way in both apps.
+Boilermakers, Badgers and Packers are built into zterminal and
+[zmail](https://github.com/sbj-ee/zmail) with the same palette, and custom
+themes move between them as `*.ztheme.json` files: **Export…** in one app's
+Theme Editor writes `<name>.ztheme.json`, and **Import…** in the other app's
+editor copies it into that app's themes folder. If both apps run under the
+same user, each one also lists the other's custom themes read-only without
+importing. A theme made in zmail has no terminal colours, so zterminal derives
+the ANSI colours from its palette; zmail keeps but ignores a zterminal theme's
+terminal block. The format, the file locations and how missing colours are
+filled in are in [docs/THEMES.md](docs/THEMES.md).
+
+![The Boilermakers, Badgers and Packers themes in zmail (top) and zterminal (bottom)](docs/brand-themes.png)
 
 ## Platforms
 
