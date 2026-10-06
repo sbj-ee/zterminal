@@ -267,12 +267,23 @@ QToolButton *ThemeEditorDialog::colourButton(const QString &objectName, std::fun
     b->setIconSize(QSize(28, 16));
     b->setToolButtonStyle(Qt::ToolButtonIconOnly);
     connect(b, &QToolButton::clicked, this, [this, get, set]() {
-        const QColor c = QColorDialog::getColor(QColor::fromRgb(get()), this, QStringLiteral("Choose Colour"));
-        if (c.isValid()) {
-            set(c.rgb() & 0xFFFFFF);
-            m_dirty = true;
-            showTheme();
-        }
+        // Qt's own colour dialog, opened on this window. The static getColor()
+        // uses the desktop's native one (GTK under GNOME), a window Qt can't
+        // attach to this dialog on Wayland: it can come up behind it while the
+        // editor, blocked waiting for it, looks frozen.
+        auto *picker = new QColorDialog(QColor::fromRgb(get()), this);
+        picker->setObjectName(QStringLiteral("colourPicker"));
+        picker->setWindowTitle(QStringLiteral("Choose Colour"));
+        picker->setOption(QColorDialog::DontUseNativeDialog);
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        connect(picker, &QColorDialog::colorSelected, this, [this, set](const QColor &c) {
+            if (c.isValid()) {
+                set(c.rgb() & 0xFFFFFF);
+                m_dirty = true;
+                showTheme();
+            }
+        });
+        picker->open(); // modal to the editor only; returns at once
     });
     m_colourButtons.append({b, get});
     return b;
