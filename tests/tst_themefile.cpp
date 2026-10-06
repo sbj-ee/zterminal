@@ -14,6 +14,10 @@
 #include <QApplication>
 #include <QSettings>
 #include <QComboBox>
+#include <functional>
+#include <QToolButton>
+#include <QPushButton>
+#include <QColorDialog>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -282,6 +286,79 @@ private slots:
         QVERIFY(!QFile::exists(ColorScheme::userThemesDir() + QStringLiteral("/lambeau-night.ztheme.json")));
         QVERIFY(!w.action(QStringLiteral("scheme:custom:lambeau-night")));
         ed->close();
+    }
+
+    // Duplicate a read-only theme with the button, then change a colour with
+    // its swatch button: the picker must be Qt's own dialog, opened on the
+    // editor without blocking it (the native one could come up behind the
+    // editor on Wayland and leave it looking frozen), and the choice must land.
+    void colourButtonOpensANonBlockingPickerOnTheEditor()
+    {
+        ThemeEditorDialog ed(AppSettings::load());
+        ed.show();
+        QVERIFY(ed.select(QStringLiteral("putty")));
+        QVERIFY(!ed.currentEditable());
+        QPushButton *dup = nullptr;
+        for (QPushButton *b : ed.findChildren<QPushButton *>()) {
+            if (b->text().remove(QLatin1Char('&')) == QLatin1String("Duplicate")) {
+                dup = b;
+            }
+        }
+        QVERIFY(dup);
+        dup->click();
+        QVERIFY(ed.currentEditable());
+        QCOMPARE(ed.currentId(), QStringLiteral("custom:putty-copy"));
+        const QString file = ColorScheme::userThemesDir() + QStringLiteral("/putty-copy.ztheme.json");
+        QVERIFY(QFile::exists(file));
+
+        // One palette role, one ANSI colour: both kinds of swatch.
+        const struct { const char *button; std::function<std::uint32_t()> value; } swatches[] = {
+            {"role:accent", [&ed] { return ed.theme().roles[Accent]; }},
+            {"ansi:1", [&ed] { return ed.theme().terminal->ansi[1]; }},
+        };
+        std::uint32_t pick = 0x12ab34;
+        for (const auto &s : swatches) {
+            auto *swatch = ed.findChild<QToolButton *>(QLatin1String(s.button));
+            QVERIFY2(swatch, s.button);
+            QVERIFY(swatch->isEnabled());
+            swatch->click(); // returns: nothing blocks here
+            QColorDialog *picker = nullptr;
+            for (QColorDialog *d : ed.findChildren<QColorDialog *>(QStringLiteral("colourPicker"))) {
+                if (d->isVisible()) {
+                    picker = d;
+                }
+            }
+            QVERIFY2(picker, s.button);
+            QVERIFY(picker->testOption(QColorDialog::DontUseNativeDialog));
+            QCOMPARE(picker->parentWidget(), &ed);
+            QCOMPARE(picker->windowModality(), Qt::WindowModal);
+            QCOMPARE(std::uint32_t(picker->currentColor().rgb() & 0xFFFFFF), s.value());
+
+            picker->setCurrentColor(QColor::fromRgb(pick));
+            picker->accept();
+            QCOMPARE(s.value(), pick);
+            QVERIFY(ed.isDirty());
+            ++pick;
+        }
+        QVERIFY(ed.saveCurrent());
+        QCOMPARE(load(file)->roles[Accent], 0x12ab34u);
+        QCOMPARE(load(file)->terminal->ansi[1], 0x12ab35u);
+
+        // Cancelling changes nothing.
+        ed.findChild<QToolButton *>(QStringLiteral("role:accent"))->click();
+        QColorDialog *picker = nullptr;
+        for (QColorDialog *d : ed.findChildren<QColorDialog *>(QStringLiteral("colourPicker"))) {
+            if (d->isVisible()) {
+                picker = d;
+            }
+        }
+        QVERIFY(picker);
+        picker->setCurrentColor(QColor(Qt::red));
+        picker->reject();
+        QCOMPARE(ed.theme().roles[Accent], 0x12ab34u);
+        QVERIFY(!ed.isDirty());
+        QVERIFY(ed.deleteCurrent());
+        QVERIFY(!QFile::exists(file));
     }
 
     void editorImportsAndListsZmailThemes()
