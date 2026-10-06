@@ -198,6 +198,30 @@ private slots:
         QVERIFY(applied == r);
     }
 
+    void brandSchemesAreOfferedEverywhere()
+    {
+        // Boilermakers / Badgers / Packers (shared with zmail): Preferences
+        // combo box and View > Color Scheme; picking one applies and persists.
+        AppSettings base;
+        base.fontFamily = AppSettings::defaultFontFamily();
+        PreferencesDialog d(base);
+        auto *scheme = d.findChild<QComboBox *>(QStringLiteral("colorScheme"));
+        QVERIFY(scheme);
+        LaunchRequest req;
+        MainWindow w(req, {});
+        w.show();
+        for (const char *id : {"boilermakers", "badgers", "packers"}) {
+            const QString sid = QString::fromLatin1(id);
+            QVERIFY2(scheme->findData(sid) >= 0, id);
+            QAction *a = w.action(QStringLiteral("scheme:") + sid);
+            QVERIFY2(a, id);
+            a->trigger();
+            QCOMPARE(w.terminal()->colorScheme().id, sid);
+            QCOMPARE(AppSettings::load().colorScheme, sid);
+        }
+        QCOMPARE(scheme->itemText(scheme->findData(QStringLiteral("badgers"))), QStringLiteral("Badgers"));
+    }
+
     void applyingUpdatesTheWidgetsLive()
     {
         LaunchRequest req;
