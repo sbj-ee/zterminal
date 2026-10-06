@@ -15,6 +15,8 @@ zterminal_add_test(tst_terminal zterminal_core)
 zterminal_add_test(tst_selection zterminal_core)
 zterminal_add_test(tst_pty zterminal_core)
 zterminal_add_test(tst_misc zterminal_core)
+zterminal_add_test(tst_themefile zterminal_ui) # tests/data/themes shared with zmail
+target_compile_definitions(tst_themefile PRIVATE ZTERMINAL_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
 zterminal_add_test(tst_view zterminal_ui)
 zterminal_add_test(tst_settings zterminal_ui)
 zterminal_add_test(tst_sessions zterminal_core)

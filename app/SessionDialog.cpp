@@ -304,7 +304,7 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_scheme = new QComboBox;
     m_scheme->setObjectName(QStringLiteral("colorScheme"));
     m_scheme->addItem(QStringLiteral("Default (Preferences)"), QString());
-    for (const ColorScheme &cs : ColorScheme::builtIn()) {
+    for (const ColorScheme &cs : ColorScheme::all()) {
         m_scheme->addItem(cs.name, cs.id);
     }
     lookForm->addRow(QStringLiteral("Color scheme:"), m_scheme);

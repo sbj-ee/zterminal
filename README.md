@@ -6,8 +6,9 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.1.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
-vault, session logging, safe paste, Find, keepalive/reconnect, and in-app updates.
+**1.2.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
+vault, session logging, safe paste, Find, keepalive/reconnect, in-app updates,
+and a theme editor.
 See [docs/PLAN.md](docs/PLAN.md) for design notes.
 
 ![zterminal running a colour test, with a selection highlighted](docs/screenshot.png)
@@ -27,6 +28,14 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   session. The brand palette is shared with [zmail](https://github.com/sbj-ee/zmail):
   see [docs/THEMES.md](docs/THEMES.md) and the
   [screenshots](docs/brand-themes.png).
+- **Theme editor** (Settings → Theme Editor…, or the bottom of View → Color Scheme):
+  duplicate any scheme (brand ones too), edit the palette roles, the 16 ANSI
+  colours, cursor/selection colours, cursor style and blink, and optionally the
+  terminal font and size, with a live preview. Save, rename, delete, apply,
+  import and export. Custom themes are `*.ztheme.json` files in
+  `~/.config/zterminal/themes/` (format shared with zmail, see
+  [docs/THEMES.md](docs/THEMES.md#theme-files)); zmail's themes in
+  `~/.config/zmail/themes/` are listed read-only, with the ANSI colours derived.
 - **Blinking vertical-bar cursor** by default; programs can still change the shape
   and blink via terminal sequences (DECSCUSR / libvterm cursor props).
 - **Scrollback:** 100,000 lines per tab by default (or Unlimited in Preferences),
@@ -77,7 +86,7 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
 ## Install
 
 Download the assets for [the latest release](https://github.com/sbj-ee/zterminal/releases/latest)
-(`zterminal_1.1.0_amd64.deb` or `zterminal-1.1.0-Darwin.dmg`, plus `SHA256SUMS`).
+(`zterminal_1.2.0_amd64.deb` or `zterminal-1.2.0-Darwin.dmg`, plus `SHA256SUMS`).
 
 ```sh
 # Verify the package (Linux or macOS)
@@ -88,7 +97,7 @@ shasum -a 256 -c SHA256SUMS      # macOS
 **Linux:**
 
 ```sh
-sudo apt install ./zterminal_1.1.0_amd64.deb
+sudo apt install ./zterminal_1.2.0_amd64.deb
 # Serial consoles: sudo usermod -aG dialout $USER   # then log out and back in
 ```
 
