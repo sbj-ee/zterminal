@@ -2,7 +2,9 @@
 // bracketed paste, mouse modes and key encoding (libvterm through Terminal).
 #include "ColorScheme.hpp"
 #include "Terminal.hpp"
+#include "WindowTitle.hpp"
 
+#include <QRandomGenerator>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -195,6 +197,91 @@ private slots:
         // Embedded end marker cannot terminate the paste early.
         QCOMPARE(collect(t, [&t]() { t.paste(QStringLiteral("a\x1b[201~rm -rf\n")); }),
                  QByteArray("\x1b[200~arm -rf\r\x1b[201~"));
+    }
+
+    // Item 4: no control character but TAB/CR survives a paste.
+    void pasteStripsControls()
+    {
+        // The split marker that the old single-pass removal re-assembled.
+        QCOMPARE(Terminal::preparePasteBytes(QStringLiteral("x\x1b[20\x1b[201~1~y")), QByteArray("x[201~y"));
+        QCOMPARE(Terminal::preparePasteBytes(QStringLiteral("a\x03" "b\x7f\x1b[31mred\u009b2Jx\tq\x1b]52;c;Zm9v\x07")),
+                 QByteArray("ab[31mred2Jx\tq]52;c;Zm9v"));
+        QCOMPARE(Terminal::preparePasteBytes(QStringLiteral("l1\r\nl2\nl3\r")), QByteArray("l1\rl2\rl3\r"));
+        QCOMPARE(Terminal::preparePasteBytes(QStringLiteral("caf\u00e9 \U0001F600")), QStringLiteral("caf\u00e9 \U0001F600").toUtf8());
+        QVERIFY(Terminal::preparePasteBytes(QString(QChar(0x1b))).isEmpty());
+        // In bracketed mode the only end marker is ours, at the very end.
+        Terminal t(5, 20);
+        t.feed("\x1b[?2004h");
+        const QByteArray out = collect(t, [&t]() { t.paste(QStringLiteral("\x1b[20\x1b[201~1~\x1b\x1b[201~~rm -rf /\n")); });
+        QVERIFY(out.startsWith("\x1b[200~"));
+        QVERIFY(out.endsWith("\x1b[201~"));
+        QCOMPARE(out.count('\x1b'), 2);
+    }
+
+    // Fuzz-style: random mixes of controls, marker fragments and Unicode.
+    void pasteFuzz()
+    {
+        QRandomGenerator rng(20261005);
+        const QStringList atoms{QStringLiteral("\x1b"), QStringLiteral("["), QStringLiteral("200~"),
+                                QStringLiteral("201~"), QStringLiteral("\x1b[201~"), QStringLiteral("\x1b[200~"),
+                                QStringLiteral("\r"), QStringLiteral("\n"), QStringLiteral("\t"),
+                                QStringLiteral("\x7f"), QStringLiteral("\u009b"), QStringLiteral("\u0090"),
+                                QStringLiteral("\u009c"), QStringLiteral("a"), QStringLiteral("\u00e9"),
+                                QStringLiteral("\u202e"), QStringLiteral("\U0001F600"), QStringLiteral("1~"),
+                                QString(QChar(0)), QStringLiteral("\x03"), QStringLiteral("\x15")};
+        Terminal t(5, 20);
+        t.feed("\x1b[?2004h");
+        for (int round = 0; round < 3000; ++round) {
+            QString in;
+            const int n = int(rng.bounded(1, 40));
+            for (int i = 0; i < n; ++i) {
+                if (rng.bounded(4) == 0) {
+                    in += QChar(char16_t(rng.bounded(0, 0x250))); // anything in C0..Latin Extended
+                } else {
+                    in += atoms.at(int(rng.bounded(qsizetype(atoms.size()))));
+                }
+            }
+            const QByteArray b = Terminal::preparePasteBytes(in);
+            for (const char32_t u : QString::fromUtf8(b).toUcs4()) {
+                const bool bad = (u < 0x20 && u != U'\t' && u != U'\r') || u == 0x7f || (u >= 0x80 && u < 0xa0);
+                QVERIFY2(!bad, qPrintable(QStringLiteral("round %1: U+%2 survived in %3")
+                                              .arg(round)
+                                              .arg(uint(u), 4, 16, QLatin1Char('0'))
+                                              .arg(QString::fromLatin1(b.toHex()))));
+            }
+            QVERIFY(!b.contains('\n'));
+            const QByteArray out = collect(t, [&t, &in]() { t.paste(in); });
+            if (!b.isEmpty()) {
+                QCOMPARE(out, QByteArray("\x1b[200~") + b + QByteArray("\x1b[201~"));
+            }
+        }
+    }
+
+    // Item 7: program titles are capped and can't carry controls or bidi tricks.
+    void titleSanitizedAndCapped()
+    {
+        Terminal t(5, 20);
+        t.feed("\x1b]2;safe\u202eexe.txt\u2066x\u2069\u200f\u061c\x07");
+        QCOMPARE(t.title(), QStringLiteral("safeexe.txtx"));
+        // C1 controls (as UTF-8) inside the OSC string.
+        t.feed("\x1b]2;a\xc2\x85" "b\xc2\x9b" "c\x07");
+        QCOMPARE(t.title(), QStringLiteral("abc"));
+        // A huge title, streamed in pieces, is cut at kMaxTitleBytes.
+        QSignalSpy spy(&t, &Terminal::titleChanged);
+        t.feed("\x1b]2;");
+        const QByteArray chunk(1000, 'x');
+        for (int i = 0; i < 2000; ++i) {
+            t.feed(chunk);
+        }
+        t.feed("\x07");
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(t.title().size(), qsizetype(Terminal::kMaxTitleBytes));
+        // And the next title starts fresh.
+        t.feed("\x1b]0;next\x07");
+        QCOMPARE(t.title(), QStringLiteral("next"));
+        // The window title sanitizes too (session names, any program title).
+        QVERIFY(!makeWindowTitle(QStringLiteral("sw\u202e1"), QStringLiteral("a\x1b[2Jb\u2067")).contains(QChar(0x202e)));
+        QVERIFY(makeWindowTitle(QStringLiteral("s"), QStringLiteral("a\x1b[2Jb\u2067")).endsWith(QStringLiteral("a[2Jb")));
     }
 
     void keyEncoding()
