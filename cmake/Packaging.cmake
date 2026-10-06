@@ -56,7 +56,7 @@ elseif(APPLE)
   set(CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE OFF)
   # zterminal.app at the dmg root next to CPack's /Applications symlink.
   # MacDeploy.cmake then runs macdeployqt, strips Homebrew rpaths, ad-hoc
-  # signs and check-bundle.sh.
+  # signs (nested then app; no hardened runtime until Developer ID) and check-bundle.sh.
   install(TARGETS zterminal BUNDLE DESTINATION .)
   install(TARGETS zterminal-askpass
           RUNTIME DESTINATION zterminal.app/Contents/MacOS)
