@@ -41,6 +41,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)
 
 include(cmake/CompilerWarnings.cmake)
+include(cmake/Sanitizers.cmake)
+include(cmake/Hardening.cmake)
 
 set(ZTERMINAL_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file(
@@ -61,6 +63,10 @@ endif()
 if(ZTERMINAL_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(ZTERMINAL_FUZZ)
+  add_subdirectory(fuzz)
 endif()
 
 include(cmake/Packaging.cmake)

@@ -86,7 +86,9 @@ struct VTermState
 
   /* lineinfo will == lineinfos[0] or lineinfos[1], depending on altscreen */
   VTermLineInfo *lineinfo;
-#define ROWWIDTH(state,row) ((state)->lineinfo[(row)].doublewidth ? ((state)->cols / 2) : (state)->cols)
+/* zterminal patch: a double-width line on a 1-column screen had width 0, and
+ * clamping the cursor to width-1 put it at column -1. At least 1. */
+#define ROWWIDTH(state,row) ((state)->lineinfo[(row)].doublewidth && (state)->cols > 1 ? ((state)->cols / 2) : (state)->cols)
 #define THISROWWIDTH(state) ROWWIDTH(state, (state)->pos.row)
 
   /* Mouse state */

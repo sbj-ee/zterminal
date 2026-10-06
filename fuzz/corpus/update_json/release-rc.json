@@ -1,0 +1,12 @@
+{
+  "html_url": "https://github.com/sbj-ee/zterminal/releases/tag/v1.0.0-rc.1",
+  "tag_name": "v1.0.0-rc.1",
+  "name": "zterminal 1.0.0 RC 1",
+  "draft": false,
+  "prerelease": true,
+  "body": "",
+  "assets": [
+    { "name": "zterminal_1.0.0~rc.1_amd64.deb", "size": 10, "browser_download_url": "https://github.com/sbj-ee/zterminal/releases/download/rc/zterminal_1.0.0~rc.1_amd64.deb" },
+    { "name": "SHA256SUMS", "size": 10, "browser_download_url": "https://github.com/sbj-ee/zterminal/releases/download/rc/SHA256SUMS" }
+  ]
+}

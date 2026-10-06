@@ -172,7 +172,10 @@ std::optional<ReleaseInfo> ReleaseInfo::fromJson(const QByteArray &json, QString
         ReleaseAsset asset;
         asset.name = a.value(QStringLiteral("name")).toString();
         asset.url = a.value(QStringLiteral("browser_download_url")).toString();
-        asset.size = qint64(a.value(QStringLiteral("size")).toDouble());
+        // toInteger: 0 for anything that isn't a whole number in qint64 range
+        // (a double cast would be undefined behaviour; found by fuzzing).
+        const qint64 size = a.value(QStringLiteral("size")).toInteger(0);
+        asset.size = size < 0 ? 0 : size;
         if (asset.isValid()) {
             r.assets << asset;
         }

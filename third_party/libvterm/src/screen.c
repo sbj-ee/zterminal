@@ -186,8 +186,13 @@ static int putglyph(VTermGlyphInfo *info, VTermPos pos, void *user)
   if(i < VTERM_MAX_CHARS_PER_CELL)
     cell->chars[i] = 0;
 
-  for(int col = 1; col < info->width; col++)
-    getcell(screen, pos.row, pos.col + col)->chars[0] = (uint32_t)-1;
+  /* zterminal patch: a double-width glyph in the last (or only) column has
+   * no cell to its right; upstream wrote through the NULL from getcell(). */
+  for(int col = 1; col < info->width; col++) {
+    ScreenCell *right = getcell(screen, pos.row, pos.col + col);
+    if(right)
+      right->chars[0] = (uint32_t)-1;
+  }
 
   VTermRect rect = {
     .start_row = pos.row,
@@ -241,10 +246,14 @@ static int moverect_internal(VTermRect dest, VTermRect src, void *user)
     inc_row  = +1;
   }
 
-  for(int row = init_row; row != test_row; row += inc_row)
-    memmove(getcell(screen, row, dest.start_col),
-            getcell(screen, row + downward, src.start_col),
-            cols * sizeof(ScreenCell));
+  /* zterminal patch: getcell() returns NULL outside the screen; memmove
+   * from/to NULL crashed (or was UB for 0 columns). Skip such rows. */
+  for(int row = init_row; row != test_row; row += inc_row) {
+    ScreenCell *to = getcell(screen, row, dest.start_col);
+    ScreenCell *from = getcell(screen, row + downward, src.start_col);
+    if(to && from && cols > 0)
+      memmove(to, from, cols * sizeof(ScreenCell));
+  }
 
   return 1;
 }
@@ -534,7 +543,10 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
   while(old_row >= 0) {
     int old_row_end = old_row;
     /* TODO: Stop if dwl or dhl */
-    while(REFLOW && old_lineinfo && old_row >= 0 && old_lineinfo[old_row].continuation)
+    /* zterminal patch: upstream tests old_row >= 0, so a continuation flag on
+     * row 0 (its first half already scrolled off) walks to row -1 and the
+     * code below reads before the buffer (ASan, found by fuzzing). */
+    while(REFLOW && old_lineinfo && old_row > 0 && old_lineinfo[old_row].continuation)
       old_row--;
     int old_row_start = old_row;
 
@@ -661,8 +673,13 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
 
   /* We really expect the cursor position to be set by now */
   if(active && (new_cursor.row == -1 || new_cursor.col == -1)) {
-    fprintf(stderr, "screen_resize failed to update cursor position\n");
-    abort();
+    /* zterminal patch: upstream calls abort() here. Program output followed
+     * by a resize reached it (found by fuzzing: a 1x1 screen, "55", resize to
+     * 3x3), so a remote host could crash the terminal. Clamp instead. */
+    if(new_cursor.row < 0)
+      new_cursor.row = 0;
+    if(new_cursor.col < 0)
+      new_cursor.col = 0;
   }
 
   if(old_row >= 0 && bufidx == BUFIDX_PRIMARY) {
@@ -737,8 +754,19 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
   vterm_allocator_free(screen->vt, old_lineinfo);
   statefields->lineinfos[bufidx] = new_lineinfo;
 
-  if(active)
+  if(active) {
+    /* zterminal patch: keep the cursor inside the new screen whatever the
+     * reflow above computed. */
+    if(new_cursor.row < 0)
+      new_cursor.row = 0;
+    if(new_cursor.row >= new_rows)
+      new_cursor.row = new_rows - 1;
+    if(new_cursor.col < 0)
+      new_cursor.col = 0;
+    if(new_cursor.col >= new_cols)
+      new_cursor.col = new_cols - 1;
     statefields->pos = new_cursor;
+  }
 
   return;
 }

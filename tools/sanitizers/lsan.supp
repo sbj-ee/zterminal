@@ -1,0 +1,5 @@
+# LeakSanitizer suppressions for the CI "Sanitizers" job: one-time allocations
+# inside system libraries that zterminal cannot free. Never suppress
+# zterminal's own code here.
+leak:libfontconfig.so
+leak:libdbus-1.so

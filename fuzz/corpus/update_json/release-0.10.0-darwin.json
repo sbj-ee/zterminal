@@ -1,0 +1,25 @@
+{
+  "url": "https://api.github.com/repos/sbj-ee/zterminal/releases/1",
+  "html_url": "https://github.com/sbj-ee/zterminal/releases/tag/v0.10.0",
+  "id": 1,
+  "tag_name": "v0.10.0",
+  "name": "zterminal 0.10.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-04T15:00:00Z",
+  "body": "Darwin package fixture",
+  "assets": [
+    {
+      "name": "zterminal-0.10.0-Darwin.dmg",
+      "size": 99,
+      "content_type": "application/x-apple-diskimage",
+      "browser_download_url": "https://github.com/sbj-ee/zterminal/releases/download/v0.10.0/zterminal-0.10.0-Darwin.dmg"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 10,
+      "content_type": "text/plain",
+      "browser_download_url": "https://github.com/sbj-ee/zterminal/releases/download/v0.10.0/SHA256SUMS"
+    }
+  ]
+}

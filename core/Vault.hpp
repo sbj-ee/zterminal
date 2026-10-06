@@ -101,12 +101,19 @@ public:
         return kind + QLatin1Char('/') + sessionName;
     }
 
+    // The two parsers that see untrusted bytes, for tests and fuzzers: the
+    // file header (before any key derivation) and the decrypted entry table.
+    // Both return false on malformed input and never read out of bounds.
+    static bool checkHeader(const QByteArray &file, QString *error = nullptr);
+    static bool parseEntries(const unsigned char *data, std::size_t len, std::map<QString, SecureBuffer> *out);
+
 private:
     struct Header {
         KdfParams params;
         unsigned char salt[16];
         unsigned char nonce[24];
     };
+    static bool parseHeaderStatic(const QByteArray &data, Header *h, QString *error);
     bool readFile(QByteArray *data);
     bool parseHeader(const QByteArray &data, Header *h);
     bool deriveKey(const SecureBuffer &password, const Header &h, SecureBuffer *key);
