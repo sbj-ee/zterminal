@@ -98,7 +98,11 @@ foreach(_f IN LISTS _machos)
   endforeach()
 endforeach()
 
-message(STATUS "zterminal deploy: ad-hoc codesign")
-_run(codesign --force --deep -s - "${_app}")
+# Hardened runtime (--options runtime) even for the ad-hoc signature: no
+# DYLD_* injection, library validation, no unsigned executable memory. A
+# Developer ID signature + notarization (docs/RELEASING.md) needs Stephen's
+# Apple account and replaces "-" with the identity.
+message(STATUS "zterminal deploy: ad-hoc codesign (hardened runtime)")
+_run(codesign --force --deep --options runtime --timestamp=none -s - "${_app}")
 _run(codesign --verify --deep --strict --verbose=2 "${_app}")
 _run(bash "@ZTERMINAL_CHECK_BUNDLE@" "${_app}")

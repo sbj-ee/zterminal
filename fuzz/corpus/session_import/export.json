@@ -1,0 +1,4 @@
+{"format":"zterminal-sessions","formatVersion":1,"exportedAt":"2026-10-05T12:00:00Z","sessions":[
+{"name":"core-sw1","type":"ssh","host":"core-sw1.example","user":"admin","port":22,"jumpHost":"jump@bastion:2222","extraArgs":"-4 -C -o ServerAliveInterval=30","keyFile":"~/.ssh/id_ed25519","passwordStored":true,"autoLog":true,"autoReconnect":true,"keepaliveInterval":15,"keepaliveCountMax":4},
+{"name":"console-1","type":"serial","serialDevice":"/dev/ttyUSB0","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none","loginUser":"cisco","localEcho":true,"charDelayMs":5,"lineDelayMs":0,"enterSends":"CR","breakMs":300},
+{"name":"Local","type":"local","fontFamily":"monospace","fontSize":12}]}

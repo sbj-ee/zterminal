@@ -13,8 +13,11 @@ on:
   push:
     tags: ['v*']
 
+# Least privilege: jobs get read-only contents unless they say otherwise.
+# Only publish writes (gh release create); the build jobs may mint an OIDC
+# token solely to sign build-provenance attestations for their packages.
 permissions:
-  contents: write # gh release create
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -24,8 +27,12 @@ jobs:
   linux:
     name: Build Linux ${{ github.ref_name }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write     # Sigstore signing for the provenance attestation
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt 6 + build tools
         run: |
@@ -65,8 +72,15 @@ jobs:
           sha256sum "$deb" > SHA256SUMS.linux
           cat SHA256SUMS.linux
 
+      # Signed SLSA build provenance for the .deb (verify with
+      # `gh attestation verify zterminal_<v>_amd64.deb -R sbj-ee/zterminal`).
+      - name: Attest build provenance (.deb)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: build/zterminal_*_amd64.deb
+
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zterminal-release-linux
           path: |
@@ -77,8 +91,12 @@ jobs:
   macos:
     name: Build macOS ${{ github.ref_name }}
     runs-on: macos-14
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt + build tools (brew)
         run: brew install qt cmake ninja libsodium pkg-config socat
@@ -128,8 +146,13 @@ jobs:
           tools/macos/check-bundle.sh "$mnt/zterminal.app"
           codesign --verify --deep --strict --verbose=2 "$mnt/zterminal.app"
 
+      - name: Attest build provenance (.dmg)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: build/zterminal-*-Darwin.dmg
+
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zterminal-release-macos
           path: |
@@ -141,9 +164,11 @@ jobs:
     name: Publish ${{ github.ref_name }}
     needs: [linux, macos]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write # gh release create
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: dist
 

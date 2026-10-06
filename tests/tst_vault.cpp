@@ -144,6 +144,35 @@ private slots:
         QVERIFY(!d.contains("core-sw1"));
     }
 
+    // The untrusted-input parsers (also fuzzed: fuzz/fuzz_vault.cpp).
+    void parsersRejectMalformedInput()
+    {
+        QString err;
+        QVERIFY(!Vault::checkHeader(QByteArray(), &err));
+        QVERIFY(!err.isEmpty());
+        QVERIFY(!Vault::checkHeader(QByteArray(200, 'x'), &err));
+        std::map<QString, SecureBuffer> out;
+        const unsigned char none[1] = {0};
+        QVERIFY(!Vault::parseEntries(none, 0, &out));
+        // count = 0xFFFFFFFF with no data: refused before allocating anything.
+        const unsigned char huge[4] = {0xff, 0xff, 0xff, 0xff};
+        QVERIFY(!Vault::parseEntries(huge, sizeof huge, &out));
+        // More entries than any real vault, each well-formed (empty key/value).
+        QByteArray many;
+        const quint32 entryCount = 20000;
+        many.append(reinterpret_cast<const char *>(&entryCount), 4); // little-endian hosts (CI)
+        many.append(QByteArray(int(entryCount) * 6, '\0'));
+        QVERIFY(!Vault::parseEntries(reinterpret_cast<const unsigned char *>(many.constData()), std::size_t(many.size()), &out));
+        // A good table.
+        const unsigned char good[] = {1, 0, 0, 0, 1, 0, 'k', 2, 0, 0, 0, 'v', 'w'};
+        QVERIFY(Vault::parseEntries(good, sizeof good, &out));
+        QCOMPARE(out.size(), std::size_t(1));
+        QCOMPARE(out.begin()->first, QStringLiteral("k"));
+        QCOMPARE(out.begin()->second.size(), std::size_t(2));
+        // Truncated value.
+        QVERIFY(!Vault::parseEntries(good, sizeof good - 1, &out));
+    }
+
     void roundTrip()
     {
         const QString p = makeVault();

@@ -222,8 +222,12 @@ size_t vterm_input_write(VTerm *vt, const char *bytes, size_t len)
       if(c >= '0' && c <= '9') {
         if(vt->parser.v.csi.args[vt->parser.v.csi.argi] == CSI_ARG_MISSING)
           vt->parser.v.csi.args[vt->parser.v.csi.argi] = 0;
-        vt->parser.v.csi.args[vt->parser.v.csi.argi] *= 10;
-        vt->parser.v.csi.args[vt->parser.v.csi.argi] += c - '0';
+        /* zterminal patch: saturate instead of overflowing a signed long
+         * (undefined behaviour) on absurdly long numbers; found by fuzzing. */
+        if(vt->parser.v.csi.args[vt->parser.v.csi.argi] < 100000000L) {
+          vt->parser.v.csi.args[vt->parser.v.csi.argi] *= 10;
+          vt->parser.v.csi.args[vt->parser.v.csi.argi] += c - '0';
+        }
         break;
       }
       if(c == ':') {
@@ -231,6 +235,10 @@ size_t vterm_input_write(VTerm *vt, const char *bytes, size_t len)
         c = ';';
       }
       if(c == ';') {
+        /* zterminal patch: drop excess arguments instead of writing past
+         * args[CSI_ARGS_MAX] (heap overflow; same fix as Vim 9.2.0279). */
+        if(vt->parser.v.csi.argi >= CSI_ARGS_MAX - 1)
+          break;
         vt->parser.v.csi.argi++;
         vt->parser.v.csi.args[vt->parser.v.csi.argi] = CSI_ARG_MISSING;
         break;
@@ -261,11 +269,13 @@ size_t vterm_input_write(VTerm *vt, const char *bytes, size_t len)
     case OSC_COMMAND:
       /* Numerical value of command */
       if(c >= '0' && c <= '9') {
+        /* zterminal patch: saturate (signed int overflow); see CSI_ARGS. */
         if(vt->parser.v.osc.command == -1)
-          vt->parser.v.osc.command = 0;
-        else
+          vt->parser.v.osc.command = c - '0';
+        else if(vt->parser.v.osc.command < 100000000) {
           vt->parser.v.osc.command *= 10;
-        vt->parser.v.osc.command += c - '0';
+          vt->parser.v.osc.command += c - '0';
+        }
         break;
       }
       if(c == ';') {
@@ -377,7 +387,10 @@ string_state:
 
   if(string_start) {
     size_t string_len = bytes + pos - string_start;
-    if(vt->parser.in_esc)
+    /* zterminal patch: an ESC followed by a C0 control at the end of the
+     * buffer leaves in_esc set with an empty fragment; the unguarded
+     * decrement wrapped to SIZE_MAX (huge out-of-bounds fragment). */
+    if(vt->parser.in_esc && string_len)
       string_len -= 1;
     string_fragment(vt, string_start, string_len, false);
   }

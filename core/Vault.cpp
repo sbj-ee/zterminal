@@ -31,6 +31,7 @@ constexpr std::uint64_t kMaxOpsAccepted = 100;
 constexpr std::uint64_t kMaxMemAccepted = 1024ull * 1024 * 1024; // 1 GiB
 constexpr std::size_t kKeyBytes = crypto_aead_xchacha20poly1305_ietf_KEYBYTES;
 constexpr std::size_t kTagBytes = crypto_aead_xchacha20poly1305_ietf_ABYTES;
+constexpr std::uint64_t kMaxEntries = 10000; // far more than any real vault holds
 static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES == 24);
 static_assert(crypto_pwhash_SALTBYTES == 16);
 
@@ -219,36 +220,60 @@ bool Vault::readFile(QByteArray *data)
     return true;
 }
 
-bool Vault::parseHeader(const QByteArray &data, Header *h)
+bool Vault::parseHeaderStatic(const QByteArray &data, Header *h, QString *error)
 {
+    auto bad = [error](const QString &msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
     if (data.size() < kHeaderSize + qsizetype(kTagBytes)) {
-        return fail(QStringLiteral("The vault file is truncated or not a zterminal vault."));
+        return bad(QStringLiteral("The vault file is truncated or not a zterminal vault."));
     }
     const auto *p = reinterpret_cast<const unsigned char *>(data.constData());
     if (std::memcmp(p, kMagic, sizeof kMagic) != 0) {
-        return fail(QStringLiteral("Not a zterminal vault file (bad magic)."));
+        return bad(QStringLiteral("Not a zterminal vault file (bad magic)."));
     }
     if (getLe(p + 8, 2) != kFormatVersion) {
-        return fail(QStringLiteral("Unsupported vault format version %1.").arg(getLe(p + 8, 2)));
+        return bad(QStringLiteral("Unsupported vault format version %1.").arg(getLe(p + 8, 2)));
     }
     if (p[10] != kKdfArgon2id13 || p[11] != kAeadXChaCha20Poly1305) {
-        return fail(QStringLiteral("Unsupported vault KDF or cipher."));
+        return bad(QStringLiteral("Unsupported vault KDF or cipher."));
     }
     h->params.opsLimit = getLe(p + 12, 8);
     h->params.memLimit = getLe(p + 20, 8);
     if (h->params.opsLimit < crypto_pwhash_OPSLIMIT_MIN || h->params.opsLimit > kMaxOpsAccepted
         || h->params.memLimit < crypto_pwhash_MEMLIMIT_MIN || h->params.memLimit > kMaxMemAccepted) {
-        return fail(QStringLiteral("The vault header has out-of-range KDF parameters."));
+        return bad(QStringLiteral("The vault header has out-of-range KDF parameters."));
     }
     std::memcpy(h->salt, p + 28, sizeof h->salt);
     std::memcpy(h->nonce, p + 44, sizeof h->nonce);
     return true;
 }
 
+bool Vault::checkHeader(const QByteArray &file, QString *error)
+{
+    Header h {};
+    return parseHeaderStatic(file, &h, error);
+}
+
+bool Vault::parseHeader(const QByteArray &data, Header *h)
+{
+    QString err;
+    if (!parseHeaderStatic(data, h, &err)) {
+        return fail(err);
+    }
+    return true;
+}
+
 bool Vault::deriveKey(const SecureBuffer &password, const Header &h, SecureBuffer *key)
 {
     SecureBuffer k(kKeyBytes);
-    if (crypto_pwhash(k.data(), k.size(), reinterpret_cast<const char *>(password.data()), password.size(),
+    // An empty SecureBuffer has no storage; libsodium wants a non-null pointer
+    // even for length 0 (UBSan).
+    const char *pw = password.size() ? reinterpret_cast<const char *>(password.data()) : "";
+    if (crypto_pwhash(k.data(), k.size(), pw, password.size(),
                       h.salt, h.params.opsLimit, static_cast<std::size_t>(h.params.memLimit),
                       crypto_pwhash_ALG_ARGON2ID13)
         != 0) {
@@ -285,35 +310,51 @@ bool Vault::decryptWith(const QByteArray &data, const Header &h, const SecureBuf
         return fail(QStringLiteral("Wrong master password, or the vault file has been modified or damaged."));
     }
     std::map<QString, SecureBuffer> entries;
-    const unsigned char *q = plain.data();
-    const unsigned char *end = q + plainLen;
+    if (!parseEntries(plain.data(), std::size_t(plainLen), &entries)) {
+        return fail(QStringLiteral("The vault contents are malformed."));
+    }
+    *out = std::move(entries);
+    return true; // `plain` is zeroed and freed here
+}
+
+bool Vault::parseEntries(const unsigned char *data, std::size_t len, std::map<QString, SecureBuffer> *out)
+{
+    std::map<QString, SecureBuffer> entries;
+    const unsigned char *q = data;
+    const unsigned char *end = data + len;
     auto need = [&](std::size_t n) { return std::size_t(end - q) >= n; };
     if (!need(4)) {
-        return fail(QStringLiteral("The vault contents are malformed."));
+        return false;
     }
     const std::uint64_t count = getLe(q, 4);
     q += 4;
+    // Each entry takes a guarded sodium_malloc block (a few pages): bound the
+    // count so a crafted file can't exhaust memory (bad_alloc) before the
+    // length checks below fail.
+    if (count > kMaxEntries) {
+        return false;
+    }
     for (std::uint64_t i = 0; i < count; ++i) {
         if (!need(2)) {
-            return fail(QStringLiteral("The vault contents are malformed."));
+            return false;
         }
         const std::size_t kl = getLe(q, 2);
         q += 2;
         if (!need(kl + 4)) {
-            return fail(QStringLiteral("The vault contents are malformed."));
+            return false;
         }
         const QString k = QString::fromUtf8(reinterpret_cast<const char *>(q), qsizetype(kl));
         q += kl;
         const std::size_t vl = getLe(q, 4);
         q += 4;
         if (!need(vl)) {
-            return fail(QStringLiteral("The vault contents are malformed."));
+            return false;
         }
         entries[k] = SecureBuffer(q, vl);
         q += vl;
     }
     *out = std::move(entries);
-    return true; // `plain` is zeroed and freed here
+    return true;
 }
 
 bool Vault::writeWith(const Header &hIn, const SecureBuffer &key, const std::map<QString, SecureBuffer> &entries)

@@ -210,7 +210,9 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
         // GUI apps on macOS often inherit cwd=/ from LaunchServices; Terminal.app
         // always starts in the user's home. Do the same for every PTY child.
         if (!home.isEmpty()) {
-            (void)::chdir(home.constData());
+            if (::chdir(home.constData()) != 0) {
+                // keep the inherited directory
+            }
         }
         // execve is POSIX (unlike GNU execvpe) and takes envp on every platform,
         // so we can use a login argv0 that is not a path.

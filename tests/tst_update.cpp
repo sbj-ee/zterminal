@@ -292,6 +292,22 @@ private slots:
         QVERIFY(err.contains(QStringLiteral("nightly")));
     }
 
+    // Found by fuzzing: an out-of-range asset size was cast from double (UB).
+    void hostileAssetSizes()
+    {
+        const QByteArray json =
+            "{\"tag_name\":\"v9.9.9\",\"assets\":["
+            "{\"name\":\"a\",\"browser_download_url\":\"https://x/a\",\"size\":1e300},"
+            "{\"name\":\"b\",\"browser_download_url\":\"https://x/b\",\"size\":-5},"
+            "{\"name\":\"c\",\"browser_download_url\":\"https://x/c\",\"size\":4096}]}";
+        const auto r = ReleaseInfo::fromJson(json);
+        QVERIFY(r);
+        QCOMPARE(r->assets.size(), 3);
+        QCOMPARE(r->assets.at(0).size, qint64(0));
+        QCOMPARE(r->assets.at(1).size, qint64(0));
+        QCOMPARE(r->assets.at(2).size, qint64(4096));
+    }
+
     void checksum()
     {
         QTemporaryDir dir;

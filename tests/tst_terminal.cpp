@@ -153,6 +153,139 @@ private slots:
         QCOMPARE(t.lineText(0), QStringLiteral("r0"));
     }
 
+    // Found by fuzzing: libvterm aborted ("screen_resize failed to update
+    // cursor position") on output followed by a resize. Patched in
+    // third_party/libvterm/src/screen.c.
+    void resizeAfterOutputDoesNotAbort()
+    {
+        {
+            Terminal t(1, 1);
+            t.feed("55");
+            t.resize(3, 3);
+            QCOMPARE(t.rows(), 3);
+        }
+        // Small sizes, wrapped output, both screens, every resize direction.
+        const QByteArray outputs[] = {"55", "abcdef\r\n12345", "\x1b[?1049hxyz\x1b[?1049l", "x\x1b[5;5Hy\r\nz",
+                                      QByteArray(50, 'w')};
+        for (const QByteArray &out : outputs) {
+            for (int r0 = 1; r0 <= 4; ++r0) {
+                for (int c0 = 1; c0 <= 4; ++c0) {
+                    Terminal t(r0, c0);
+                    t.feed(out);
+                    for (int r1 = 1; r1 <= 5; ++r1) {
+                        for (int c1 = 1; c1 <= 5; ++c1) {
+                            t.resize(r1, c1);
+                            t.feed(out.left(3));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Found by fuzzing: a wide character on a 1-column screen wrote through NULL.
+    void wideCharInOneColumn()
+    {
+        Terminal t(3, 1);
+        t.feed("\xe4\xb8\xad\xf0\x9f\x98\x80x\r\n\xe4\xb8\xad");
+        t.resize(3, 2);
+        t.feed("\xe4\xb8\xad\xe4\xb8\xad");
+        t.resize(2, 1);
+        t.feed("\xe4\xb8\xad");
+        QCOMPARE(t.rows(), 2);
+    }
+
+    // Found by fuzzing: CSI numbers overflowed a signed long (UBSan).
+    void hugeCsiArguments()
+    {
+        Terminal t(5, 10);
+        t.feed("\x1b[" + QByteArray(60, '9') + "C\x1b[" + QByteArray(60, '4') + ";" + QByteArray(40, '7') + "Hx");
+        t.feed("\x1b[" + QByteArray(30, '9') + "m\x1b[1;" + QByteArray(30, '8') + "r");
+        t.feed("\x1b]" + QByteArray(30, '2') + ";title\x07");
+        QCOMPARE(t.rows(), 5);
+    }
+
+    void tooManyCsiArguments()
+    {
+        // libvterm wrote past args[16] (heap overflow) for long ';' lists.
+        Terminal t(5, 20);
+        QByteArray semis;
+        for (int i = 0; i < 2000; ++i)
+            semis += "1;";
+        t.feed("\x1b[" + semis + "1m");
+        t.feed("\x1b[" + QByteArray(2000, ':') + "m");
+        t.feed("\x1b[38:2:59:66:97;48:2:36:40:59;58:2:224:175:104;4:3mok");
+        QCOMPARE(t.rows(), 5);
+        QVERIFY(t.lineText(0).contains(QStringLiteral("ok")));
+    }
+
+    void scrollRegionAfterShrink()
+    {
+        // A scroll region below the new bottom (top 6 > 3 rows) used to make
+        // scroll() call memmove with a negative size on the next line feed.
+        Terminal t(9, 10);
+        t.feed("\x1b[6;8r");
+        t.resize(3, 10);
+        t.feed("\x1b[3;1Ha\n\nb\x1b" "D\x1b" "M");
+        t.resize(9, 10);
+        t.feed("\x1b[?69h\x1b[6;9s\x1b[?6h");
+        t.resize(9, 4);
+        t.feed("\x1b[9;1Hc\n\x1b" "D\x1b[1Pok");
+        QCOMPARE(t.rows(), 9);
+    }
+
+    void oscEscC0AtChunkEnd()
+    {
+        // ESC + C0 at the end of a chunk inside an OSC made libvterm pass a
+        // SIZE_MAX-length fragment to the title callback.
+        Terminal t(5, 20);
+        t.feed(QByteArray("\x1b]2;abc\x1b\x17", 9));
+        t.feed("def\x07");
+        QVERIFY(t.title().size() < 64);
+        t.feed("\x1b]2;ok\x07");
+        QCOMPARE(t.title(), QStringLiteral("ok"));
+    }
+
+    void repWithoutPreviousChar()
+    {
+        // REP with no preceding character looped forever in libvterm.
+        Terminal t(5, 20);
+        t.feed("\x1b[5b");
+        t.feed("x\x1b[3b");
+        QCOMPARE(t.lineText(0), QStringLiteral("xxxx"));
+    }
+
+    void restoreCursorAfterShrink()
+    {
+        // DECRC restored a cursor saved before a shrink, past the new
+        // bottom, and the next glyph wrote out of bounds in libvterm.
+        Terminal t(25, 10);
+        t.feed("\x1b[20;5H\x1b" "7");
+        t.resize(5, 5);
+        t.feed("\x1b" "8abcdefgh\r\nij");
+        t.feed("\x1b[?1049h\x1b[?1049l");
+        QCOMPARE(t.rows(), 5);
+    }
+
+    void utf8C1DoesNotMoveCursorBack()
+    {
+        // U+0082 as UTF-8 text had width -1: cursor column -1, then TBC
+        // cleared a tab stop before libvterm's tabstops[] (heap overflow).
+        Terminal t(4, 20);
+        t.feed("\r\n\xc2\x82\x1b[g\x1b[0g\xc2\x82\xc2\x9b\x1b[Hok");
+        QCOMPARE(t.lineText(0), QStringLiteral("ok"));
+    }
+
+    void doubleWidthLineInOneColumn()
+    {
+        // DECDHL/DECDWL on a 1-column screen: row width 0, cursor column -1.
+        Terminal t(5, 1);
+        t.feed("\x1b#3\x1b[@\x1b[K\x1b[P\x1b#6x\x1b[2@\x1b[X");
+        t.resize(3, 7);
+        t.feed("\x1b#3\x1b[@ok");
+        QCOMPARE(t.rows(), 3);
+    }
+
     void altScreenAndTitle()
     {
         Terminal t(5, 20);

@@ -361,6 +361,11 @@ static int on_text(const char bytes[], size_t len, void *user)
     for( ; i < glyph_ends; i++) {
       chars[i - glyph_starts] = codepoints[i];
       int this_width = vterm_unicode_width(codepoints[i]);
+      /* zterminal patch: C1 controls arriving as UTF-8 text (e.g. U+0082)
+       * have width -1, which moved the cursor to column -1 and let TBC and
+       * others index before their arrays. Treat them as zero-width. */
+      if(this_width < 0)
+        this_width = 0;
 #ifdef DEBUG
       if(this_width < 0) {
         fprintf(stderr, "Text with negative-width codepoint U+%04x\n", codepoints[i]);
@@ -577,6 +582,17 @@ static void savecursor(VTermState *state, int save)
     VTermPos oldpos = state->pos;
 
     state->pos = state->saved.pos;
+    /* zterminal patch: the saved position may predate a shrink; restoring
+     * it unclamped let later writes index lineinfo[] out of bounds. */
+    if(state->pos.row >= state->rows)
+      state->pos.row = state->rows - 1;
+    if(state->pos.col >= state->cols)
+      state->pos.col = state->cols - 1;
+    if(state->pos.row < 0)
+      state->pos.row = 0;
+    if(state->pos.col < 0)
+      state->pos.col = 0;
+    state->at_phantom = 0;
 
     settermprop_bool(state, VTERM_PROP_CURSORVISIBLE, state->saved.mode.cursor_visible);
     settermprop_bool(state, VTERM_PROP_CURSORBLINK,   state->saved.mode.cursor_blink);
@@ -1231,6 +1247,10 @@ static int on_csi(const char *leader, const long args[], int argcount, const cha
 
   case 0x62: { // REP - ECMA-48 8.3.103
     const int row_width = THISROWWIDTH(state);
+    /* zterminal patch: with no previous graphic character combine_width is
+     * 0 and the loop below never advances (remote hang). Ignore REP then. */
+    if(state->combine_width <= 0)
+      break;
     count = CSI_ARG_COUNT(args[0]);
     col = state->pos.col + count;
     UBOUND(col, row_width);
@@ -1826,7 +1846,9 @@ static void request_status_string(VTermState *state, VTermStringFragment frag)
   if(!frag.final)
     return;
 
-  switch(tmp[0] | tmp[1]<<8 | tmp[2]<<16) {
+  /* zterminal patch: unsigned, a high-bit byte was a left shift of a
+   * negative value (UB). */
+  switch((unsigned char)tmp[0] | (unsigned char)tmp[1]<<8 | (unsigned char)tmp[2]<<16) {
     case 'm': {
       // Query SGR
       long args[20];
@@ -1983,6 +2005,21 @@ static int on_resize(int rows, int cols, void *user)
     UBOUND(state->scrollregion_bottom, state->rows);
   if(state->scrollregion_right > -1)
     UBOUND(state->scrollregion_right, state->cols);
+
+  /* zterminal patch: shrinking can leave top >= bottom (or left >= right),
+   * which made scroll() memmove a negative size. Reset such regions, as
+   * DECSTBM/DECSLRM do for invalid input. */
+  if(SCROLLREGION_BOTTOM(state) <= state->scrollregion_top) {
+    state->scrollregion_top    = 0;
+    state->scrollregion_bottom = -1;
+  }
+  if(state->scrollregion_right > -1 &&
+     state->scrollregion_right <= state->scrollregion_left) {
+    state->scrollregion_left  = 0;
+    state->scrollregion_right = -1;
+  }
+  if(state->scrollregion_left >= state->cols)
+    state->scrollregion_left = 0;
 
   VTermStateFields fields = {
     .pos       = state->pos,
