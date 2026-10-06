@@ -132,4 +132,13 @@ SecureBuffer SecureBuffer::fromQString(QStringView s)
     return out;
 }
 
+void wipeByteArray(QByteArray &b)
+{
+    if (b.isDetached() && b.capacity() > 0) {
+        b.resize(b.capacity()); // new bytes are not initialised: the old contents
+        sodium_memzero(b.data(), std::size_t(b.size()));
+    }
+    b.clear();
+}
+
 } // namespace zterminal

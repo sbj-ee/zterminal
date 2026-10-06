@@ -1,5 +1,6 @@
 #include "CommandLine.hpp"
 #include "MainWindow.hpp"
+#include "ProcessHardening.hpp"
 #include "SessionStore.hpp"
 #include "UpdateManager.hpp"
 #include "version.hpp"
@@ -12,6 +13,11 @@
 
 int main(int argc, char *argv[])
 {
+#if defined(NDEBUG)
+    // Release builds: no core dumps, not ptrace-able/dumpable (README: Security).
+    // Debug builds skip it so debuggers and crash dumps keep working.
+    zterminal::applyProcessHardening();
+#endif
     // --version / --help must work without a display (used by `zt` and tests).
     if (argc > 1) {
         QStringList early;

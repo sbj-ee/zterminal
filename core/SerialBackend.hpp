@@ -33,7 +33,9 @@ public:
     QString device() const { return m_cfg.serialDevice; }
     const SessionConfig &config() const { return m_cfg; }
 
-    // echo=false: never local-echo (used for stored passwords).
+    // echo=false: never local-echo, and treat the bytes as a secret (stored
+    // passwords): our copies are zeroed once sent or cancelled. QSerialPort's
+    // own write buffer is out of our reach (README: residual risk).
     void write(const QByteArray &data, bool echo = true);
     // Bytes still queued by the pacer.
     qint64 pending() const { return m_queue.size(); }
@@ -78,6 +80,7 @@ private:
     QTimer *m_breakTimer = nullptr;
     QTimer *m_watchdog = nullptr;
     QByteArray m_queue;
+    bool m_queueSensitive = false; // a stored password went through m_queue: wipe it when drained
     QString m_error;
     bool m_breakActive = false;
 };

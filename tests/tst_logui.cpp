@@ -3,6 +3,7 @@
 // or typed passwords never reach the log (askpass, vault dialog, no-echo
 // prompts, serial Send Stored Login).
 #include "AppSettings.hpp"
+#include "AskpassServer.hpp"
 #include "MainWindow.hpp"
 #include "PreferencesDialog.hpp"
 #include "Pty.hpp"
@@ -133,6 +134,8 @@ private slots:
     {
         Vault::setKdfOverrideForTests(1, 8192);
         QVERIFY(!qEnvironmentVariable("ZTERMINAL_ASKPASS").isEmpty());
+        // Release builds ignore $ZTERMINAL_ASKPASS (ZTERMINAL_DEV_OVERRIDES); CMake passes it to tests.
+        AskpassServer::setHelperPathForTests(qEnvironmentVariable("ZTERMINAL_ASKPASS"));
     }
 
     void preferencesAndDefaults()
@@ -256,6 +259,7 @@ private slots:
             QFile f(bin.filePath(QStringLiteral("ssh")));
             QVERIFY(f.open(QIODevice::WriteOnly));
             f.write("#!/bin/sh\n"
+                    "[ \"$1\" = -G ] && exit 1 # resolveTarget's `ssh -G`: use the session fields\n"
                     "o=\"$ZT_FAKE_OUT\"\n"
                     "echo 'Welcome to core-sw1'\n"
                     "\"$SSH_ASKPASS\" \"admin@core-sw1's password: \" > \"$o/answer1\"\n"

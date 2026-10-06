@@ -5,6 +5,7 @@
 // the log file kept with disconnected/reconnected markers, and no reconnect
 // after a clean exit.
 #include "AppSettings.hpp"
+#include "AskpassServer.hpp"
 #include "CommandLine.hpp"
 #include "Reconnect.hpp"
 #include "SecureBuffer.hpp"
@@ -84,7 +85,9 @@ struct FakeSsh {
         QFile f(dir.filePath(QStringLiteral("ssh")));
         if (f.open(QIODevice::WriteOnly)) {
             const QByteArray st = QFile::encodeName(dir.path());
-            QByteArray s = "#!/bin/sh\nS='" + st + "'\n"
+            QByteArray s = "#!/bin/sh\n"
+                           "[ \"$1\" = -G ] && exit 1 # resolveTarget's `ssh -G`: use the session fields\n"
+                           "S='" + st + "'\n"
                            "n=$(cat \"$S/count\" 2>/dev/null || echo 0); n=$((n+1)); echo $n > \"$S/count\"\n"
                            "printf '%s\\n' \"$*\" > \"$S/args$n\"\n";
             if (askpass) {
@@ -177,6 +180,8 @@ private slots:
         Vault::setKdfOverrideForTests(1, 8192);
         AppSettings{}.save();
         SessionWidget::setReconnectStableMsForTests(400);
+        // Release builds ignore $ZTERMINAL_ASKPASS (ZTERMINAL_DEV_OVERRIDES); CMake passes it to tests.
+        AskpassServer::setHelperPathForTests(qEnvironmentVariable("ZTERMINAL_ASKPASS"));
     }
     void init()
     {

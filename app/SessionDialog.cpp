@@ -49,6 +49,9 @@ QLineEdit *secretEdit(const char *name)
     QLineEdit *e = lineEdit(name, QStringLiteral("(unchanged)"));
     e->setEchoMode(QLineEdit::Password);
     e->setContextMenuPolicy(Qt::NoContextMenu);
+    e->setDragEnabled(false);
+    // Keep input methods from learning/suggesting it (Password echo sets these too; be explicit).
+    e->setInputMethodHints(e->inputMethodHints() | Qt::ImhSensitiveData | Qt::ImhNoPredictiveText | Qt::ImhHiddenText);
     e->setToolTip(QStringLiteral("Saved to the encrypted vault when you press Save, never to the session file. "
                                  "Leave empty to keep the stored one."));
     return e;

@@ -26,6 +26,8 @@ QLineEdit *passwordEdit(const char *name)
     e->setContextMenuPolicy(Qt::NoContextMenu);
     e->setDragEnabled(false);
     e->setMinimumWidth(260);
+    // Keep input methods from learning/suggesting it (Password echo sets these too; be explicit).
+    e->setInputMethodHints(e->inputMethodHints() | Qt::ImhSensitiveData | Qt::ImhNoPredictiveText | Qt::ImhHiddenText);
     return e;
 }
 
