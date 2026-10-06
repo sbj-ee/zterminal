@@ -56,12 +56,47 @@ struct SessionConfig {
     int fontSize = 0;
     QString colorScheme;
 
+    // False for a session that arrived through Import Sessions and hasn't been
+    // reviewed yet: it won't launch until the user approves it (the import
+    // review dialog, or Save in the Sessions dialog). Sessions created in the
+    // app are approved.
+    bool approved = true;
+
     static QString typeToString(Type t);
     static Type typeFromString(const QString &s); // unknown -> LocalShell
 
     bool operator==(const SessionConfig &o) const;
     bool operator!=(const SessionConfig &o) const { return !(*this == o); }
 };
+
+// The target an ssh session really connects to: the user/host/port fields,
+// overridden by -l / -p / -o User= / -o Port= / -o HostName= in the extra
+// arguments (ssh uses the first value it sees and the extra arguments come
+// first). `user` may be empty (ssh's default).
+struct SshTarget {
+    QString user;
+    QString host;
+    int port = 22;
+    QString toString() const; // [user@]host:port
+};
+SshTarget effectiveSshTarget(const SessionConfig &s);
+
+// What a stored vault secret is bound to (Vault entry "binding/<secret key>"):
+// "ssh:[user@]host:port" (effective target) or "serial:<device>". A stored
+// password is only ever used for a session whose binding matches.
+QString vaultBindingFor(const SessionConfig &s);
+
+// Extra checks for a session that came from an import file (untrusted input).
+// Empty when acceptable, else the reason it is refused. Refuses extra ssh
+// options that run local commands, load config files or libraries, defeat
+// host-key checking, forward credentials, or point the session somewhere other
+// than its Host field; see the list in Session.cpp.
+QString validateImportedSession(const SessionConfig &s);
+
+// Human-readable list of the settings an import review should show: anything
+// that isn't a plain "ssh user@host" (extra arguments, jump host, key file,
+// port, keepalive, auto-reconnect, auto-log, serial line settings...).
+QStringList notableSessionSettings(const SessionConfig &s);
 
 // Empty string when valid, otherwise a user-facing reason. A name must be
 // usable as `zt <name>`: non-empty, no control characters, no leading '-',

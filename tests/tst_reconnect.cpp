@@ -12,7 +12,9 @@
 #include "Session.hpp"
 #include "SessionDialog.hpp"
 #include "SessionLog.hpp"
+#include "SessionExport.hpp"
 #include "SessionStore.hpp"
+#include "VaultBindings.hpp"
 #include "SessionWidget.hpp"
 #include "SocatPair.hpp"
 #include "Terminal.hpp"
@@ -477,8 +479,7 @@ private slots:
         vm.noteUnlocked();
         const SessionConfig s = sshSession(QStringLiteral("vaulted"), true, /*stored=*/true);
         QVERIFY(store.save(s));
-        QVERIFY(vm.vault().setSecret(Vault::secretKeyFor(QStringLiteral("ssh-password"), s.name),
-                                     SecureBuffer::fromQString(QStringLiteral("s3cret"))));
+        QVERIFY(vaultbind::storeSecret(vm.vault(), s, SecureBuffer::fromQString(QStringLiteral("s3cret"))));
         NoDialogs guard;
         auto w = open(s.name);
         w->startSession();
@@ -492,6 +493,74 @@ private slots:
         QVERIFY(vm.isUnlocked());
         // The password never shows up in the log or the ssh argv.
         QVERIFY(!ssh.args(2).contains(QStringLiteral("s3cret")));
+        vm.lock();
+    }
+
+    // Review item 1: an import that replaces a session can't redirect its
+    // stored password to another host, even if "use stored password" is
+    // ticked again afterwards; only an explicit re-bind sends it there.
+    void importedRedirectNeverGetsStoredPassword()
+    {
+        FakeSsh ssh({QStringLiteral("clean"), QStringLiteral("clean"), QStringLiteral("clean"), QStringLiteral("clean")},
+                    /*askpass=*/true);
+        VaultManager &vm = VaultManager::instance();
+        vm.setPath(tmp.filePath(QStringLiteral("vault-redirect/vault.bin")));
+        vm.setAutoLockIntervalMsForTests(0);
+        QVERIFY(vm.vault().create(SecureBuffer::fromQString(QStringLiteral("master pw"))));
+        vm.noteUnlocked();
+        const SessionConfig mine = sshSession(QStringLiteral("core-sw1"), false, /*stored=*/true);
+        QVERIFY(store.save(mine));
+        QVERIFY(vaultbind::storeSecret(vm.vault(), mine, SecureBuffer::fromQString(QStringLiteral("s3cret"))));
+
+        SessionConfig evil = mine;
+        evil.host = QStringLiteral("evil.example");
+        QString err;
+        const auto r = importSessionsFromJson(store, sessionsToExportJson({evil}), SessionImportConflict::Overwrite, &err,
+                                              ImportApproval::Approved);
+        QCOMPARE(r.overwritten, 1);
+        QVERIFY(!store.load(mine.name)->useStoredPassword);
+        NoDialogs guard;
+        {
+            auto w = open(mine.name);
+            w->startSession();
+            QTRY_VERIFY_WITH_TIMEOUT(screen(w->terminal()).contains(QStringLiteral("attempt 1 got [")), 10000);
+            QVERIFY(!screen(w->terminal()).contains(QStringLiteral("s3cret")));
+        }
+        // Ticking it again doesn't help: the secret is bound to sw.example.
+        SessionConfig reticked = *store.load(mine.name);
+        reticked.useStoredPassword = true;
+        QVERIFY(store.save(reticked));
+        SessionWidget::setRebindAnswerForTests(0);
+        {
+            auto w = open(mine.name);
+            w->startSession();
+            QTRY_VERIFY_WITH_TIMEOUT(screen(w->terminal()).contains(QStringLiteral("attempt 2 got [")), 10000);
+            QVERIFY(!screen(w->terminal()).contains(QStringLiteral("s3cret")));
+            QVERIFY(screen(w->terminal()).contains(QStringLiteral("not sent")));
+        }
+        QCOMPARE(vaultbind::check(vm.vault(), reticked), vaultbind::Status::Mismatch);
+        // The user explicitly re-binds it to evil.example: now it is sent.
+        SessionWidget::setRebindAnswerForTests(1);
+        {
+            auto w = open(mine.name);
+            w->startSession();
+            QTRY_VERIFY_WITH_TIMEOUT(screen(w->terminal()).contains(QStringLiteral("attempt 3 got [s3cret]")), 10000);
+        }
+        QCOMPARE(vaultbind::check(vm.vault(), reticked), vaultbind::Status::Match);
+        SessionWidget::setRebindAnswerForTests(-1);
+        QVERIFY2(guard.seen.isEmpty(), qPrintable(guard.seen));
+
+        // An unapproved import doesn't launch at all.
+        SessionConfig pending = evil;
+        pending.name = QStringLiteral("pending");
+        importSessionsFromJson(store, sessionsToExportJson({pending}), SessionImportConflict::Overwrite, &err);
+        QVERIFY(!store.load(pending.name)->approved);
+        {
+            auto w = open(pending.name);
+            w->startSession();
+            QTRY_VERIFY_WITH_TIMEOUT(screen(w->terminal()).contains(QStringLiteral("hasn't been reviewed")), 5000);
+        }
+        QCOMPARE(ssh.count(), 3);
         vm.lock();
     }
 

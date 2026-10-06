@@ -11,6 +11,7 @@ add_library(zterminal_ui STATIC
   VaultManager.cpp VaultManager.hpp
   VaultDialogs.cpp VaultDialogs.hpp
   PasteConfirmDialog.cpp PasteConfirmDialog.hpp
+  ImportReviewDialog.cpp ImportReviewDialog.hpp
   UpdateDialog.cpp UpdateDialog.hpp
   UpdateManager.cpp UpdateManager.hpp
 )

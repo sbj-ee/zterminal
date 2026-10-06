@@ -480,36 +480,37 @@ QStringList Vault::keys() const
 
 bool Vault::setSecret(const QString &key, SecureBuffer value)
 {
-    FileLock fl(m_path + QStringLiteral(".lock"));
-    if (!refresh()) {
-        return false;
-    }
-    std::map<QString, SecureBuffer> next;
-    for (const auto &[k, v] : m_entries) {
-        next[k] = v.clone();
-    }
-    next[key] = std::move(value);
-    if (!writeWith(m_header, m_key, next)) {
-        return false;
-    }
-    m_entries = std::move(next);
-    return true;
+    std::map<QString, SecureBuffer> set;
+    set[key] = std::move(value);
+    return update(std::move(set));
 }
 
 bool Vault::removeSecret(const QString &key)
+{
+    return update({}, {key});
+}
+
+bool Vault::update(std::map<QString, SecureBuffer> set, const QStringList &remove)
 {
     FileLock fl(m_path + QStringLiteral(".lock"));
     if (!refresh()) {
         return false;
     }
-    if (m_entries.find(key) == m_entries.end()) {
+    bool changed = !set.empty();
+    for (const QString &k : remove) {
+        changed |= m_entries.find(k) != m_entries.end() && set.find(k) == set.end();
+    }
+    if (!changed) {
         return true;
     }
     std::map<QString, SecureBuffer> next;
     for (const auto &[k, v] : m_entries) {
-        if (k != key) {
+        if (!remove.contains(k)) {
             next[k] = v.clone();
         }
+    }
+    for (auto &[k, v] : set) {
+        next[k] = std::move(v);
     }
     if (!writeWith(m_header, m_key, next)) {
         return false;

@@ -4,7 +4,11 @@
 #include "MainWindow.hpp"
 #include "Pty.hpp"
 #include "SessionDialog.hpp"
+#include "ImportReviewDialog.hpp"
+#include "SessionExport.hpp"
 #include "SessionStore.hpp"
+#include "VaultBindings.hpp"
+#include "VaultManager.hpp"
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
 #include "WindowTitle.hpp"
@@ -22,7 +26,9 @@
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QTemporaryDir>
+#include <QMessageBox>
 #include <QTabWidget>
+#include <QTreeWidget>
 #include <QTest>
 #include <QTimer>
 
@@ -335,6 +341,122 @@ private slots:
         QCOMPARE(w.view()->terminalFont().pointSize(), 20);
         QCOMPARE(store.load(s.name)->fontSize, 20);
         QCOMPARE(AppSettings::load().fontSize, globalSize);
+    }
+    // Review items 1 + 2: import shows everything for approval first, refuses
+    // dangerous options, and never brings stored-password use along.
+    void importNeedsReviewAndApproval()
+    {
+        SessionConfig mine = ssh(QStringLiteral("core-sw1"), QStringLiteral("10.0.0.1"));
+        mine.useStoredPassword = true;
+        QVERIFY(store.save(mine));
+        SessionConfig replaced = ssh(QStringLiteral("core-sw1"), QStringLiteral("evil.example"));
+        replaced.useStoredPassword = true;
+        replaced.jumpHost = QStringLiteral("sbj@vertex");
+        replaced.extraArgs = QStringLiteral("-C -o ServerAliveInterval=5");
+        SessionConfig bad = ssh(QStringLiteral("bad"), QStringLiteral("bad.example"));
+        bad.extraArgs = QStringLiteral("-oProxyCommand=\"sh -c 'touch /tmp/pwned'\"");
+        SessionConfig fresh = ssh(QStringLiteral("fresh"), QStringLiteral("fresh.example"));
+        const QByteArray json = sessionsToExportJson({replaced, bad, fresh});
+
+        for (const bool approve : {false, true}) {
+            QString treeText;
+            int step = 0;
+            whenModal([&](QWidget *w) {
+                if (auto *box = qobject_cast<QMessageBox *>(w); box && step == 0) {
+                    box->button(QMessageBox::Yes)->click(); // overwrite conflicts
+                    step = 1;
+                    return false;
+                }
+                if (w->objectName() == QLatin1String("importReview") && step == 1) {
+                    auto *tree = child<QTreeWidget>(w, "importReviewList");
+                    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+                        QTreeWidgetItem *it = tree->topLevelItem(i);
+                        treeText += it->text(0) + QLatin1Char('|') + it->text(1) + QLatin1Char('\n');
+                        for (int c = 0; c < it->childCount(); ++c) {
+                            treeText += QStringLiteral("  ") + it->child(c)->text(1) + QLatin1Char('\n');
+                        }
+                    }
+                    child<QPushButton>(w, approve ? "approveImport" : "cancelImport")->click();
+                    step = 2;
+                    return !approve;
+                }
+                if (auto *box = qobject_cast<QMessageBox *>(w); box && step == 2) {
+                    treeText += QStringLiteral("RESULT ") + box->text();
+                    box->accept();
+                    return true;
+                }
+                return false;
+            });
+            SessionDialog d(store, SessionConfig{});
+            QCOMPARE(d.importSessionsFromBytes(json), approve);
+            QVERIFY2(treeText.contains(QStringLiteral("core-sw1|REPLACES")), qPrintable(treeText));
+            QVERIFY(treeText.contains(QStringLiteral("connects to admin@evil.example:2222")));
+            QVERIFY(treeText.contains(QStringLiteral("jump host: sbj@vertex")));
+            QVERIFY(treeText.contains(QStringLiteral("extra ssh options: -C -o ServerAliveInterval=5")));
+            QVERIFY(treeText.contains(QStringLiteral("bad|REFUSED")));
+            QVERIFY(treeText.contains(QStringLiteral("fresh|new")));
+            if (!approve) {
+                QCOMPARE(store.load(mine.name)->host, QStringLiteral("10.0.0.1")); // nothing written
+                QVERIFY(!store.contains(QStringLiteral("fresh")));
+                continue;
+            }
+            QVERIFY(treeText.contains(QStringLiteral("refused 1")));
+            QVERIFY(!treeText.contains(QStringLiteral("Passwords are never imported; re-enter")));
+            const SessionConfig now = *store.load(mine.name);
+            QCOMPARE(now.host, QStringLiteral("evil.example"));
+            QVERIFY(!now.useStoredPassword);
+            QVERIFY(now.approved);
+            QVERIFY(!store.contains(QStringLiteral("bad")));
+            QVERIFY(store.contains(QStringLiteral("fresh")));
+        }
+    }
+
+    void unapprovedSessionMustBeSavedBeforeOpen()
+    {
+        SessionConfig s = ssh(QStringLiteral("pending"), QStringLiteral("p.example"));
+        s.approved = false;
+        QVERIFY(store.save(s));
+        SessionDialog d(store, SessionConfig{});
+        auto *list = child<QListWidget>(&d, "sessionList");
+        list->setCurrentRow(0);
+        QVERIFY(d.loadSelected());
+        QVERIFY(d.errorText().contains(QStringLiteral("not approved")));
+        QVERIFY(!d.openSession());
+        QVERIFY(d.errorText().contains(QStringLiteral("hasn't been approved")));
+        QVERIFY(d.saveCurrent()); // the user reviewed it in the dialog
+        QVERIFY(store.load(s.name)->approved);
+        QVERIFY(d.openSession());
+    }
+
+    void deleteWhileLockedForgetsSecretAtNextUnlock()
+    {
+        Vault::setKdfOverrideForTests(1, 8192);
+        QTemporaryDir vdir;
+        VaultManager &vm = VaultManager::instance();
+        vm.setPath(vdir.filePath(QStringLiteral("vault.bin")));
+        vm.setAutoLockIntervalMsForTests(0);
+        QVERIFY(vm.vault().create(SecureBuffer::fromQString(QStringLiteral("m"))));
+        vm.noteUnlocked();
+        SessionConfig s = ssh(QStringLiteral("doomed"), QStringLiteral("d.example"));
+        s.useStoredPassword = true;
+        QVERIFY(store.save(s));
+        QVERIFY(vaultbind::storeSecret(vm.vault(), s, SecureBuffer::fromQString(QStringLiteral("pw"))));
+        vm.lock();
+
+        SessionDialog d(store, SessionConfig{});
+        auto *list = child<QListWidget>(&d, "sessionList");
+        list->setCurrentRow(0);
+        QVERIFY(d.deleteSelected());
+        QVERIFY(!store.contains(s.name));
+        QVERIFY(!vaultbind::pendingDeletions(vm.vault()).isEmpty());
+
+        QVERIFY(vm.vault().unlock(SecureBuffer::fromQString(QStringLiteral("m"))));
+        vm.noteUnlocked();
+        QVERIFY(vm.lastReconcile().deleted.contains(QStringLiteral("ssh-password/doomed")));
+        QVERIFY(!vm.vault().secret(QStringLiteral("ssh-password/doomed")));
+        QVERIFY(!vm.vault().secret(QStringLiteral("binding/ssh-password/doomed")));
+        QVERIFY(vaultbind::pendingDeletions(vm.vault()).isEmpty());
+        vm.lock();
     }
 };
 

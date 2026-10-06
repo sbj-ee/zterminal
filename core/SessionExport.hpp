@@ -24,8 +24,19 @@ namespace zterminal {
 //   }
 //
 // Secrets are NEVER included. passwordStored mirrors SessionConfig::useStoredPassword
-// (SSH vault flag). Serial login passwords live only in the vault and are not
-// exported; after import the user re-enters them via the session dialog.
+// (SSH vault flag) on export, for information only: importing never turns
+// "use stored password" on (see importSessionsFromJson). Serial login
+// passwords live only in the vault and are not exported.
+//
+// An import file is untrusted input. Importing:
+//   - refuses sessions whose ssh options could run local commands, load
+//     config files/libraries, defeat host-key checking or forward credentials
+//     (validateImportedSession), listing them in SessionImportResult::errors;
+//   - switches "use stored password" off on every imported or overwritten
+//     session, so an import can never point an existing stored password at a
+//     new host (vault secrets are also bound to their target, VaultBindings);
+//   - saves the sessions as unapproved unless the caller had the user review
+//     and approve them (ImportApproval::Approved); unapproved sessions don't launch.
 //
 // TODO(import): a future UI may offer selective import / rename-on-conflict;
 // the schema and parse path below are the contract for that.
@@ -61,18 +72,29 @@ enum class SessionImportConflict {
     Skip,      // leave existing sessions alone; only add new names
 };
 
+enum class ImportApproval {
+    Pending,  // saved with approved=false (default): must be reviewed before use
+    Approved, // the user reviewed exactly these sessions in the import review dialog
+};
+
+// What an imported session is saved as: stored-password use off, approval as given.
+SessionConfig sanitizeImportedSession(SessionConfig s, ImportApproval approval);
+
 struct SessionImportResult {
     int imported = 0;    // newly written (did not exist before)
     int overwritten = 0; // replaced an existing name
     int skipped = 0;     // conflict + Skip policy
+    int rejected = 0;    // refused by validateImportedSession (also listed in errors)
     QStringList errors;  // per-session save/validation failures (non-fatal)
 };
 
 // Merge sessions from a JSON document into the store. Does not touch the vault.
 SessionImportResult importSessionsFromJson(SessionStore &store, const QByteArray &json,
-                                           SessionImportConflict conflict, QString *error = nullptr);
+                                           SessionImportConflict conflict, QString *error = nullptr,
+                                           ImportApproval approval = ImportApproval::Pending);
 bool importSessionsFromFile(SessionStore &store, const QString &path,
-                            SessionImportConflict conflict, QString *error = nullptr);
+                            SessionImportConflict conflict, QString *error = nullptr,
+                            ImportApproval approval = ImportApproval::Pending);
 
 // Default save-dialog name: zterminal-sessions-YYYYMMDD.json (local date).
 QString defaultSessionsExportFileName();

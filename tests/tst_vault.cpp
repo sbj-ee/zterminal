@@ -3,7 +3,11 @@
 // production KDF defaults. Uses cheap KDF parameters via the test hook except
 // in productionDefaults*.
 #include "SecureBuffer.hpp"
+#include "Session.hpp"
+#include "SessionExport.hpp"
+#include "SessionStore.hpp"
 #include "Vault.hpp"
+#include "VaultBindings.hpp"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -327,6 +331,170 @@ private slots:
         QVERIFY(!moved.isEmpty());
         moved.reset();
         QVERIFY(moved.isEmpty() && moved.data() == nullptr);
+    }
+    // ---- Secrets bound to their target (review item 1) ---------------------
+    static SessionConfig ssh(const QString &name, const QString &host)
+    {
+        SessionConfig s;
+        s.name = name;
+        s.type = SessionConfig::Type::Ssh;
+        s.host = host;
+        s.user = QStringLiteral("admin");
+        s.useStoredPassword = true;
+        return s;
+    }
+
+    void bindingBlocksRedirectByImport()
+    {
+        const QString p = freshPath();
+        SessionStore store(QFileInfo(p).absolutePath() + QStringLiteral("/sessions"));
+        Vault v(p);
+        QVERIFY(v.create(pw("m")));
+        const SessionConfig mine = ssh(QStringLiteral("core-sw1"), QStringLiteral("10.0.0.5"));
+        QVERIFY(store.save(mine));
+        QVERIFY(vaultbind::storeSecret(v, mine, pw("s3cret")));
+        QCOMPARE(vaultbind::check(v, mine), vaultbind::Status::Match);
+        QCOMPARE(str(v.secret(QStringLiteral("binding/ssh-password/core-sw1"))), QStringLiteral("ssh:admin@10.0.0.5:22"));
+
+        // An import replaces core-sw1 with a session for evil.example that asks
+        // for the stored password, then the user (or a later edit) turns it back on.
+        SessionConfig evil = ssh(QStringLiteral("core-sw1"), QStringLiteral("evil.example"));
+        QString err;
+        importSessionsFromJson(store, sessionsToExportJson({evil}), SessionImportConflict::Overwrite, &err,
+                               ImportApproval::Approved);
+        SessionConfig now = *store.load(QStringLiteral("core-sw1"));
+        QVERIFY(!now.useStoredPassword);
+        now.useStoredPassword = true;
+        QString stored;
+        QCOMPARE(vaultbind::check(v, now, &stored), vaultbind::Status::Mismatch);
+        QCOMPARE(stored, QStringLiteral("ssh:admin@10.0.0.5:22"));
+        // Same host but an extra -o HostName / -l / -p redirect is a mismatch too.
+        SessionConfig sneaky = mine;
+        sneaky.extraArgs = QStringLiteral("-l root");
+        QCOMPARE(vaultbind::check(v, sneaky), vaultbind::Status::Mismatch);
+        sneaky.extraArgs = QStringLiteral("-p 2222");
+        QCOMPARE(vaultbind::check(v, sneaky), vaultbind::Status::Mismatch);
+        // Reconcile at unlock never re-binds a mismatch (the session exists).
+        const auto r = vaultbind::reconcile(v, store);
+        QVERIFY(r.ok);
+        QVERIFY(r.migrated.isEmpty());
+        QCOMPARE(vaultbind::check(v, now), vaultbind::Status::Mismatch);
+        // Only an explicit re-bind makes it usable for the new target.
+        QVERIFY(vaultbind::rebind(v, now));
+        QCOMPARE(vaultbind::check(v, now), vaultbind::Status::Match);
+        QCOMPARE(str(v.secret(QStringLiteral("ssh-password/core-sw1"))), QStringLiteral("s3cret"));
+    }
+
+    void serialBindingFollowsDevice()
+    {
+        Vault v(freshPath());
+        QVERIFY(v.create(pw("m")));
+        SessionConfig s;
+        s.name = QStringLiteral("con");
+        s.type = SessionConfig::Type::Serial;
+        s.serialDevice = QStringLiteral("/dev/ttyUSB0");
+        QVERIFY(vaultbind::storeSecret(v, s, pw("c1sco")));
+        QCOMPARE(vaultbind::check(v, s), vaultbind::Status::Match);
+        s.serialDevice = QStringLiteral("/dev/pts/7");
+        QCOMPARE(vaultbind::check(v, s), vaultbind::Status::Mismatch);
+    }
+
+    void reconcileMigratesPrunesAndRunsQueuedDeletions()
+    {
+        const QString p = freshPath();
+        SessionStore store(QFileInfo(p).absolutePath() + QStringLiteral("/sessions"));
+        Vault v(p);
+        QVERIFY(v.create(pw("m")));
+        const SessionConfig a = ssh(QStringLiteral("a"), QStringLiteral("a.example"));
+        const SessionConfig b = ssh(QStringLiteral("b"), QStringLiteral("b.example"));
+        SessionConfig imported = ssh(QStringLiteral("imp"), QStringLiteral("i.example"));
+        imported.approved = false;
+        QVERIFY(store.save(a));
+        QVERIFY(store.save(b));
+        QVERIFY(store.save(imported));
+        // Stored by zterminal 1.0.0: no bindings.
+        QVERIFY(v.setSecret(QStringLiteral("ssh-password/a"), pw("pa")));
+        QVERIFY(v.setSecret(QStringLiteral("ssh-password/b"), pw("pb")));
+        QVERIFY(v.setSecret(QStringLiteral("ssh-password/imp"), pw("pi")));
+        QVERIFY(v.setSecret(QStringLiteral("ssh-password/gone"), pw("orphan")));
+        QVERIFY(v.setSecret(QStringLiteral("serial-password/a"), pw("wrong type")));
+        QVERIFY(v.setSecret(QStringLiteral("binding/ssh-password/nothing"), pw("ssh:x@y:22")));
+        QCOMPARE(vaultbind::check(v, a), vaultbind::Status::Unbound);
+
+        auto r = vaultbind::reconcile(v, store);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(vaultbind::check(v, a), vaultbind::Status::Match);
+        QCOMPARE(vaultbind::check(v, b), vaultbind::Status::Match);
+        // An unapproved (imported) session is not trusted for migration.
+        QCOMPARE(vaultbind::check(v, imported), vaultbind::Status::Unbound);
+        QVERIFY(!v.secret(QStringLiteral("ssh-password/gone")));
+        QVERIFY(!v.secret(QStringLiteral("serial-password/a")));
+        QVERIFY(!v.secret(QStringLiteral("binding/ssh-password/nothing")));
+        QVERIFY(r.pruned.contains(QStringLiteral("ssh-password/gone")));
+        QCOMPARE(r.migrated.size(), 2);
+
+        // Deleting "b" while the vault is locked queues its deletion...
+        v.lock();
+        QVERIFY(store.remove(b.name));
+        vaultbind::queueDeletion(v, b);
+        QCOMPARE(vaultbind::pendingDeletions(v).size(), 2); // ssh + serial key
+        // ...and a new session called "b" for another host, saved while locked,
+        // must not inherit the old password.
+        const SessionConfig b2 = ssh(QStringLiteral("b"), QStringLiteral("other.example"));
+        QVERIFY(store.save(b2));
+        QVERIFY(v.unlock(pw("m")));
+        r = vaultbind::reconcile(v, store);
+        QVERIFY(r.ok);
+        QVERIFY(r.deleted.contains(QStringLiteral("ssh-password/b")));
+        QVERIFY(!v.secret(QStringLiteral("ssh-password/b")));
+        QVERIFY(!v.secret(QStringLiteral("binding/ssh-password/b")));
+        QCOMPARE(vaultbind::check(v, b2), vaultbind::Status::NoSecret);
+        QVERIFY(vaultbind::pendingDeletions(v).isEmpty());
+        QVERIFY(!QFile::exists(vaultbind::pendingDeletionsPath(v)));
+        QCOMPARE(str(v.secret(QStringLiteral("ssh-password/a"))), QStringLiteral("pa"));
+
+        // A queued deletion doesn't remove a password stored later for a
+        // different target under the same name (another window, vault unlocked there).
+        v.lock();
+        vaultbind::queueDeletion(v, a);
+        QVERIFY(v.unlock(pw("m")));
+        SessionConfig a2 = a;
+        a2.host = QStringLiteral("new-a.example");
+        QVERIFY(store.save(a2));
+        QVERIFY(vaultbind::storeSecret(v, a2, pw("new pa")));
+        r = vaultbind::reconcile(v, store);
+        QVERIFY(r.deleted.isEmpty());
+        QCOMPARE(str(v.secret(QStringLiteral("ssh-password/a"))), QStringLiteral("new pa"));
+        QCOMPARE(vaultbind::check(v, a2), vaultbind::Status::Match);
+
+        // forget() removes both kinds and their bindings in one write.
+        QVERIFY(vaultbind::forget(v, a2.name));
+        QCOMPARE(vaultbind::check(v, a2), vaultbind::Status::NoSecret);
+        QVERIFY(!v.secret(QStringLiteral("binding/ssh-password/a")));
+    }
+
+    void reconcileLeavesEverythingWithoutSessionsDir()
+    {
+        const QString p = freshPath();
+        Vault v(p);
+        QVERIFY(v.create(pw("m")));
+        QVERIFY(v.setSecret(QStringLiteral("ssh-password/x"), pw("px")));
+        const auto r = vaultbind::reconcile(v, SessionStore(QFileInfo(p).absolutePath() + QStringLiteral("/nope")));
+        QVERIFY(r.ok);
+        QVERIFY(v.secret(QStringLiteral("ssh-password/x")));
+    }
+
+    void updateIsOneAtomicChange()
+    {
+        Vault v(freshPath());
+        QVERIFY(v.create(pw("m")));
+        std::map<QString, SecureBuffer> set;
+        set[QStringLiteral("k1")] = pw("1");
+        set[QStringLiteral("k2")] = pw("2");
+        QVERIFY(v.update(std::move(set)));
+        QVERIFY(v.update({}, {QStringLiteral("k1"), QStringLiteral("absent")}));
+        QVERIFY(!v.secret(QStringLiteral("k1")));
+        QCOMPARE(str(v.secret(QStringLiteral("k2"))), QStringLiteral("2"));
     }
 };
 

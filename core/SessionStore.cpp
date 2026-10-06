@@ -57,6 +57,8 @@ std::optional<SessionConfig> readFile(const QString &path)
     s.fontFamily = f.value(QStringLiteral("appearance/fontFamily")).toString();
     s.fontSize = f.value(QStringLiteral("appearance/fontSize"), 0).toInt();
     s.colorScheme = f.value(QStringLiteral("appearance/colorScheme")).toString();
+    // Absent (every file written before import review existed) = approved.
+    s.approved = f.value(QStringLiteral("session/approved"), true).toBool();
     // Any password-like key someone adds by hand is ignored: there is no field for it
     // (stored passwords live only in the encrypted vault).
     return s;
@@ -158,6 +160,9 @@ bool SessionStore::save(const SessionConfig &s, QString *error) const
         }
         if (s.autoReconnect) {
             f.setValue(QStringLiteral("session/autoReconnect"), true);
+        }
+        if (!s.approved) {
+            f.setValue(QStringLiteral("session/approved"), false); // imported, not reviewed yet
         }
         if (s.type == SessionConfig::Type::Serial) {
             f.setValue(QStringLiteral("serial/device"), s.serialDevice);

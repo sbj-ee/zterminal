@@ -13,6 +13,7 @@
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
 #include "Vault.hpp"
+#include "VaultBindings.hpp"
 #include "VaultManager.hpp"
 #include "ColorScheme.hpp"
 
@@ -33,7 +34,69 @@ namespace zterminal {
 
 namespace {
 int s_stableMsValue = 5000;
+int s_rebindAnswer = -1;
 } // namespace
+
+void SessionWidget::setRebindAnswerForTests(int answer)
+{
+    s_rebindAnswer = answer;
+}
+
+bool SessionWidget::storedPasswordBindingOk(bool mayPrompt, const QString &what)
+{
+    VaultManager &vm = VaultManager::instance();
+    QString stored;
+    const vaultbind::Status st = vaultbind::check(vm.vault(), *m_saved, &stored);
+    if (st == vaultbind::Status::Match || st == vaultbind::Status::NoSecret) {
+        return true;
+    }
+    const QString now = vaultBindingFor(*m_saved);
+    auto pretty = [](QString b) { return b.section(QLatin1Char(':'), 1); }; // drop "ssh:" / "serial:"
+    const QString was = st == vaultbind::Status::Unbound
+        ? QStringLiteral("an unknown target (stored by an older zterminal and never confirmed)")
+        : pretty(stored);
+    if (!mayPrompt) {
+        m_term->feed(QStringLiteral("\x1b[2m[zterminal: the stored password was saved for %1, not %2; not sent]\x1b[0m\r\n")
+                         .arg(was, pretty(now))
+                         .toUtf8());
+        return false;
+    }
+    bool use = false;
+    if (s_rebindAnswer >= 0) {
+        use = s_rebindAnswer == 1;
+    } else {
+        QMessageBox box(QMessageBox::Warning, what,
+                        QStringLiteral("The stored password for \"%1\" was saved for %2, but the session now "
+                                       "connects to %3.\n\nzterminal has not sent it. Only use it if you trust the "
+                                       "new target (the session may have been edited or replaced by an import).")
+                            .arg(m_saved->name, was, pretty(now)),
+                        QMessageBox::NoButton, this);
+        box.setObjectName(QStringLiteral("vaultBindingMismatch"));
+        QPushButton *rebind = box.addButton(QStringLiteral("Use It for %1").arg(pretty(now)), QMessageBox::AcceptRole);
+        rebind->setObjectName(QStringLiteral("rebindPassword"));
+        QPushButton *no = box.addButton(QStringLiteral("Don't Send It"), QMessageBox::RejectRole);
+        no->setObjectName(QStringLiteral("keepBinding"));
+        box.setDefaultButton(no);
+        box.setEscapeButton(no);
+        box.exec();
+        use = box.clickedButton() == rebind;
+    }
+    if (!use) {
+        m_term->feed(QByteArrayLiteral("\x1b[2m[zterminal: stored password not sent (saved for another target); "
+                                       "type it, or re-enter it in the session's settings]\x1b[0m\r\n"));
+        return false;
+    }
+    if (!vaultbind::rebind(vm.vault(), *m_saved)) {
+        m_term->feed(QStringLiteral("\x1b[31m[zterminal: re-binding the stored password failed: %1]\x1b[0m\r\n")
+                         .arg(vm.vault().lastError())
+                         .toUtf8());
+        if (!vm.vault().isUnlocked()) {
+            vm.lock();
+        }
+        return false;
+    }
+    return true;
+}
 
 SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &originalArgs,
                              const AppSettings &settings, QWidget *parent)
@@ -318,6 +381,12 @@ SessionWidget::Launch SessionWidget::launchCommand() const
             l.error = m_store.unknownSessionMessage(m_request.sessionName);
             break;
         }
+        if (!m_saved->approved) {
+            l.error = QStringLiteral("session \"%1\" was imported and hasn't been reviewed yet. Open it in "
+                                     "File > New Session, check its settings and press Save to approve it.")
+                          .arg(m_saved->name);
+            break;
+        }
         switch (m_saved->type) {
         case SessionConfig::Type::Ssh: {
             const SshCommand c = buildSshCommand(*m_saved);
@@ -448,10 +517,17 @@ QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
         return {};
     }
     vm.touch(); // using a stored password counts as activity
-    const SecureBuffer *secret =
-        vm.vault().secret(Vault::secretKeyFor(QStringLiteral("ssh-password"), m_saved->name));
+    const SecureBuffer *secret = vm.vault().secret(vaultbind::sshSecretKey(m_saved->name));
     if (!secret) {
         note(QStringLiteral("no stored password for this session; ssh will ask for it"));
+        return {};
+    }
+    // The secret is keyed by name: only send it to the target it was stored for.
+    if (!storedPasswordBindingOk(mayPrompt, QStringLiteral("Stored Password"))) {
+        return {};
+    }
+    secret = vm.vault().secret(vaultbind::sshSecretKey(m_saved->name)); // update() rebuilt the entries
+    if (!secret) {
         return {};
     }
     m_askpass = new AskpassServer(secret->clone(), this);
@@ -510,9 +586,12 @@ bool SessionWidget::sendStoredLogin()
         return false;
     }
     vm.touch();
-    if (!vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))) {
+    if (!vm.vault().secret(vaultbind::serialSecretKey(m_saved->name))) {
         QMessageBox::information(this, QStringLiteral("Send Stored Login"),
                                  QStringLiteral("No login password is stored for \"%1\".").arg(m_saved->name));
+        return false;
+    }
+    if (!storedPasswordBindingOk(true, QStringLiteral("Send Stored Login"))) {
         return false;
     }
     m_log->suspend(QStringLiteral("Send Stored Login"));
@@ -546,9 +625,9 @@ void SessionWidget::finishLogin(bool sendPassword)
     }
     VaultManager &vm = VaultManager::instance();
     const SecureBuffer *pw = vm.isUnlocked() && m_saved
-        ? vm.vault().secret(Vault::secretKeyFor(QStringLiteral("serial-password"), m_saved->name))
+        ? vm.vault().secret(vaultbind::serialSecretKey(m_saved->name))
         : nullptr;
-    if (!pw) {
+    if (!pw || vaultbind::check(vm.vault(), *m_saved) != vaultbind::Status::Match) {
         return;
     }
     vm.touch();

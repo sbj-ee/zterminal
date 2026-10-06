@@ -1,5 +1,7 @@
 #include "VaultManager.hpp"
 
+#include "SessionStore.hpp"
+#include "VaultBindings.hpp"
 #include "VaultDialogs.hpp"
 
 #include <QApplication>
@@ -118,6 +120,15 @@ bool VaultManager::refresh()
 
 void VaultManager::noteUnlocked()
 {
+    if (m_vault->isUnlocked()) {
+        // Deletions queued while locked, orphaned secrets, and binding of
+        // secrets stored before bindings existed (VaultBindings.hpp).
+        m_lastReconcile = vaultbind::reconcile(*m_vault, SessionStore());
+        if (!m_lastReconcile.ok && !m_vault->isUnlocked()) {
+            lock();
+            return;
+        }
+    }
     m_announced = m_vault->isUnlocked();
     restartIdleTimer();
     emit lockedChanged(true);
