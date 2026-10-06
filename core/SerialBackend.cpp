@@ -1,5 +1,7 @@
 #include "SerialBackend.hpp"
 
+#include "SecureBuffer.hpp"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QSerialPortInfo>
@@ -187,8 +189,10 @@ void SerialBackend::write(const QByteArray &data, bool echo)
     if (!m_port->isOpen() || data.isEmpty()) {
         return;
     }
-    // The terminal sends CR for Enter (and pasted line ends); map it.
-    QByteArray out = data;
+    const bool secret = !echo;
+    // The terminal sends CR for Enter (and pasted line ends); map it. A secret
+    // gets its own copy (the caller wipes theirs, we wipe ours).
+    QByteArray out = secret ? QByteArray(data.constData(), data.size()) : data;
     const QByteArray enter = enterSequence(m_cfg.enterSends);
     if (enter != "\r") {
         out.replace('\r', enter);
@@ -200,7 +204,14 @@ void SerialBackend::write(const QByteArray &data, bool echo)
         shown.replace("\n", "\r\n");
         emit dataReceived(shown);
     }
+    if (secret) {
+        m_queueSensitive = true;
+        m_queue.reserve(m_queue.size() + out.size()); // no reallocation inside +=
+    }
     m_queue += out;
+    if (secret) {
+        wipeByteArray(out);
+    }
     if (!m_pacer->isActive()) {
         pump();
     }
@@ -230,11 +241,18 @@ void SerialBackend::pump()
         if (n == 1 && m_queue.size() > 1 && m_queue.at(0) == '\r' && m_queue.at(1) == '\n') {
             n = 2;
         }
-        const QByteArray chunk = m_queue.left(n);
+        QByteArray chunk = m_queue.left(n);
         m_queue.remove(0, n);
         m_port->write(chunk);
-        emit pendingChanged(m_queue.size());
         const char last = chunk.back();
+        if (m_queueSensitive) {
+            wipeByteArray(chunk);
+            if (m_queue.isEmpty()) {
+                wipeByteArray(m_queue);
+                m_queueSensitive = false;
+            }
+        }
+        emit pendingChanged(m_queue.size());
         const bool lineEnd = last == '\r' || last == '\n';
         const int delay = lineEnd ? std::max(m_cfg.lineDelayMs, m_cfg.charDelayMs) : m_cfg.charDelayMs;
         if (delay > 0 && !m_queue.isEmpty()) {
@@ -247,7 +265,12 @@ void SerialBackend::pump()
 void SerialBackend::cancelPending()
 {
     m_pacer->stop();
-    if (!m_queue.isEmpty()) {
+    const bool had = !m_queue.isEmpty();
+    if (m_queueSensitive) {
+        wipeByteArray(m_queue);
+        m_queueSensitive = false;
+    }
+    if (had) {
         m_queue.clear();
         emit pendingChanged(0);
     }

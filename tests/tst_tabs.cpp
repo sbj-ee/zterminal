@@ -123,6 +123,8 @@ private slots:
     {
         Vault::setKdfOverrideForTests(1, 8192);
         AppSettings{}.save();
+        // Release builds ignore $ZTERMINAL_ASKPASS (ZTERMINAL_DEV_OVERRIDES); CMake passes it to tests.
+        AskpassServer::setHelperPathForTests(qEnvironmentVariable("ZTERMINAL_ASKPASS"));
     }
 
     void shortcutsLeaveTerminalKeysAlone()
@@ -363,7 +365,9 @@ private slots:
         {
             QFile f(bin.filePath(QStringLiteral("ssh")));
             QVERIFY(f.open(QIODevice::WriteOnly));
-            f.write("#!/bin/sh\nfor a in \"$@\"; do h=\"$a\"; done\n"
+            f.write("#!/bin/sh\n"
+                    "[ \"$1\" = -G ] && exit 1 # resolveTarget's `ssh -G`: use the session fields\n"
+                    "for a in \"$@\"; do h=\"$a\"; done\n"
                     "printf 'ssh to %s got [%s]\\n' \"$h\" \"$(\"$SSH_ASKPASS\" \"$h password: \")\"\nexec cat\n");
             f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
         }

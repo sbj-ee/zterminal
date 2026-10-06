@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QSocketNotifier>
 #include <QTimer>
 
@@ -195,16 +196,104 @@ bool AskpassServer::listen(QString *error)
 
 QStringList AskpassServer::sshEnvironment(const QString &helperPath) const
 {
-    return {QStringLiteral("SSH_ASKPASS=") + helperPath, QStringLiteral("SSH_ASKPASS_REQUIRE=force"),
-            QStringLiteral("ZTERMINAL_ASKPASS_SOCKET=") + m_socketPath};
+    QStringList env{QStringLiteral("SSH_ASKPASS=") + helperPath, QStringLiteral("SSH_ASKPASS_REQUIRE=force"),
+                    QStringLiteral("ZTERMINAL_ASKPASS_SOCKET=") + m_socketPath};
+    QString host = m_target.host;
+    if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']'))) {
+        host = host.mid(1, host.size() - 2);
+    }
+    if (!host.isEmpty()) {
+        env << QStringLiteral("ZTERMINAL_ASKPASS_TARGET=") + m_target.user + QLatin1Char('@') + host;
+    }
+    if (!m_target.hostKeyAlias.isEmpty()) {
+        env << QStringLiteral("ZTERMINAL_ASKPASS_HOSTKEYALIAS=") + m_target.hostKeyAlias;
+    }
+    if (m_target.viaJump) {
+        env << QStringLiteral("ZTERMINAL_ASKPASS_VIA_JUMP=1");
+    }
+    return env;
+}
+
+namespace {
+QString &testHelperPath()
+{
+    static QString p;
+    return p;
+}
+} // namespace
+
+void AskpassServer::setHelperPathForTests(const QString &path)
+{
+    testHelperPath() = path;
+}
+
+AskpassTarget AskpassServer::parseSshConfigDump(const QByteArray &dump, const AskpassTarget &fallback)
+{
+    AskpassTarget t = fallback;
+    bool sawHost = false;
+    for (const QByteArray &raw : dump.split('\n')) {
+        const QByteArray line = raw.trimmed();
+        const qsizetype sp = line.indexOf(' ');
+        if (sp <= 0) {
+            continue;
+        }
+        const QByteArray key = line.left(sp).toLower();
+        const QString val = QString::fromUtf8(line.mid(sp + 1).trimmed());
+        if (val.isEmpty()) {
+            continue;
+        }
+        const bool none = val.compare(QLatin1String("none"), Qt::CaseInsensitive) == 0;
+        if (key == "hostname") {
+            t.host = val;
+            sawHost = true;
+        } else if (key == "user") {
+            t.user = val;
+        } else if (key == "hostkeyalias" && !none) {
+            t.hostKeyAlias = val;
+        } else if ((key == "proxyjump" || key == "proxycommand") && !none) {
+            t.viaJump = true;
+        }
+    }
+    if (!sawHost) {
+        return fallback; // not ssh -G output
+    }
+    t.viaJump = t.viaJump || fallback.viaJump;
+    return t;
+}
+
+AskpassTarget AskpassServer::resolveTarget(const QString &sshProgram, const QStringList &sshArgs,
+                                           const AskpassTarget &fallback, int timeoutMs)
+{
+    QProcess p;
+    p.setProcessChannelMode(QProcess::SeparateChannels);
+    p.setStandardInputFile(QProcess::nullDevice());
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("SSH_ASKPASS")); // -G never authenticates; be sure
+    env.remove(QStringLiteral("ZTERMINAL_ASKPASS_SOCKET"));
+    p.setProcessEnvironment(env);
+    p.start(sshProgram, QStringList{QStringLiteral("-G")} + sshArgs);
+    if (!p.waitForStarted(timeoutMs) || !p.waitForFinished(timeoutMs)) {
+        p.kill();
+        p.waitForFinished(1000);
+        return fallback;
+    }
+    if (p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0) {
+        return fallback;
+    }
+    return parseSshConfigDump(p.readAllStandardOutput(), fallback);
 }
 
 QString AskpassServer::findHelper()
 {
+    if (!testHelperPath().isEmpty()) {
+        return QFileInfo(testHelperPath()).isExecutable() ? testHelperPath() : QString();
+    }
+#if defined(ZTERMINAL_DEV_OVERRIDES)
     const QString env = qEnvironmentVariable("ZTERMINAL_ASKPASS");
     if (!env.isEmpty()) {
         return QFileInfo(env).isExecutable() ? env : QString();
     }
+#endif
     const QString appDir = QCoreApplication::applicationDirPath();
     // Build tree / Linux install / macOS .app (Contents/MacOS).
     for (const QString &c : {appDir + QStringLiteral("/zterminal-askpass"),

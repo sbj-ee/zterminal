@@ -28,6 +28,20 @@ namespace zterminal {
 //     prompt therefore finds no socket and the helper asks the user on the
 //     terminal: one automatic attempt, no loop.
 //   - unused, it expires after timeoutMs (default 2 min).
+//
+// Which prompt gets the password: the helper only answers a prompt that ssh
+// labels with the session's own target ("(user@host) ..." or
+// "user@host's password: "), or a bare "Password:" when no jump host/proxy is
+// involved (askpass/askpass_policy.h). So with -J, the jump host never
+// receives the target's password. The target goes to the helper in
+// ZTERMINAL_ASKPASS_TARGET / _HOSTKEYALIAS / _VIA_JUMP (not secret).
+struct AskpassTarget {
+    QString user;         // may be empty (ssh's default user)
+    QString host;         // as ssh prints it: HostName after ~/.ssh/config
+    QString hostKeyAlias; // optional
+    bool viaJump = false; // ProxyJump / -J / ProxyCommand in effect
+};
+
 class AskpassServer : public QObject
 {
     Q_OBJECT
@@ -42,11 +56,29 @@ public:
     void setTimeoutMs(int ms);
     bool isActive() const { return m_listenFd >= 0; }
 
-    // The environment for ssh: SSH_ASKPASS, SSH_ASKPASS_REQUIRE, ZTERMINAL_ASKPASS_SOCKET.
+    void setTarget(const AskpassTarget &t) { m_target = t; }
+    AskpassTarget target() const { return m_target; }
+
+    // The environment for ssh: SSH_ASKPASS, SSH_ASKPASS_REQUIRE,
+    // ZTERMINAL_ASKPASS_SOCKET, ZTERMINAL_ASKPASS_TARGET and, when set,
+    // ZTERMINAL_ASKPASS_HOSTKEYALIAS and ZTERMINAL_ASKPASS_VIA_JUMP=1.
     QStringList sshEnvironment(const QString &helperPath) const;
-    // $ZTERMINAL_ASKPASS, else zterminal-askpass next to the app, else
-    // <prefix>/libexec/zterminal/zterminal-askpass. Empty if none exists.
+    // zterminal-askpass next to the app, else <prefix>/libexec/zterminal/,
+    // else Contents/Helpers (macOS). Empty if none exists. Builds with
+    // ZTERMINAL_DEV_OVERRIDES (debug/test builds only) also honour
+    // $ZTERMINAL_ASKPASS; release builds never read it.
     static QString findHelper();
+    // Tests: use this helper (empty: back to the normal search).
+    static void setHelperPathForTests(const QString &path);
+
+    // What ssh will really connect to, for the helper's prompt check:
+    // `ssh -G <args>` (same program and options as the session, so
+    // ~/.ssh/config HostName/User/ProxyJump are honoured), falling back to
+    // `fallback` (the session's fields) if that fails. Never connects.
+    static AskpassTarget resolveTarget(const QString &sshProgram, const QStringList &sshArgs,
+                                       const AskpassTarget &fallback, int timeoutMs = 3000);
+    // Parses `ssh -G` output on top of `fallback` (public for tests).
+    static AskpassTarget parseSshConfigDump(const QByteArray &dump, const AskpassTarget &fallback);
 
     // True if `pid` is `ancestor` or descends from it (/proc on Linux, sysctl on macOS).
     static bool isDescendant(qint64 pid, qint64 ancestor);
@@ -61,6 +93,7 @@ private:
     void shutdown();
 
     SecureBuffer m_secret;
+    AskpassTarget m_target;
     QString m_dir;
     QString m_socketPath;
     int m_listenFd = -1;

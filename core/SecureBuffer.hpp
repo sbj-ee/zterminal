@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 
 #include <cstddef>
@@ -43,5 +44,12 @@ private:
     unsigned char *m_data = nullptr;
     std::size_t m_size = 0;
 };
+
+// Zero a QByteArray that held a secret, including the unused capacity after
+// size() (left there by remove()/chop()), then empty it. If the data is still
+// shared with another QByteArray, only drops this reference: the last owner
+// wipes (writing would detach and wipe a fresh copy instead). Best effort:
+// copies made by earlier reallocations are not reachable.
+void wipeByteArray(QByteArray &b);
 
 } // namespace zterminal

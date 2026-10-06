@@ -152,6 +152,8 @@ private slots:
     {
         Vault::setKdfOverrideForTests(1, 8192);
         QVERIFY(!qEnvironmentVariable("ZTERMINAL_ASKPASS").isEmpty()); // set by CMake
+        // Release builds ignore $ZTERMINAL_ASKPASS (ZTERMINAL_DEV_OVERRIDES); CMake passes it to tests.
+        AskpassServer::setHelperPathForTests(qEnvironmentVariable("ZTERMINAL_ASKPASS"));
     }
 
     void autoLockLocksAndWipes()
@@ -380,11 +382,12 @@ private slots:
             QVERIFY(f.open(QIODevice::WriteOnly));
             // Portable argv/environ capture (works without Linux /proc).
             f.write("#!/bin/sh\n"
+                    "[ \"$1\" = -G ] && exit 1 # resolveTarget's `ssh -G`: use the session fields\n"
                     "o=\"$ZT_FAKE_OUT\"\n"
                     "{ printf '%s\\0' \"$0\"; for a; do printf '%s\\0' \"$a\"; done; } > \"$o/cmdline\"\n"
                     "if env -0 > \"$o/environ\" 2>/dev/null; then :; else printenv > \"$o/environ\"; fi\n"
-                    "\"$SSH_ASKPASS\" \"stevebj@core-sw1's password: \" > \"$o/answer1\"; echo $? > \"$o/rc1\"\n"
-                    "\"$SSH_ASKPASS\" \"stevebj@core-sw1's password: \" > \"$o/answer2\"; echo $? > \"$o/rc2\"\n"
+                    "\"$SSH_ASKPASS\" \"stevebj@core-sw1.example's password: \" > \"$o/answer1\"; echo $? > \"$o/rc1\"\n"
+                    "\"$SSH_ASKPASS\" \"stevebj@core-sw1.example's password: \" > \"$o/answer2\"; echo $? > \"$o/rc2\"\n"
                     "echo fake-ssh-finished\n");
             f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
         }
@@ -410,7 +413,7 @@ private slots:
             QCOMPARE(readFile(out + QStringLiteral("/rc1")).trimmed(), QByteArray("0"));
             QVERIFY(!QFileInfo::exists(sock)); // one shot
             // Second prompt: manual entry in the terminal (no loop, no resend).
-            QTRY_VERIFY_WITH_TIMEOUT(screen(w).contains(QStringLiteral("stevebj@core-sw1's password:")), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(screen(w).contains(QStringLiteral("stevebj@core-sw1.example's password:")), 10000);
             w.pty()->write("typed-by-hand\r");
             QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(out + QStringLiteral("/rc2")), 10000);
             QCOMPARE(readFile(out + QStringLiteral("/answer2")), QByteArray("typed-by-hand\n"));
@@ -427,6 +430,9 @@ private slots:
         QVERIFY(env.contains("SSH_ASKPASS_REQUIRE=force"));
         QVERIFY(env.contains("ZTERMINAL_ASKPASS_SOCKET="));
         QVERIFY(env.contains(QByteArray("SSH_ASKPASS=") + qgetenv("ZTERMINAL_ASKPASS")));
+        // Which prompt is the target's (ssh -G fails in the fake: the session fields).
+        QVERIFY(env.contains("ZTERMINAL_ASKPASS_TARGET=stevebj@core-sw1.example"));
+        QVERIFY(!env.contains("ZTERMINAL_ASKPASS_VIA_JUMP="));
         // ...nor in ours (Linux /proc; skipped on macOS).
 #if defined(Q_OS_LINUX)
         QVERIFY(!readFile(QStringLiteral("/proc/self/environ")).contains("Sw0rdfish"));

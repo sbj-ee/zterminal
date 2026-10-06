@@ -181,14 +181,17 @@ private slots:
     {
         Vault::setKdfOverrideForTests(1, 8192);
         QVERIFY(!qEnvironmentVariable("ZTERMINAL_ASKPASS").isEmpty()); // set by CMake
+        // Release builds ignore $ZTERMINAL_ASKPASS (ZTERMINAL_DEV_OVERRIDES); CMake passes it to tests.
+        AskpassServer::setHelperPathForTests(qEnvironmentVariable("ZTERMINAL_ASKPASS"));
         QVERIFY(SocatPair::available());                                 // CI installs socat: no skipping
         // A fake `ssh` that asks $SSH_ASKPASS once, like ssh's first password prompt.
         QVERIFY(QDir().mkpath(bin.filePath(QStringLiteral("out"))));
         QFile f(bin.filePath(QStringLiteral("ssh")));
         QVERIFY(f.open(QIODevice::WriteOnly));
         f.write("#!/bin/sh\n"
+                "[ \"$1\" = -G ] && exit 1 # resolveTarget's `ssh -G`: use the session fields\n"
                 "o=\"$ZT_FAKE_OUT\"\n"
-                "\"$SSH_ASKPASS\" \"stevebj@core-sw1's password: \" > \"$o/answer\"; echo $? > \"$o/rc\"\n"
+                "\"$SSH_ASKPASS\" \"stevebj@core-sw1.example's password: \" > \"$o/answer\"; echo $? > \"$o/rc\"\n"
                 // With $o/drop present: the connection then drops (ssh exit 255).
                 "if [ -e \"$o/drop\" ]; then echo 'Connection to core-sw1.example closed by remote host.' >&2; exit 255; fi\n"
                 "echo fake-ssh-finished\n"

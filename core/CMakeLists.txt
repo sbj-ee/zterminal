@@ -2,6 +2,7 @@
 # wrapper, scrollback, selection, settings.
 add_library(zterminal_core STATIC
   Pty.cpp Pty.hpp
+  ProcessHardening.cpp ProcessHardening.hpp
   Terminal.cpp Terminal.hpp
   Selection.cpp Selection.hpp
   BrandThemes.h ColorScheme.cpp ColorScheme.hpp
@@ -30,3 +31,19 @@ target_include_directories(zterminal_core PUBLIC
   ${ZTERMINAL_GENERATED_DIR})
 target_link_libraries(zterminal_core PUBLIC Qt6::Core Qt6::Gui Qt6::SerialPort Qt6::Network vterm PkgConfig::SODIUM PRIVATE util)
 zterminal_set_warnings(zterminal_core)
+
+# Environment overrides for development only, e.g. ZTERMINAL_ASKPASS (askpass
+# helper path). Release packages must be built without them, so a modified
+# environment can't swap the helper that receives stored passwords. Off unless
+# CMAKE_BUILD_TYPE is Debug; the tests don't need it (they use setters).
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(_zt_dev_overrides_default ON)
+else()
+  set(_zt_dev_overrides_default OFF)
+endif()
+option(ZTERMINAL_DEV_OVERRIDES "Honour development environment overrides such as ZTERMINAL_ASKPASS (debug builds only)"
+       ${_zt_dev_overrides_default})
+if(ZTERMINAL_DEV_OVERRIDES)
+  target_compile_definitions(zterminal_core PUBLIC ZTERMINAL_DEV_OVERRIDES)
+  message(STATUS "zterminal: ZTERMINAL_DEV_OVERRIDES=ON (environment overrides compiled in; not for release packages)")
+endif()

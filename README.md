@@ -183,6 +183,34 @@ recovery: if you forget the master password, the stored passwords are lost.**
 The vault protects passwords **at rest**. It does not protect against malware
 running as your user, root, or keyloggers while the vault is unlocked.
 
+**Which prompt gets the stored password.** `zterminal-askpass` answers only a
+password prompt that comes from the session's own target, as resolved by
+`ssh -G` (so `~/.ssh/config` `HostName`/`User`/`HostKeyAlias` count):
+
+- `user@host's password:` and `(user@host) Password:` (keyboard-interactive,
+  OpenSSH 8.4+) are labelled by ssh itself; the label must be the target.
+  Through a jump host (`-J`, `ProxyJump`, `ProxyCommand`) the jump host's own
+  prompt therefore never receives the target's password — you type that one.
+- A bare `Password:` (keyboard-interactive from older OpenSSH, or a device
+  that sends its own prompt text) carries no label. It is answered only when
+  there is **no** jump host or proxy; with one, it is refused, because the
+  jump host could be the one asking. If your target only produces bare
+  prompts behind a jump host, type the password (or use keys).
+- Anything else (passphrases, host-key questions) is never answered from the
+  vault. When a password prompt is refused, a note on the terminal says so.
+
+**Process hardening (release builds).** zterminal disables core dumps (soft
+and hard limit 0) and, on Linux, marks itself non-dumpable, so other processes
+of your user can't attach a debugger or read its memory through `/proc`, and a
+crash doesn't write secrets to disk. Debug builds skip this.
+
+**Limits of memory hygiene.** The vault key and decrypted passwords live in
+locked, guarded libsodium memory, and zterminal zeroes its own temporary
+copies (including the serial send queue). Copies outside its control are not
+covered: the text of password fields while you type (Qt's widget buffers and
+the `QString` they return), QSerialPort's internal write buffer, and the
+password inside the `ssh` process once delivered.
+
 ## Session logs
 
 Session → Start Logging (Ctrl+Shift+G), or enable automatic logging in the
@@ -227,6 +255,14 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 open ./build/app/zterminal.app
 ```
+
+### Development overrides
+
+`-DZTERMINAL_DEV_OVERRIDES=ON` (default only for `CMAKE_BUILD_TYPE=Debug`)
+compiles in environment overrides for development, such as
+`ZTERMINAL_ASKPASS` (path of the askpass helper). Release builds and packages
+ignore them, so a modified environment can't substitute the program
+that receives stored passwords. The tests don't need the option.
 
 ### Tests
 

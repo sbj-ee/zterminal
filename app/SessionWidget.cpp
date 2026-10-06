@@ -21,6 +21,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -465,6 +466,16 @@ QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
     connect(m_askpass, &AskpassServer::served, this, [note]() {
         note(QStringLiteral("stored password sent once; if it is rejected, ssh asks here"));
     });
+    // Tell the helper which prompt is the target's, so a jump host (-J) never
+    // gets this password (askpass/askpass_policy.h).
+    AskpassTarget fallback;
+    fallback.user = m_saved->user;
+    fallback.host = m_saved->host;
+    fallback.viaJump = !m_saved->jumpHost.isEmpty() || m_saved->extraArgs.contains(QLatin1String("proxyjump"), Qt::CaseInsensitive)
+        || m_saved->extraArgs.contains(QLatin1String("proxycommand"), Qt::CaseInsensitive)
+        || QProcess::splitCommand(m_saved->extraArgs).contains(QStringLiteral("-J"));
+    const SshCommand cmd = buildSshCommand(*m_saved);
+    m_askpass->setTarget(cmd.ok() ? AskpassServer::resolveTarget(cmd.program, cmd.args, fallback) : fallback);
     return m_askpass->sshEnvironment(helper);
 }
 
@@ -553,10 +564,12 @@ void SessionWidget::finishLogin(bool sendPassword)
     }
     vm.touch();
     // QSerialPort keeps its own write buffer (not locked memory); wipe our copy.
-    QByteArray bytes(reinterpret_cast<const char *>(pw->data()), qsizetype(pw->size()));
+    QByteArray bytes;
+    bytes.reserve(qsizetype(pw->size()) + 1); // the '\r' must not reallocate (an unwiped copy)
+    bytes.append(reinterpret_cast<const char *>(pw->data()), qsizetype(pw->size()));
     bytes += '\r';
     m_serial->write(bytes, /*echo=*/false);
-    sodium_memzero(bytes.data(), std::size_t(bytes.size()));
+    wipeByteArray(bytes);
     m_serialTail.clear(); // that prompt has been answered
 }
 

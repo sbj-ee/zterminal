@@ -3,8 +3,12 @@
  *
  * ssh runs it as `zterminal-askpass "<prompt>"` and reads the answer from its
  * stdout. Behaviour:
- *   - A password prompt ("...assword...") with $ZTERMINAL_ASKPASS_SOCKET set:
- *     connect, read the stored password zterminal sends (one shot), print it.
+ *   - A password prompt for the session's own target (askpass_policy.h:
+ *     "(user@host) ..." / "user@host's password: " naming
+ *     $ZTERMINAL_ASKPASS_TARGET, or a bare "Password:" when there is no jump
+ *     host, $ZTERMINAL_ASKPASS_VIA_JUMP unset) with $ZTERMINAL_ASKPASS_SOCKET
+ *     set: connect, read the stored password zterminal sends (one shot), print
+ *     it. A jump host's prompt never gets the target's password.
  *   - Anything else, or when the socket is gone (a second password prompt
  *     after a failed attempt), or empty: ask on /dev/tty, the terminal the
  *     session runs in, like ssh itself would. Yes/no questions echo; secrets
@@ -17,6 +21,8 @@
 #else
 #define _GNU_SOURCE
 #endif
+#include "askpass_policy.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -131,16 +137,41 @@ static ssize_t from_tty(const char *prompt, int echo)
     return (ssize_t)got;
 }
 
+/* Tell the user why they are asked although a password is stored. */
+static void note_not_offered(const char *target)
+{
+    int tty = open("/dev/tty", O_WRONLY | O_CLOEXEC | O_NOCTTY);
+    if (tty < 0)
+        return;
+    static const char a[] = "[zterminal: the stored password is only sent to ";
+    static const char b[] = "; type this one]\r\n";
+    write_all(tty, a, sizeof a - 1);
+    if (target && *target)
+        write_all(tty, target[0] == '@' ? target + 1 : target, strlen(target[0] == '@' ? target + 1 : target));
+    else
+        write_all(tty, "its own host", 12);
+    write_all(tty, b, sizeof b - 1);
+    close(tty);
+}
+
 int main(int argc, char **argv)
 {
     const char *prompt = argc > 1 ? argv[1] : "Password: ";
     const char *sock = getenv("ZTERMINAL_ASKPASS_SOCKET");
-    int is_password = strstr(prompt, "assword") != NULL;
+    const char *target = getenv("ZTERMINAL_ASKPASS_TARGET");
+    const char *alias = getenv("ZTERMINAL_ASKPASS_HOSTKEYALIAS");
+    const char *jump = getenv("ZTERMINAL_ASKPASS_VIA_JUMP");
+    int via_jump = jump && *jump && strcmp(jump, "0") != 0;
     int is_question = strstr(prompt, "yes/no") != NULL;
     ssize_t n = -1;
 
-    if (is_password && sock && *sock)
-        n = from_socket(sock);
+    if (sock && *sock) {
+        if (zt_askpass_may_answer(prompt, target, alias, via_jump)) {
+            n = from_socket(sock);
+        } else if (strstr(prompt, "assword") || strstr(prompt, "ASSWORD")) {
+            note_not_offered(target);
+        }
+    }
     if (n <= 0)
         n = from_tty(prompt, is_question);
     if (n < 0) {
