@@ -22,6 +22,7 @@ class QMenu;
 namespace zterminal {
 
 class AskpassServer;
+class ThemeEditorDialog;
 class Pty;
 class SessionLog;
 class SerialBackend;
@@ -95,6 +96,8 @@ public:
     void setSettings(const AppSettings &s);
     void reloadSettings();
     void showPreferences();
+    // Settings > Theme Editor (non-modal; returned for tests).
+    ThemeEditorDialog *showThemeEditor();
 
     AskpassServer *askpassServer() const;
     bool sendStoredLogin();
@@ -123,6 +126,7 @@ private:
     void updateSessionActions();
     void setFontSize(int points);
     void setSchemeFor(const QString &id);
+    void rebuildSchemeMenu();
     void updateSavedEverywhere(const SessionConfig &cfg);
     void duplicateSession();
     void showAbout();
@@ -138,6 +142,8 @@ private:
     QTabWidget *m_tabs = nullptr;
     QMenu *m_contextMenu = nullptr;
     QActionGroup *m_schemeGroup = nullptr;
+    QMenu *m_schemeMenu = nullptr;
+    QAction *m_themeEditorAction = nullptr;
     QFileSystemWatcher *m_settingsWatcher = nullptr;
     QTimer *m_reloadTimer = nullptr;
     QList<QAction *> m_actions;

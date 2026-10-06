@@ -72,7 +72,7 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     lookForm->addRow(QStringLiteral("Size:"), m_fontSize);
     m_scheme = new QComboBox;
     m_scheme->setObjectName(QStringLiteral("colorScheme"));
-    for (const ColorScheme &s : ColorScheme::builtIn()) {
+    for (const ColorScheme &s : ColorScheme::all()) {
         m_scheme->addItem(s.name, s.id);
     }
     m_scheme->setCurrentIndex(std::max(0, m_scheme->findData(current.colorScheme)));

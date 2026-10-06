@@ -2,6 +2,7 @@
 
 #include "ColorScheme.hpp"
 #include "PreferencesDialog.hpp"
+#include "ThemeEditorDialog.hpp"
 #include "Pty.hpp"
 #include "SerialBackend.hpp"
 #include "SessionDialog.hpp"
@@ -200,17 +201,12 @@ void MainWindow::buildMenus()
     resetFont->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_ParenRight), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_0)});
     connect(resetFont, &QAction::triggered, this, [this]() { setFontSize(AppSettings::kDefaultFontSize); });
     view->addSeparator();
-    QMenu *schemes = view->addMenu(QStringLiteral("Color &Scheme"));
+    m_schemeMenu = view->addMenu(QStringLiteral("Color &Scheme"));
     m_schemeGroup = new QActionGroup(this);
-    for (const ColorScheme &s : ColorScheme::builtIn()) {
-        QAction *a = schemes->addAction(s.name);
-        a->setObjectName(QStringLiteral("scheme:") + s.id);
-        a->setCheckable(true);
-        a->setData(s.id);
-        m_schemeGroup->addAction(a);
-        m_actions << a;
-    }
     connect(m_schemeGroup, &QActionGroup::triggered, this, [this](QAction *a) { setSchemeFor(a->data().toString()); });
+    // Built-in schemes, then custom themes (re-read each time the menu opens,
+    // so themes saved in another window or by zmail show up).
+    connect(m_schemeMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildSchemeMenu);
     view->addSeparator();
     QAction *full = addAct(view, QStringLiteral("fullScreen"), QStringLiteral("&Full Screen"), QKS(Qt::Key_F11));
     full->setCheckable(true);
@@ -276,6 +272,9 @@ void MainWindow::buildMenus()
     // Ctrl+Shift+, (Qt reports Shift+comma as '<' on US layouts, so register both).
     prefs->setShortcuts({QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Comma), QKS(Qt::CTRL | Qt::SHIFT | Qt::Key_Less)});
     connect(prefs, &QAction::triggered, this, &MainWindow::showPreferences);
+    m_themeEditorAction = addAct(settings, QStringLiteral("themeEditor"), QStringLiteral("&Theme Editor\u2026"));
+    connect(m_themeEditorAction, &QAction::triggered, this, &MainWindow::showThemeEditor);
+    rebuildSchemeMenu();
     settings->addSeparator();
     QMenu *vaultMenu = settings->addMenu(QStringLiteral("Password &Vault"));
     connect(addAct(vaultMenu, QStringLiteral("unlockVault"), QStringLiteral("&Unlock Vault\u2026")),
@@ -820,6 +819,46 @@ void MainWindow::showPreferences()
     if (dlg.exec() == QDialog::Accepted) {
         setSettings(dlg.result());
     }
+}
+
+void MainWindow::rebuildSchemeMenu()
+{
+    for (QAction *a : m_schemeGroup->actions()) {
+        m_actions.removeAll(a);
+        m_schemeGroup->removeAction(a);
+    }
+    m_schemeMenu->clear(); // deletes the scheme actions (the menu owns them)
+    const SessionWidget *cur = currentSession();
+    const QString current = cur ? cur->terminal()->colorScheme().id : m_settings.colorScheme;
+    const qsizetype builtIns = ColorScheme::builtIn().size();
+    const QList<ColorScheme> all = ColorScheme::all();
+    for (qsizetype i = 0; i < all.size(); ++i) {
+        if (i == builtIns) {
+            m_schemeMenu->addSeparator();
+        }
+        QAction *a = m_schemeMenu->addAction(all[i].name);
+        a->setObjectName(QStringLiteral("scheme:") + all[i].id);
+        a->setCheckable(true);
+        a->setData(all[i].id);
+        a->setChecked(all[i].id == current);
+        m_schemeGroup->addAction(a);
+        m_actions << a;
+    }
+    m_schemeMenu->addSeparator();
+    m_schemeMenu->addAction(m_themeEditorAction);
+}
+
+ThemeEditorDialog *MainWindow::showThemeEditor()
+{
+    auto *dlg = new ThemeEditorDialog(m_settings, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &ThemeEditorDialog::applied, this, [this](const AppSettings &s) {
+        setSettings(s);
+        rebuildSchemeMenu();
+    });
+    connect(dlg, &ThemeEditorDialog::themesChanged, this, &MainWindow::rebuildSchemeMenu);
+    dlg->show();
+    return dlg;
 }
 
 void MainWindow::showAbout()

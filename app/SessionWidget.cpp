@@ -202,7 +202,15 @@ void SessionWidget::applySettings(const AppSettings &s)
     m_view->setMouseSettings(m_settings.mouse);
     m_view->setTrimCopiedWhitespace(m_settings.trimCopiedWhitespace);
     m_term->setScrollbackLimit(m_settings.scrollbackLines);
-    m_term->setColorScheme(ColorScheme::byId(eff.colorScheme));
+    const ColorScheme scheme = ColorScheme::byId(eff.colorScheme);
+    m_term->setColorScheme(scheme);
+    // A custom theme may ask for a cursor style; only touch it on a change,
+    // so a settings reload doesn't undo a shape the program chose.
+    const int shape = scheme.cursorShape >= 0 ? scheme.cursorShape : Terminal::kDefaultCursorShape;
+    const bool blink = scheme.cursorBlink >= 0 ? scheme.cursorBlink != 0 : Terminal::kDefaultCursorBlink;
+    if (shape != m_term->defaultCursorShape() || blink != m_term->defaultCursorBlink()) {
+        m_term->setDefaultCursorStyle(shape, blink);
+    }
 }
 
 QString SessionWidget::bannerText() const

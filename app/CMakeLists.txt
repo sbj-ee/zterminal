@@ -5,6 +5,7 @@ add_library(zterminal_ui STATIC
   FindBar.cpp FindBar.hpp
   SessionWidget.cpp SessionWidget.hpp
   PreferencesDialog.cpp PreferencesDialog.hpp
+  ThemeEditorDialog.cpp ThemeEditorDialog.hpp
   AppSettings.cpp AppSettings.hpp
   SessionDialog.cpp SessionDialog.hpp
   VaultManager.cpp VaultManager.hpp
