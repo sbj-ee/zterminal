@@ -412,14 +412,48 @@ void Terminal::sendMouseButton(int button, bool pressed, VTermModifier mod)
     vterm_mouse_button(m_vt, button, pressed, mod);
 }
 
+namespace {
+bool isPasteControl(char32_t u)
+{
+    return (u < 0x20 && u != U'\t' && u != U'\r') || u == 0x7f || (u >= 0x80 && u < 0xa0);
+}
+bool isBidiControl(char32_t u)
+{
+    return u == 0x061c || u == 0x200e || u == 0x200f || (u >= 0x202a && u <= 0x202e) || (u >= 0x2066 && u <= 0x2069);
+}
+} // namespace
+
 QByteArray Terminal::preparePasteBytes(const QString &text)
 {
     QString t = text;
     t.replace(QStringLiteral("\r\n"), QStringLiteral("\r"));
     t.replace(QLatin1Char('\n'), QLatin1Char('\r'));
-    // Never let pasted text end a bracketed paste early.
+    // Drop whole end-of-paste markers first (so "a ESC[201~ b" reads "a b")...
     t.remove(QStringLiteral("\x1b[201~"));
-    return t.toUtf8();
+    // ...then every remaining control character. Without ESC no escape
+    // sequence can survive, however the markers were split or nested
+    // ("ESC[20" + "ESC[201~" + "1~" re-forms one after the removal above).
+    QString clean;
+    clean.reserve(t.size());
+    for (const char32_t u : t.toUcs4()) {
+        if (!isPasteControl(u)) {
+            clean += QString::fromUcs4(&u, 1);
+        }
+    }
+    return clean.toUtf8();
+}
+
+QString Terminal::sanitizeTitle(const QString &title)
+{
+    QString out;
+    out.reserve(title.size());
+    for (const char32_t u : title.toUcs4()) {
+        if ((u < 0x20) || u == 0x7f || (u >= 0x80 && u < 0xa0) || isBidiControl(u)) {
+            continue;
+        }
+        out += QString::fromUcs4(&u, 1);
+    }
+    return out;
 }
 
 bool Terminal::bracketedPasteEnabled() const
@@ -487,9 +521,15 @@ int Terminal::cbSetTermProp(VTermProp prop, VTermValue *val, void *user)
         if (val->string.initial) {
             t->m_titleBuf.clear();
         }
-        t->m_titleBuf.append(val->string.str, static_cast<qsizetype>(val->string.len));
+        // A program can stream an endless OSC title; keep at most kMaxTitleBytes.
+        if (t->m_titleBuf.size() < kMaxTitleBytes) {
+            const qsizetype room = kMaxTitleBytes - t->m_titleBuf.size();
+            t->m_titleBuf.append(val->string.str, std::min(room, static_cast<qsizetype>(val->string.len)));
+        }
         if (val->string.final) {
-            t->m_title = QString::fromUtf8(t->m_titleBuf);
+            t->m_title = sanitizeTitle(QString::fromUtf8(t->m_titleBuf));
+            t->m_titleBuf.clear();
+            t->m_titleBuf.squeeze();
             emit t->titleChanged(t->m_title);
         }
         break;

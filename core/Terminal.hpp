@@ -109,11 +109,21 @@ public:
     void sendMouseMove(int row, int col, VTermModifier mod);
     void sendMouseButton(int button, bool pressed, VTermModifier mod);
     // Paste: newline -> CR, wrapped in bracketed-paste markers when the program
-    // enabled mode 2004. Embedded end-of-paste markers are stripped.
+    // enabled mode 2004. See preparePasteBytes() for what is removed.
     void paste(const QString &text);
     // Raw bytes to the program (control characters typed by the user).
     void sendBytes(const QByteArray &bytes) { emit output(bytes); }
+    // The bytes a paste sends: CRLF/LF -> CR, and every control character
+    // except TAB and CR removed (ESC, the rest of C0, DEL, C1 U+0080-009F),
+    // so pasted text can't end a bracketed paste, inject escape sequences or
+    // send Ctrl-keys. Typed control keys are unaffected (sendBytes/sendKey).
     static QByteArray preparePasteBytes(const QString &text);
+    // A program-set title made safe to show: C0/C1/DEL and bidirectional
+    // formatting characters (U+061C, U+200E/F, U+202A-202E, U+2066-2069)
+    // removed, so a title can't reorder or hide text in the window/tab title.
+    static QString sanitizeTitle(const QString &title);
+    // Longest title (UTF-8 bytes) accepted from OSC 0/2; the rest is dropped.
+    static constexpr qsizetype kMaxTitleBytes = 4096;
 
 signals:
     void output(const QByteArray &bytes); // write to the PTY

@@ -35,8 +35,9 @@ PasteConfirmDialog::PasteConfirmDialog(const PasteInfo &info, const Context &ctx
 
     QStringList notes;
     if (ctx.bracketedPaste) {
-        notes << QStringLiteral("The program turned on bracketed paste, so it receives this as one paste "
-                                "(a shell waits for Enter).");
+        notes << QStringLiteral("The program turned on bracketed paste, so it is told this text is pasted. "
+                                "Shells such as bash and zsh then wait for Enter, but what happens is up to "
+                                "the program: review it as if typed.");
     } else if (info.endsWithNewline || info.lines > 1) {
         notes << QStringLiteral("Each line break acts like pressing Enter: lines may run as they arrive.");
     }
@@ -48,7 +49,9 @@ PasteConfirmDialog::PasteConfirmDialog(const PasteInfo &info, const Context &ctx
                      .arg(seconds(ctx.pacedMs));
     }
     if (info.controlChars > 0) {
-        notes << QStringLiteral("Contains %1 control character(s), shown as symbols below.").arg(info.controlChars);
+        notes << QStringLiteral("Contains %1 control character(s), shown as symbols below. They are removed "
+                                "before sending (except tab and line breaks).")
+                     .arg(info.controlChars);
     }
     if (!notes.isEmpty()) {
         auto *n = new QLabel(notes.join(QStringLiteral("\n")));

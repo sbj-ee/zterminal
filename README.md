@@ -263,6 +263,15 @@ Selecting copies (PRIMARY, and CLIPBOARD unless turned off); right-click pastes
 CLIPBOARD; Ctrl+Shift+C/V also work. A paste that contains a line break asks
 first (**Paste N lines?**); Cancel is the default. Single-line pastes go
 straight through. Bracketed paste is honored when the program enabled it.
+Pasted text never carries control characters: ESC, the other C0 controls
+(except tab and line breaks), DEL and C1 are removed before sending, so a
+paste can't end a bracketed paste early, inject escape sequences or send
+Ctrl-keys. Bracketed paste only tells the program the text was pasted; what it
+does with it is up to the program.
+
+Titles set by programs (OSC 0/2) are cut at 4 KB, and control and
+bidirectional formatting characters are removed before they reach the window
+or tab title.
 
 ## Building
 
