@@ -290,8 +290,18 @@ bool exportSessionsToFile(const SessionStore &store, const QString &path, QStrin
     return true;
 }
 
+SessionConfig sanitizeImportedSession(SessionConfig s, ImportApproval approval)
+{
+    // The vault keys secrets by session name; never let a file decide that a
+    // stored password should be sent (possibly to a different host).
+    s.useStoredPassword = false;
+    s.approved = approval == ImportApproval::Approved;
+    return s;
+}
+
 SessionImportResult importSessionsFromJson(SessionStore &store, const QByteArray &json,
-                                           SessionImportConflict conflict, QString *error)
+                                           SessionImportConflict conflict, QString *error,
+                                           ImportApproval approval)
 {
     SessionImportResult result;
     QString parseErr;
@@ -302,12 +312,18 @@ SessionImportResult importSessionsFromJson(SessionStore &store, const QByteArray
         }
         return result;
     }
-    for (const SessionConfig &s : doc->sessions) {
-        const bool exists = store.contains(s.name);
+    for (const SessionConfig &parsed : doc->sessions) {
+        const bool exists = store.contains(parsed.name);
         if (exists && conflict == SessionImportConflict::Skip) {
             ++result.skipped;
             continue;
         }
+        if (const QString why = validateImportedSession(parsed); !why.isEmpty()) {
+            ++result.rejected;
+            result.errors << QStringLiteral("%1: %2").arg(parsed.name, why);
+            continue;
+        }
+        const SessionConfig s = sanitizeImportedSession(parsed, approval);
         QString saveErr;
         if (!store.save(s, &saveErr)) {
             result.errors << QStringLiteral("%1: %2").arg(s.name, saveErr);
@@ -323,7 +339,7 @@ SessionImportResult importSessionsFromJson(SessionStore &store, const QByteArray
 }
 
 bool importSessionsFromFile(SessionStore &store, const QString &path,
-                            SessionImportConflict conflict, QString *error)
+                            SessionImportConflict conflict, QString *error, ImportApproval approval)
 {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
@@ -334,7 +350,7 @@ bool importSessionsFromFile(SessionStore &store, const QString &path,
     }
     const QByteArray bytes = f.readAll();
     QString err;
-    const SessionImportResult r = importSessionsFromJson(store, bytes, conflict, &err);
+    const SessionImportResult r = importSessionsFromJson(store, bytes, conflict, &err, approval);
     if (!err.isEmpty() && r.imported == 0 && r.overwritten == 0 && r.skipped == 0) {
         // Parse failure (or every session failed before any write).
         if (error) {

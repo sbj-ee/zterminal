@@ -21,6 +21,63 @@ bool hasControlChars(const QString &s)
     return false;
 }
 
+struct SshOpt {
+    QChar letter;
+    QString value; // empty for flags
+};
+
+// getopt-style walk over the extra arguments (same rules as buildSshCommand):
+// in a cluster such as "-4vo", the first letter that takes a value swallows
+// the rest of the cluster, or the next argument if it is the last letter.
+// Returns false for anything that isn't an option.
+bool parseSshOptions(const QStringList &extra, QList<SshOpt> *out)
+{
+    for (qsizetype i = 0; i < extra.size(); ++i) {
+        const QString &a = extra.at(i);
+        if (!a.startsWith(QLatin1Char('-')) || a.size() < 2 || a.startsWith(QLatin1String("--"))) {
+            return false;
+        }
+        for (qsizetype j = 1; j < a.size(); ++j) {
+            const QChar c = a.at(j);
+            if (kSshOptsWithValue.contains(c)) {
+                QString v;
+                if (j == a.size() - 1) {
+                    if (i + 1 >= extra.size()) {
+                        return false;
+                    }
+                    v = extra.at(++i);
+                } else {
+                    v = a.mid(j + 1);
+                }
+                out->append({c, v});
+                break;
+            }
+            out->append({c, QString()});
+        }
+    }
+    return true;
+}
+
+// "-o Key=Value" / "-o Key Value" / "-oKey = Value": ssh splits the keyword
+// at the first whitespace or '=' and matches it case-insensitively.
+std::pair<QString, QString> splitSshConfigOption(const QString &opt)
+{
+    const QString t = opt.trimmed();
+    qsizetype k = 0;
+    while (k < t.size() && !t.at(k).isSpace() && t.at(k) != QLatin1Char('=')) {
+        ++k;
+    }
+    const QString key = t.left(k).toLower();
+    QString rest = t.mid(k).trimmed();
+    if (rest.startsWith(QLatin1Char('='))) {
+        rest = rest.mid(1).trimmed();
+    }
+    if (rest.size() >= 2 && rest.startsWith(QLatin1Char('"')) && rest.endsWith(QLatin1Char('"'))) {
+        rest = rest.mid(1, rest.size() - 2);
+    }
+    return {key, rest};
+}
+
 QString expandTilde(const QString &path)
 {
     if (path == QLatin1String("~")) {
@@ -68,8 +125,196 @@ bool SessionConfig::operator==(const SessionConfig &o) const
         && lineDelayMs == o.lineDelayMs && breakMs == o.breakMs
         && useStoredPassword == o.useStoredPassword && loginUser == o.loginUser && autoLog == o.autoLog
         && keepaliveInterval == o.keepaliveInterval && keepaliveCountMax == o.keepaliveCountMax
-        && autoReconnect == o.autoReconnect
+        && autoReconnect == o.autoReconnect && approved == o.approved
         && fontFamily == o.fontFamily && fontSize == o.fontSize && colorScheme == o.colorScheme;
+}
+
+QString SshTarget::toString() const
+{
+    QString h = host;
+    if (h.contains(QLatin1Char(':')) && !h.startsWith(QLatin1Char('['))) {
+        h = QLatin1Char('[') + h + QLatin1Char(']'); // IPv6
+    }
+    return (user.isEmpty() ? QString() : user + QLatin1Char('@')) + h + QLatin1Char(':') + QString::number(port);
+}
+
+SshTarget effectiveSshTarget(const SessionConfig &s)
+{
+    SshTarget t;
+    t.user = s.user;
+    t.host = s.host;
+    t.port = s.port;
+    QList<SshOpt> opts;
+    if (!parseSshOptions(QProcess::splitCommand(s.extraArgs), &opts)) {
+        return t; // buildSshCommand refuses these anyway
+    }
+    // First value wins (ssh semantics); the extra arguments precede the fields.
+    bool haveUser = false;
+    bool havePort = false;
+    bool haveHost = false;
+    for (const SshOpt &o : opts) {
+        if (o.letter == QLatin1Char('l') && !haveUser) {
+            t.user = o.value;
+            haveUser = true;
+        } else if (o.letter == QLatin1Char('p') && !havePort) {
+            t.port = o.value.toInt();
+            havePort = true;
+        } else if (o.letter == QLatin1Char('o')) {
+            const auto [key, val] = splitSshConfigOption(o.value);
+            if (key == QLatin1String("user") && !haveUser) {
+                t.user = val;
+                haveUser = true;
+            } else if (key == QLatin1String("port") && !havePort) {
+                t.port = val.toInt();
+                havePort = true;
+            } else if (key == QLatin1String("hostname") && !haveHost) {
+                t.host = val;
+                haveHost = true;
+            }
+        }
+    }
+    return t;
+}
+
+QString vaultBindingFor(const SessionConfig &s)
+{
+    switch (s.type) {
+    case SessionConfig::Type::Ssh:
+        return QStringLiteral("ssh:") + effectiveSshTarget(s).toString();
+    case SessionConfig::Type::Serial:
+        return QStringLiteral("serial:") + s.serialDevice;
+    case SessionConfig::Type::LocalShell:
+        break;
+    }
+    return {};
+}
+
+QString validateImportedSession(const SessionConfig &s)
+{
+    if (s.type == SessionConfig::Type::Serial) {
+        return validateSerial(s);
+    }
+    if (s.type != SessionConfig::Type::Ssh) {
+        return {};
+    }
+    const SshCommand cmd = buildSshCommand(s); // host/user/jump/extra syntax
+    if (!cmd.ok()) {
+        return cmd.error;
+    }
+    QList<SshOpt> opts;
+    if (!parseSshOptions(QProcess::splitCommand(s.extraArgs), &opts)) {
+        return QStringLiteral("Extra arguments must be ssh options.");
+    }
+    auto refuse = [](const QString &what, const QString &why) {
+        return QStringLiteral("imported extra argument %1 is not allowed (%2).").arg(what, why);
+    };
+    for (const SshOpt &o : opts) {
+        const QString flag = QStringLiteral("-") + o.letter;
+        switch (o.letter.toLatin1()) {
+        case 'F':
+            return refuse(flag, QStringLiteral("loads another ssh config file"));
+        case 'E':
+            return refuse(flag, QStringLiteral("writes ssh's log to a file"));
+        case 'I':
+            return refuse(flag, QStringLiteral("loads a PKCS#11 library"));
+        case 'S':
+        case 'M':
+            return refuse(flag, QStringLiteral("connection sharing / control socket"));
+        case 'A':
+            return refuse(flag, QStringLiteral("forwards your ssh agent to the server"));
+        case 'Y':
+            return refuse(flag, QStringLiteral("trusted X11 forwarding gives the server your display"));
+        case 'J':
+            if (const QString e = validateJumpHost(o.value); !e.isEmpty()) {
+                return e;
+            }
+            break;
+        case 'o': {
+            const auto [key, val] = splitSshConfigOption(o.value);
+            const QString lv = val.toLower();
+            const QString shown = QStringLiteral("-o ") + key;
+            static const QStringList runsOrLoads{
+                QStringLiteral("proxycommand"),       QStringLiteral("localcommand"),
+                QStringLiteral("permitlocalcommand"), QStringLiteral("knownhostscommand"),
+                QStringLiteral("match"),              QStringLiteral("include"),
+                QStringLiteral("pkcs11provider"),     QStringLiteral("securitykeyprovider"),
+                QStringLiteral("remotecommand"),      QStringLiteral("controlpath"),
+                QStringLiteral("controlmaster"),      QStringLiteral("controlpersist"),
+                QStringLiteral("sendenv"),            QStringLiteral("hostname"),
+                QStringLiteral("forwardx11trusted"),
+            };
+            if (key.isEmpty()) {
+                return refuse(QStringLiteral("-o"), QStringLiteral("empty option"));
+            }
+            if (runsOrLoads.contains(key)) {
+                return refuse(shown, key == QLatin1String("hostname")
+                                         ? QStringLiteral("connects somewhere other than the Host field")
+                                         : QStringLiteral("runs a command, loads code or config, or shares connections"));
+            }
+            if (key == QLatin1String("forwardagent") && lv != QLatin1String("no")) {
+                return refuse(shown, QStringLiteral("forwards your ssh agent to the server"));
+            }
+            if (key == QLatin1String("stricthostkeychecking")
+                && (lv == QLatin1String("no") || lv == QLatin1String("off") || lv == QLatin1String("false"))) {
+                return refuse(shown + QLatin1Char('=') + val, QStringLiteral("disables host-key checking"));
+            }
+            if (key == QLatin1String("userknownhostsfile") || key == QLatin1String("globalknownhostsfile")) {
+                for (const QString &f : val.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+                    if (f == QLatin1String("/dev/null") || f.toLower() == QLatin1String("none")) {
+                        return refuse(shown + QLatin1Char('=') + val, QStringLiteral("disables host-key checking"));
+                    }
+                }
+            }
+            if (key == QLatin1String("proxyjump") && lv != QLatin1String("none")) {
+                if (const QString e = validateJumpHost(val); !e.isEmpty()) {
+                    return e;
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return {};
+}
+
+QStringList notableSessionSettings(const SessionConfig &s)
+{
+    QStringList out;
+    const SessionConfig d;
+    if (s.type == SessionConfig::Type::Ssh) {
+        out << QStringLiteral("connects to %1").arg(effectiveSshTarget(s).toString());
+        if (!s.jumpHost.isEmpty()) {
+            out << QStringLiteral("jump host: %1").arg(s.jumpHost);
+        }
+        if (!s.extraArgs.trimmed().isEmpty()) {
+            out << QStringLiteral("extra ssh options: %1").arg(s.extraArgs.trimmed());
+        }
+        if (!s.keyFile.isEmpty()) {
+            out << QStringLiteral("key file: %1").arg(s.keyFile);
+        }
+        if (s.keepaliveInterval != d.keepaliveInterval || s.keepaliveCountMax != d.keepaliveCountMax) {
+            out << QStringLiteral("keepalive: %1 s x %2").arg(s.keepaliveInterval).arg(s.keepaliveCountMax);
+        }
+    } else if (s.type == SessionConfig::Type::Serial) {
+        out << QStringLiteral("serial device: %1 at %2").arg(s.serialDevice).arg(s.baudRate);
+        if (!s.loginUser.isEmpty()) {
+            out << QStringLiteral("login user: %1").arg(s.loginUser);
+        }
+        if (s.charDelayMs || s.lineDelayMs) {
+            out << QStringLiteral("paste delays: %1 ms/char, %2 ms/line").arg(s.charDelayMs).arg(s.lineDelayMs);
+        }
+    } else {
+        out << QStringLiteral("local shell");
+    }
+    if (s.autoReconnect) {
+        out << QStringLiteral("reconnects automatically");
+    }
+    if (s.autoLog) {
+        out << QStringLiteral("starts logging automatically");
+    }
+    return out;
 }
 
 QString validateSessionName(const QString &name)
@@ -182,6 +427,11 @@ QString validateSerial(const SessionConfig &s)
     }
     if (s.breakMs < 10 || s.breakMs > 5000) {
         return QStringLiteral("Break duration must be 10-5000 ms.");
+    }
+    // The login user is typed into the device followed by Enter: a CR/LF or
+    // other control character in it would type further commands.
+    if (hasControlChars(s.loginUser)) {
+        return QStringLiteral("Login user must not contain control characters.");
     }
     return {};
 }

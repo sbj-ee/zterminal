@@ -75,6 +75,9 @@ public:
     // Read-modify-write under an flock: refresh, apply, write atomically.
     bool setSecret(const QString &key, SecureBuffer value);
     bool removeSecret(const QString &key);
+    // Several changes in one locked read-modify-write (one file write):
+    // remove every key in `remove`, then set every entry of `set`.
+    bool update(std::map<QString, SecureBuffer> set, const QStringList &remove = {});
     QStringList keys() const;
 
     // KDF parameters recorded in the current header (valid while unlocked).

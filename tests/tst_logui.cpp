@@ -11,6 +11,7 @@
 #include "SessionDialog.hpp"
 #include "SessionLog.hpp"
 #include "SessionStore.hpp"
+#include "VaultBindings.hpp"
 #include "SocatPair.hpp"
 #include "Terminal.hpp"
 #include "TerminalView.hpp"
@@ -321,7 +322,6 @@ private slots:
         vm.setPath(tmp.filePath(QStringLiteral("vault2/vault.bin")));
         QVERIFY(vm.vault().create(sb(kMaster)));
         vm.noteUnlocked();
-        QVERIFY(vm.vault().setSecret(QStringLiteral("serial-password/SG250 log"), sb("c1sc0-LOG-secret")));
         SessionConfig s;
         s.name = QStringLiteral("SG250 log");
         s.type = SessionConfig::Type::Serial;
@@ -329,6 +329,7 @@ private slots:
         s.loginUser = QStringLiteral("admin");
         s.autoLog = true;
         QVERIFY(store.save(s));
+        QVERIFY(vaultbind::storeSecret(vm.vault(), s, sb("c1sc0-LOG-secret")));
         MainWindow w(parseCommandLine({s.name}), {s.name});
         w.show();
         w.startSession();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Vault.hpp"
+#include "VaultBindings.hpp"
 
 #include <QObject>
 
@@ -53,10 +54,13 @@ public:
     // announced like any other, so every window's menu and timer follow.
     bool refresh();
 
-    // Called by the dialogs after a successful create/unlock/change.
+    // Called by the dialogs after a successful create/unlock/change. Also runs
+    // vaultbind::reconcile() against the saved sessions.
     void noteUnlocked();
 
     bool isDialogOpen() const { return m_dialogs > 0; }
+    // What the clean-up after the last unlock did (tests, diagnostics).
+    const vaultbind::ReconcileResult &lastReconcile() const { return m_lastReconcile; }
 
 signals:
     void lockedChanged(bool unlocked);
@@ -77,6 +81,7 @@ private:
     int m_testIntervalMs = 0;
     int m_dialogs = 0;
     bool m_announced = false; // lockedChanged(true) was the last state sent
+    vaultbind::ReconcileResult m_lastReconcile;
     friend struct DialogScope;
 };
 

@@ -10,6 +10,7 @@
 #include "SerialBackend.hpp"
 #include "SessionLog.hpp"
 #include "SessionStore.hpp"
+#include "VaultBindings.hpp"
 #include "SessionWidget.hpp"
 #include "SocatPair.hpp"
 #include "Terminal.hpp"
@@ -382,8 +383,7 @@ private slots:
             s.host = s.name + QStringLiteral(".example");
             s.useStoredPassword = true;
             QVERIFY(store.save(s));
-            QVERIFY(vm.vault().setSecret(QStringLiteral("ssh-password/") + s.name,
-                                         SecureBuffer::fromQString(QStringLiteral("pw-of-") + s.name)));
+            QVERIFY(vaultbind::storeSecret(vm.vault(), s, SecureBuffer::fromQString(QStringLiteral("pw-of-") + s.name)));
         }
         SocatPair cable;
         QVERIFY(cable.start());

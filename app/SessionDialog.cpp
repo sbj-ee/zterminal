@@ -3,10 +3,12 @@
 #include "SessionExport.hpp"
 
 #include "AppSettings.hpp"
+#include "ImportReviewDialog.hpp"
 #include "ColorScheme.hpp"
 #include "SecureBuffer.hpp"
 #include "SerialBackend.hpp"
 #include "Vault.hpp"
+#include "VaultBindings.hpp"
 #include "VaultManager.hpp"
 
 #include <QCheckBox>
@@ -87,7 +89,8 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     m_export->setObjectName(QStringLiteral("exportSessions"));
     m_import->setObjectName(QStringLiteral("importSessions"));
     m_export->setToolTip(QStringLiteral("Save all sessions to a JSON file (passwords are never exported)"));
-    m_import->setToolTip(QStringLiteral("Merge sessions from a previously exported JSON file"));
+    m_import->setToolTip(QStringLiteral("Merge sessions from an exported JSON file, after reviewing them "
+                                        "(no passwords; \"Use stored password\" is switched off on imported sessions)"));
     for (QPushButton *b : {m_export, m_import}) {
         b->setAutoDefault(false);
         ioButtons->addWidget(b);
@@ -531,6 +534,9 @@ bool SessionDialog::loadSelected()
         return false;
     }
     setConfig(*s);
+    if (!s->approved) {
+        setError(QStringLiteral("Imported session, not approved yet: check every setting, then press Save to approve it."));
+    }
     return true;
 }
 
@@ -566,21 +572,19 @@ bool SessionDialog::saveCurrent()
 bool SessionDialog::storeSecrets(const SessionConfig &c)
 {
     QLineEdit *field = nullptr;
-    QString key;
     if (c.type == SessionConfig::Type::Ssh) {
         field = m_sshPassword;
-        key = Vault::secretKeyFor(QStringLiteral("ssh-password"), c.name);
     } else if (c.type == SessionConfig::Type::Serial) {
         field = m_loginPassword;
-        key = Vault::secretKeyFor(QStringLiteral("serial-password"), c.name);
     } else {
         return true;
     }
+    const QString key = vaultbind::secretKeyFor(c);
     VaultManager &vm = VaultManager::instance();
     if (c.type == SessionConfig::Type::Ssh && !c.useStoredPassword) {
         // Unticked: forget a stored password if the vault is open (don't prompt just for this).
         if (vm.isUnlocked() && vm.vault().secret(key)) {
-            vm.vault().removeSecret(key);
+            vm.vault().update({}, {key, vaultbind::bindingKey(key)});
         }
         field->clear();
         return true;
@@ -595,7 +599,9 @@ bool SessionDialog::storeSecrets(const SessionConfig &c)
     }
     SecureBuffer secret = SecureBuffer::fromQString(field->text());
     field->clear();
-    if (!vm.vault().setSecret(key, std::move(secret))) {
+    // Stored together with the target it is for (vaultBindingFor): the
+    // password is only ever sent to this user@host:port / serial device.
+    if (!vaultbind::storeSecret(vm.vault(), c, std::move(secret))) {
         setError(QStringLiteral("Session saved, but storing its password failed: %1").arg(vm.vault().lastError()));
         if (!vm.vault().isUnlocked()) {
             vm.lock(); // setSecret's refresh locked it: announce it app-wide
@@ -613,15 +619,21 @@ bool SessionDialog::deleteSelected()
         return false;
     }
     const QString name = item->text();
+    const std::optional<SessionConfig> old = m_store.load(name);
     if (!m_store.remove(name)) {
         setError(QStringLiteral("Can't delete \"%1\".").arg(name));
         return false;
     }
-    // Forget its stored passwords too when the vault is open.
+    // Forget its stored passwords too: now if the vault is open, otherwise at
+    // the next unlock (a secret must not outlive its session and be picked up
+    // by a future session with the same name).
     VaultManager &vm = VaultManager::instance();
     if (vm.isUnlocked()) {
-        vm.vault().removeSecret(Vault::secretKeyFor(QStringLiteral("ssh-password"), name));
-        vm.vault().removeSecret(Vault::secretKeyFor(QStringLiteral("serial-password"), name));
+        vaultbind::forget(vm.vault(), name);
+    } else if (vm.exists()) {
+        SessionConfig gone = old.value_or(SessionConfig{});
+        gone.name = name;
+        vaultbind::queueDeletion(vm.vault(), gone);
     }
     setError({});
     refreshList();
@@ -669,7 +681,11 @@ bool SessionDialog::importSessions()
         setError(QStringLiteral("Can't read %1: %2").arg(path, f.errorString()));
         return false;
     }
-    const QByteArray bytes = f.readAll();
+    return importSessionsFromBytes(f.readAll());
+}
+
+bool SessionDialog::importSessionsFromBytes(const QByteArray &bytes)
+{
     QString parseErr;
     const auto doc = sessionsFromExportJson(bytes, &parseErr);
     if (!doc) {
@@ -693,7 +709,7 @@ bool SessionDialog::importSessions()
             this, QStringLiteral("Import Sessions"),
             QStringLiteral("%1 of %2 session(s) already exist. Overwrite them?\n\n"
                            "Yes replaces matching names; No keeps existing ones and only "
-                           "adds new names; Cancel aborts.")
+                           "adds new names; Cancel aborts. You can review everything before it is saved.")
                 .arg(conflicts)
                 .arg(doc->sessions.size()),
             QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Cancel);
@@ -704,22 +720,42 @@ bool SessionDialog::importSessions()
                                               : SessionImportConflict::Skip;
     }
 
+    // Review: nothing is written unless the user approves what they see.
+    QList<ImportReviewDialog::Entry> entries;
+    for (const SessionConfig &s : doc->sessions) {
+        ImportReviewDialog::Entry e;
+        e.session = s;
+        e.replaces = m_store.contains(s.name);
+        e.skipped = e.replaces && policy == SessionImportConflict::Skip;
+        e.refusal = validateImportedSession(s);
+        entries << e;
+    }
+    ImportReviewDialog review(entries, this);
+    if (review.exec() != QDialog::Accepted || review.importableCount() == 0) {
+        setError(QStringLiteral("Import cancelled; nothing was changed."));
+        return false;
+    }
+
     QString err;
-    const SessionImportResult r = importSessionsFromJson(m_store, bytes, policy, &err);
+    const SessionImportResult r = importSessionsFromJson(m_store, bytes, policy, &err, ImportApproval::Approved);
     if (!err.isEmpty() && r.imported == 0 && r.overwritten == 0 && r.skipped == 0) {
         setError(err);
         return false;
     }
     refreshList();
     setError({});
-    QString msg = QStringLiteral("Imported %1, overwritten %2, skipped %3.")
+    QString msg = QStringLiteral("Imported %1, overwritten %2, skipped %3, refused %4.")
                       .arg(r.imported)
                       .arg(r.overwritten)
-                      .arg(r.skipped);
+                      .arg(r.skipped)
+                      .arg(r.rejected);
     if (!r.errors.isEmpty()) {
-        msg += QStringLiteral("\n\nSome sessions failed:\n") + r.errors.join(QLatin1Char('\n'));
+        msg += QStringLiteral("\n\nNot imported:\n") + r.errors.join(QLatin1Char('\n'));
     }
-    msg += QStringLiteral("\n\nPasswords are never imported; re-enter them under Save if needed.");
+    msg += QStringLiteral("\n\nThe file contained no passwords. \"Use stored password\" is now off on every imported "
+                          "or replaced session, so a password already in your vault is not sent to an imported "
+                          "host. To use one, tick it in the session and re-enter the password; stored passwords "
+                          "only work for the host they were saved for.");
     QMessageBox::information(this, QStringLiteral("Import Sessions"), msg);
     return true;
 }
@@ -727,6 +763,15 @@ bool SessionDialog::importSessions()
 bool SessionDialog::openSession()
 {
     const SessionConfig c = config();
+    if (const auto stored = c.name.isEmpty() ? std::nullopt : m_store.load(c.name); stored && !stored->approved) {
+        SessionConfig reviewed = *stored;
+        reviewed.approved = true;
+        if (reviewed == c) {
+            setError(QStringLiteral("\"%1\" was imported and hasn't been approved yet. Check its settings and "
+                                    "press Save to approve it, then Open.").arg(c.name));
+            return false;
+        }
+    }
     if (!m_sshPassword->text().isEmpty() || !m_loginPassword->text().isEmpty()) {
         setError(QStringLiteral("Press Save to store the password in the vault first (Open never stores it)."));
         return false;

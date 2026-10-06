@@ -51,7 +51,8 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   Session INI files never store passwords. **Export / Import Sessions**
   (File menu or the session dialog) writes re-importable JSON
   (`format: zterminal-sessions`); vault passwords are never included — only a
-  `passwordStored` flag for SSH.
+  `passwordStored` flag for SSH, which import ignores. See
+  [Importing sessions](#importing-sessions).
 - **Password vault:** optional, Argon2id + XChaCha20-Poly1305 (libsodium) in
   `~/.config/zterminal/vault.bin`. Per SSH session, “Use stored password” answers
   ssh’s first password prompt via `SSH_ASKPASS`; per serial session,
@@ -167,6 +168,30 @@ Host, user and jump host are validated (no leading `-`, no spaces or shell
 characters); the host always follows `--` on the ssh argv. `authFromVault=true`
 is the only password-related flag ever written to the session file.
 
+## Importing sessions
+
+An import file is treated as untrusted input:
+
+- **Review first.** Every session in the file is listed with its real target,
+  jump host, extra ssh options and other non-default settings, and which
+  saved sessions it would replace. Nothing is written until you press
+  **Import**. Sessions imported without that review (only possible through the
+  API) are marked unapproved and won't launch until you open them in the
+  session dialog and press **Save**.
+- **Refused options.** Sessions whose extra ssh options run local commands,
+  load other config files or libraries, defeat host-key checking or forward
+  credentials are refused: `ProxyCommand`, `LocalCommand`,
+  `PermitLocalCommand`, `KnownHostsCommand`, `Match`, `Include`,
+  `PKCS11Provider`, `SecurityKeyProvider`, `RemoteCommand`, `ControlPath`,
+  `ControlMaster`, `ControlPersist`, `SendEnv`, `HostName`, `ForwardAgent`,
+  `ForwardX11Trusted`, `StrictHostKeyChecking=no/off`,
+  `User/GlobalKnownHostsFile=/dev/null`, and `-F -E -I -S -M -A -Y`. Keys
+  match case-insensitively in every `-o` spelling (`-oKey=v`, `-o Key=v`,
+  `-o "Key v"`, clusters such as `-4oKey=v`). You can still add such options
+  by hand to a session you create yourself.
+- **No stored passwords.** “Use stored password” is switched off on every
+  imported or replaced session.
+
 ## Password vault
 
 Prefer SSH keys with `ssh-agent`; the vault is for devices where you must use a
@@ -177,6 +202,17 @@ recovery: if you forget the master password, the stored passwords are lost.**
   to the vault, never the session file. ssh calls `zterminal-askpass`
   (`SSH_ASKPASS_REQUIRE=force`) over a private one-shot Unix socket.
 - **Serial:** set Login user / password, then Session → Send Stored Login.
+- **Bound to the target.** Each stored password remembers what it was saved
+  for (`user@host:port` as ssh will really use it, including `-l`, `-p`,
+  `-o User/Port/HostName` in the extra options; or the serial device). If the
+  session now points somewhere else (edited, or replaced by an import), the
+  password is not sent: zterminal asks, and only **Use It for …** re-binds it.
+  Passwords stored by 1.0.x are bound to their session's current target at
+  the first unlock after upgrading.
+- **Clean-up.** Deleting a session forgets its stored password; if the vault is
+  locked, the deletion is queued (`vault.bin.pending-deletions`, names only)
+  and done at the next unlock, which also removes passwords whose session no
+  longer exists.
 - **One unlock per process:** tabs and windows opened from inside zterminal share
   the unlocked vault. Lock with Ctrl+Shift+L (or idle auto-lock, default 15 min).
 

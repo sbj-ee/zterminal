@@ -15,6 +15,7 @@ add_library(zterminal_core STATIC
   SerialBackend.cpp SerialBackend.hpp
   SecureBuffer.cpp SecureBuffer.hpp
   Vault.cpp Vault.hpp
+  VaultBindings.cpp VaultBindings.hpp
   AskpassServer.cpp AskpassServer.hpp
   LogTextFilter.cpp LogTextFilter.hpp
   SessionLog.cpp SessionLog.hpp

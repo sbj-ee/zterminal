@@ -399,8 +399,14 @@ private slots:
         SessionStore dest(dir.filePath(QStringLiteral("imported")));
         QVERIFY2(importSessionsFromFile(dest, path, SessionImportConflict::Overwrite, &err), qPrintable(err));
         QCOMPARE(dest.names().size(), 2);
-        QCOMPARE(*dest.load(a.name), a);
-        QCOMPARE(*dest.load(b.name), b);
+        // Imported: stored-password use switched off, not approved until reviewed.
+        SessionConfig ai = a;
+        ai.useStoredPassword = false;
+        ai.approved = false;
+        SessionConfig bi = b;
+        bi.approved = false;
+        QCOMPARE(*dest.load(a.name), ai);
+        QCOMPARE(*dest.load(b.name), bi);
 
         // Skip policy leaves an existing session alone.
         SessionConfig changed = a;
@@ -415,6 +421,214 @@ private slots:
         const auto r2 = importSessionsFromJson(dest, bytes, SessionImportConflict::Overwrite, &err);
         QCOMPARE(r2.overwritten, 2);
         QCOMPARE(dest.load(a.name)->host, a.host);
+    }
+
+    // ---- Import hardening (review items 1 and 2) ---------------------------
+    static SessionConfig importedSsh(const QString &extra)
+    {
+        SessionConfig s;
+        s.name = QStringLiteral("imp");
+        s.type = SessionConfig::Type::Ssh;
+        s.host = QStringLiteral("core-sw1");
+        s.user = QStringLiteral("admin");
+        s.extraArgs = extra;
+        return s;
+    }
+
+    void importBlocksDangerousOptions_data()
+    {
+        QTest::addColumn<QString>("extra");
+        // Each key in the -oKey=val form, the -o "Key val" form, and other spellings.
+        const QList<QPair<QString, QString>> keys{
+            {QStringLiteral("ProxyCommand"), QStringLiteral("nc evil 22")},
+            {QStringLiteral("LocalCommand"), QStringLiteral("touch /tmp/pwned")},
+            {QStringLiteral("PermitLocalCommand"), QStringLiteral("yes")},
+            {QStringLiteral("KnownHostsCommand"), QStringLiteral("/bin/sh -c id")},
+            {QStringLiteral("Match"), QStringLiteral("exec \"touch /tmp/x\"")},
+            {QStringLiteral("Include"), QStringLiteral("/tmp/evil.conf")},
+            {QStringLiteral("PKCS11Provider"), QStringLiteral("/tmp/evil.so")},
+            {QStringLiteral("SecurityKeyProvider"), QStringLiteral("/tmp/evil.so")},
+            {QStringLiteral("RemoteCommand"), QStringLiteral("rm -rf ~")},
+            {QStringLiteral("ControlPath"), QStringLiteral("/tmp/sock")},
+            {QStringLiteral("ControlMaster"), QStringLiteral("auto")},
+            {QStringLiteral("SendEnv"), QStringLiteral("*")},
+            {QStringLiteral("HostName"), QStringLiteral("evil.example")},
+            {QStringLiteral("ForwardAgent"), QStringLiteral("yes")},
+            {QStringLiteral("ForwardX11Trusted"), QStringLiteral("yes")},
+            {QStringLiteral("StrictHostKeyChecking"), QStringLiteral("no")},
+            {QStringLiteral("StrictHostKeyChecking"), QStringLiteral("off")},
+            {QStringLiteral("UserKnownHostsFile"), QStringLiteral("/dev/null")},
+            {QStringLiteral("GlobalKnownHostsFile"), QStringLiteral("/dev/null")},
+            {QStringLiteral("ProxyJump"), QStringLiteral("-oProxyCommand=x")},
+        };
+        for (const auto &[k, v] : keys) {
+            const QString q = v.contains(QLatin1Char(' ')) ? QStringLiteral("\"%1\"").arg(v) : v;
+            QTest::addRow("%s -oK=v", qPrintable(k)) << QStringLiteral("-o%1=%2").arg(k, q);
+            QTest::addRow("%s -o K=v", qPrintable(k)) << QStringLiteral("-o %1=%2").arg(k, q);
+            QTest::addRow("%s -o 'K v'", qPrintable(k)) << QStringLiteral("-o \"%1 %2\"").arg(k, v.contains(QLatin1Char('"')) ? QStringLiteral("x") : v);
+            QTest::addRow("%s lower", qPrintable(k)) << QStringLiteral("-o %1=%2").arg(k.toLower(), q);
+            QTest::addRow("%s upper cluster", qPrintable(k)) << QStringLiteral("-4Co%1=%2").arg(k.toUpper(), q);
+        }
+        QTest::newRow("-F") << QStringLiteral("-F /tmp/evil_config");
+        QTest::newRow("-Fattached") << QStringLiteral("-F/tmp/evil_config");
+        QTest::newRow("-E") << QStringLiteral("-E /tmp/log");
+        QTest::newRow("-I") << QStringLiteral("-I /tmp/evil.so");
+        QTest::newRow("-S") << QStringLiteral("-S /tmp/sock");
+        QTest::newRow("-M") << QStringLiteral("-M");
+        QTest::newRow("-A") << QStringLiteral("-A");
+        QTest::newRow("-Y") << QStringLiteral("-Y");
+        QTest::newRow("-4A cluster") << QStringLiteral("-4A");
+        QTest::newRow("-J injection") << QStringLiteral("-J -oProxyCommand=x");
+    }
+
+    void importBlocksDangerousOptions()
+    {
+        QFETCH(QString, extra);
+        const SessionConfig s = importedSsh(extra);
+        QVERIFY2(!validateImportedSession(s).isEmpty(), qPrintable(extra));
+        // ...and the import itself refuses it.
+        QTemporaryDir dir;
+        SessionStore store(dir.filePath(QStringLiteral("s")));
+        QString err;
+        const auto r = importSessionsFromJson(store, sessionsToExportJson({s}), SessionImportConflict::Overwrite, &err);
+        QCOMPARE(r.rejected, 1);
+        QCOMPARE(r.imported, 0);
+        QVERIFY(!store.contains(s.name));
+    }
+
+    void importAllowsBenignOptions_data()
+    {
+        QTest::addColumn<QString>("extra");
+        QTest::newRow("-4") << QStringLiteral("-4");
+        QTest::newRow("-C") << QStringLiteral("-C");
+        QTest::newRow("-4C") << QStringLiteral("-4C");
+        QTest::newRow("-v -C") << QStringLiteral("-v -C");
+        QTest::newRow("ServerAlive") << QStringLiteral("-o ServerAliveInterval=30");
+        QTest::newRow("accept-new") << QStringLiteral("-o StrictHostKeyChecking=accept-new");
+        QTest::newRow("strict yes") << QStringLiteral("-oStrictHostKeyChecking=yes");
+        QTest::newRow("known hosts file") << QStringLiteral("-o UserKnownHostsFile=~/.ssh/known_hosts_lab");
+        QTest::newRow("ForwardAgent no") << QStringLiteral("-o ForwardAgent=no");
+        QTest::newRow("ciphers") << QStringLiteral("-c aes256-gcm@openssh.com -m hmac-sha2-256");
+        QTest::newRow("legacy kex") << QStringLiteral("-o KexAlgorithms=+diffie-hellman-group14-sha1 -o HostKeyAlgorithms=+ssh-rsa");
+        QTest::newRow("forward") << QStringLiteral("-L 8080:localhost:80");
+        QTest::newRow("-J ok") << QStringLiteral("-J sbj@vertex:22");
+        QTest::newRow("ProxyJump ok") << QStringLiteral("-o ProxyJump=sbj@vertex");
+        QTest::newRow("ProxyJump none") << QStringLiteral("-o ProxyJump=none");
+    }
+
+    void importAllowsBenignOptions()
+    {
+        QFETCH(QString, extra);
+        const SessionConfig s = importedSsh(extra);
+        QVERIFY2(validateImportedSession(s).isEmpty(), qPrintable(validateImportedSession(s)));
+    }
+
+    void importValidatesTargetFields_data()
+    {
+        QTest::addColumn<QString>("field");
+        QTest::addColumn<QString>("value");
+        QTest::newRow("host -o") << "host" << "-oProxyCommand=x";
+        QTest::newRow("host space") << "host" << "a b";
+        QTest::newRow("host ctrl") << "host" << "a\nb";
+        QTest::newRow("user -o") << "user" << "-oProxyCommand=x";
+        QTest::newRow("user space") << "user" << "ad min";
+        QTest::newRow("user ctrl") << "user" << "ad\tmin";
+        QTest::newRow("jump -o") << "jump" << "-oProxyCommand=x";
+        QTest::newRow("jump space") << "jump" << "a b";
+        QTest::newRow("jump hop -") << "jump" << "ok,-oProxyCommand=x";
+        QTest::newRow("jump ctrl") << "jump" << "a\rb";
+    }
+
+    void importValidatesTargetFields()
+    {
+        QFETCH(QString, field);
+        QFETCH(QString, value);
+        SessionConfig s = importedSsh(QString());
+        if (field == QLatin1String("host")) {
+            s.host = value;
+        } else if (field == QLatin1String("user")) {
+            s.user = value;
+        } else {
+            s.jumpHost = value;
+        }
+        QVERIFY(!validateImportedSession(s).isEmpty());
+        QVERIFY(!buildSshCommand(s).ok());
+    }
+
+    void destinationFollowsDoubleDash()
+    {
+        const SshCommand c = buildSshCommand(importedSsh(QStringLiteral("-4")));
+        QVERIFY(c.ok());
+        QCOMPARE(c.args.at(c.args.size() - 2), QStringLiteral("--"));
+        QCOMPARE(c.args.last(), QStringLiteral("core-sw1"));
+    }
+
+    void serialLoginUserRejectsControlChars()
+    {
+        SessionConfig s;
+        s.name = QStringLiteral("con");
+        s.type = SessionConfig::Type::Serial;
+        s.serialDevice = QStringLiteral("/dev/ttyUSB0");
+        s.loginUser = QStringLiteral("admin");
+        QVERIFY(validateSerial(s).isEmpty());
+        s.loginUser = QStringLiteral("admin\rreload\r");
+        QVERIFY(!validateSerial(s).isEmpty());
+        QVERIFY(!validateImportedSession(s).isEmpty());
+    }
+
+    void importOverwriteClearsStoredPasswordAndNeedsApproval()
+    {
+        QTemporaryDir dir;
+        SessionStore store(dir.filePath(QStringLiteral("s")));
+        SessionConfig mine = importedSsh(QString());
+        mine.name = QStringLiteral("core-sw1");
+        mine.useStoredPassword = true;
+        QVERIFY(store.save(mine));
+        QVERIFY(store.load(mine.name)->approved);
+
+        SessionConfig evil = mine;
+        evil.host = QStringLiteral("evil.example");
+        evil.useStoredPassword = true; // the file asks for the stored password
+        const QByteArray json = sessionsToExportJson({evil});
+        QVERIFY(json.contains("\"passwordStored\": true"));
+        QString err;
+        const auto r = importSessionsFromJson(store, json, SessionImportConflict::Overwrite, &err);
+        QCOMPARE(r.overwritten, 1);
+        const SessionConfig now = *store.load(mine.name);
+        QCOMPARE(now.host, QStringLiteral("evil.example"));
+        QVERIFY(!now.useStoredPassword);
+        QVERIFY(!now.approved);
+        // The INI file records it; files written before this existed have no key (approved).
+        QVERIFY(QSettings(store.filePathFor(mine.name), QSettings::IniFormat).contains(QStringLiteral("session/approved")));
+
+        // The review dialog's approval saves them approved (still no stored password).
+        const auto r2 = importSessionsFromJson(store, json, SessionImportConflict::Overwrite, &err, ImportApproval::Approved);
+        QCOMPARE(r2.overwritten, 1);
+        QVERIFY(store.load(mine.name)->approved);
+        QVERIFY(!store.load(mine.name)->useStoredPassword);
+        // The binding of the overwritten session differs from the original one.
+        QVERIFY(vaultBindingFor(mine) != vaultBindingFor(*store.load(mine.name)));
+    }
+
+    void effectiveTargetAndBinding()
+    {
+        SessionConfig s = importedSsh(QString());
+        QCOMPARE(vaultBindingFor(s), QStringLiteral("ssh:admin@core-sw1:22"));
+        s.port = 2222;
+        QCOMPARE(vaultBindingFor(s), QStringLiteral("ssh:admin@core-sw1:2222"));
+        // Extra options come first on ssh's command line, so they win.
+        s.extraArgs = QStringLiteral("-o HostName=10.9.9.9 -l root -oPort=2200");
+        QCOMPARE(effectiveSshTarget(s).toString(), QStringLiteral("root@10.9.9.9:2200"));
+        s.extraArgs = QStringLiteral("-p 23 -o Port=24");
+        QCOMPARE(effectiveSshTarget(s).port, 23);
+        s.extraArgs.clear();
+        s.user.clear();
+        s.host = QStringLiteral("fe80::1");
+        QCOMPARE(vaultBindingFor(s), QStringLiteral("ssh:[fe80::1]:2222"));
+        SessionConfig ser;
+        ser.type = SessionConfig::Type::Serial;
+        ser.serialDevice = QStringLiteral("/dev/ttyUSB0");
+        QCOMPARE(vaultBindingFor(ser), QStringLiteral("serial:/dev/ttyUSB0"));
     }
 
     void exportRejectsBadDocuments()

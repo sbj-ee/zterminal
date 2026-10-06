@@ -86,6 +86,9 @@ public:
     void cancelReconnect();
     // An ssh connection counts as back once it has stayed up this long.
     static void setReconnectStableMsForTests(int ms);
+    // Tests: answer the "stored password belongs to another target" prompt
+    // without showing it (1 = re-bind and use it, 0 = don't send it, -1 = ask).
+    static void setRebindAnswerForTests(int answer);
     // Edit > Find (Ctrl+Shift+F): this tab's find bar under the view.
     FindBar *findBar() const { return m_findBar; }
     void openFind();
@@ -130,6 +133,9 @@ private:
     void checkDeviceBack();
     void resetModesForReconnect();
     QStringList prepareStoredPasswordFor(bool mayPrompt);
+    // The vault entry for m_saved must be bound to its current target. On a
+    // mismatch (or an unbound secret) asks before re-binding, if allowed.
+    bool storedPasswordBindingOk(bool mayPrompt, const QString &what);
     void onSerialDisconnected(const QString &reason);
     void updatePasteBar(qint64 remaining);
     QStringList prepareStoredPassword();

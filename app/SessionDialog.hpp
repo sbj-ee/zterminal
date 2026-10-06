@@ -37,6 +37,9 @@ public:
     // Export/import all saved sessions as JSON (no vault secrets).
     bool exportSessions();
     bool importSessions();
+    // The import flow after the file is read: conflict question, review
+    // dialog (ImportReviewDialog, must be approved), then save. Public for tests.
+    bool importSessionsFromBytes(const QByteArray &bytes);
     // Validates; on success accept()s.
     bool openSession();
 
