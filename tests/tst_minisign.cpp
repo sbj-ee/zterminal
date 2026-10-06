@@ -2,6 +2,7 @@
 // tampering, wrong keys, malformed files.
 #include "Minisign.hpp"
 #include "MinisignTestSigner.hpp"
+#include "Update.hpp"
 
 #include <QFile>
 #include <QTest>
@@ -106,6 +107,19 @@ private slots:
         const MinisignResult r = verifyMinisign("x", sig, key);
         QVERIFY(!r.ok);
         QVERIFY(!r.error.isEmpty());
+    }
+
+    void compiledReleaseKeyIsValid()
+    {
+        // The key compiled into core/UpdateSigningKey.cpp must be a real
+        // minisign Ed25519 public key, or every in-app update is refused.
+        setUpdateSigningPublicKeyForTests(QString());
+        const QString key = updateSigningPublicKey();
+        QVERIFY2(!key.isEmpty(), "core/UpdateSigningKey.cpp has no release key");
+        QString error;
+        const auto parsed = MinisignPublicKey::parse(key, &error);
+        QVERIFY2(parsed.has_value(), qPrintable(error));
+        QCOMPARE(parsed->keyIdHex(), QStringLiteral("32960BBA77B36F1F"));
     }
 
     void badPublicKeys()

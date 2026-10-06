@@ -2,16 +2,14 @@
 // Not secret. Release builds refuse to install an update unless
 // SHA256SUMS.minisig verifies against this key.
 //
-// TODO(release key): paste the second line of minisign.pub (it starts with
-// "RW") between the quotes, once the key exists. See docs/RELEASING.md,
-// "Signing key". Until then, in-app Install is refused and users download
-// from the release page.
+// Release key ID 32960BBA77B36F1F (minisign -G, October 2026). To rotate it, see
+// docs/RELEASING.md, "Signing key".
 #include "Update.hpp"
 
 namespace zterminal {
 
 namespace {
-constexpr const char kUpdateSigningPublicKey[] = "";
+constexpr const char kUpdateSigningPublicKey[] = "RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9";
 
 QString &testKey()
 {
