@@ -6,8 +6,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Minor and patch updates arrive together in one PR, which merges itself
+    # once CI passes (dependabot-auto-merge.yml). A major update gets a PR of
+    # its own and waits for review.
     groups:
       actions:
         patterns: ["*"]
+        update-types: [minor, patch]
     commit-message:
       prefix: "ci"
