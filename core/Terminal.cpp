@@ -412,6 +412,15 @@ void Terminal::sendMouseButton(int button, bool pressed, VTermModifier mod)
     vterm_mouse_button(m_vt, button, pressed, mod);
 }
 
+void Terminal::sendFocus(bool focused)
+{
+    if (focused) {
+        vterm_state_focus_in(m_state);
+    } else {
+        vterm_state_focus_out(m_state);
+    }
+}
+
 namespace {
 bool isPasteControl(char32_t u)
 {

@@ -20,7 +20,7 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   validated argv (no shell). Serial uses QSerialPort (9600 8N1 by default).
 - **xterm-style emulation** via libvterm: 16 / 256 / truecolor, bold, italic,
   underline, reverse, strike, alternate screen, wide characters, bracketed paste,
-  and mouse modes 1000/1002/1003/1006.
+  mouse modes 1000/1002/1003/1006, and focus reporting (1004).
 - **Colour schemes:** xterm, PuTTY, Solarized Dark, and the brand themes
   **Boilermakers** (Purdue gold on black), **Badgers** (white on UW black, Badger
   Red accents) and **Packers** (white on Packers green, gold accents). Pick one in
@@ -122,7 +122,7 @@ filled in are in [docs/THEMES.md](docs/THEMES.md).
 ## Install
 
 Download the assets for [the latest release](https://github.com/sbj-ee/zterminal/releases/latest)
-(`zterminal_1.2.0_amd64.deb` or `zterminal-1.2.0-Darwin.dmg`, plus `SHA256SUMS`
+(`zterminal_<ver>_amd64.deb` or `zterminal-<ver>-Darwin.dmg`, plus `SHA256SUMS`
 and, from the first signed release on, `SHA256SUMS.minisig`).
 
 ```sh
@@ -135,7 +135,7 @@ shasum -a 256 -c --ignore-missing SHA256SUMS      # macOS
 **Linux:**
 
 ```sh
-sudo apt install ./zterminal_1.2.0_amd64.deb
+sudo apt install ./zterminal_*_amd64.deb
 # Serial consoles: sudo usermod -aG dialout $USER   # then log out and back in
 ```
 
