@@ -87,6 +87,23 @@ CI job **Fuzz** runs each harness for 60 s on a copy of `fuzz/corpus/` and
 uploads crashing inputs as an artifact. Add a minimised reproducer to
 `fuzz/corpus/<harness>/` and a unit test when you fix a finding.
 
+**Nightly** (`.github/workflows/fuzz-nightly.yml`): every harness runs for
+20 minutes, one job each, at 07:17 UTC. Each run starts from `fuzz/corpus/`
+plus the corpus the earlier nights found, which is minimised (`-merge=1`) and
+kept in the Actions cache, so coverage builds up from night to night instead
+of starting over. A crash fails that harness's job (GitHub emails the failure)
+and uploads the input as the artifact `fuzz-crashes-<harness>`; that night's
+corpus is not saved. To reproduce one, download the artifact and pass the file
+to a local fuzz build:
+
+    gh run download <run-id> -n fuzz-crashes-terminal -D /tmp/crash
+    QT_QPA_PLATFORM=offscreen build-fuzz/fuzz/fuzz_terminal /tmp/crash/terminal-crash-<hash>
+
+Run it by hand, optionally for longer, with
+`gh workflow run fuzz-nightly.yml -f minutes=120`. GitHub pauses scheduled
+workflows after 60 days without repository activity; re-enable it on the
+Actions tab if that happens.
+
 Bugs found so far, all fixed: thirteen in the bundled libvterm,
 listed in `third_party/libvterm/README.zterminal.md` with the tests that cover
 them. They include three remotely
