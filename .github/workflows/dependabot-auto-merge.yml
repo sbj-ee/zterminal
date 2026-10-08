@@ -1,7 +1,8 @@
-# Dependabot pull requests merge themselves once the required checks on main
-# pass. This job only switches on GitHub's auto-merge for the PR; the branch
-# protection on main is what holds the merge back until CI is green, so a
-# failing update just stays open.
+# Dependabot pull requests that carry only minor and patch updates merge
+# themselves once the required checks on main pass. This job only switches on
+# GitHub's auto-merge for the PR; the branch protection on main is what holds
+# the merge back until CI is green, so a failing update just stays open. A PR
+# with a major version bump is left for a person to review and merge.
 name: Dependabot auto-merge
 
 on:
@@ -22,8 +23,23 @@ jobs:
       contents: write # merge the PR
       pull-requests: write # enable auto-merge on it
     steps:
-      - name: Enable auto-merge
+      - name: Enable auto-merge unless a major version changes
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --merge "$PR_URL"
+        run: |
+          # Dependabot lists each dependency it updates, with the size of the
+          # step, in its commit message. Auto-merge needs every one of them to
+          # say minor or patch; anything else, or nothing at all, does not
+          # qualify.
+          body=$(gh pr view "$PR_URL" --json commits --jq '.commits[].messageBody')
+          total=$(grep -c '^- dependency-name: ' <<<"$body" || true)
+          small=$(grep -c -E '^  update-type: version-update:semver-(minor|patch)$' <<<"$body" || true)
+          echo "$small of $total updated dependencies are minor or patch"
+          if [ "$total" -gt 0 ] && [ "$small" -eq "$total" ]; then
+            gh pr merge --auto --merge "$PR_URL"
+          else
+            echo "::notice::Left for manual review: not every update is minor or patch."
+            # An earlier push of this PR may have qualified.
+            gh pr merge --disable-auto "$PR_URL" || true
+          fi

@@ -121,8 +121,10 @@ conversion of the release asset size.
 - Every action is pinned to a full commit SHA with the version in a comment.
   Dependabot (`.github/dependabot.yml`) proposes updates weekly.
 - `main` is protected: the five `ci.yml` jobs must pass on a branch that is up
-  to date with `main`, for administrators too. Dependabot's PRs merge
-  themselves once that holds (`.github/workflows/dependabot-auto-merge.yml`,
-  which uses no third-party action); a failing update stays open.
+  to date with `main`, for administrators too. Dependabot's minor and patch
+  updates merge themselves once that holds
+  (`.github/workflows/dependabot-auto-merge.yml`, which uses no third-party
+  action); a failing update stays open, and a major version bump comes as its
+  own PR and waits for review.
 - Releases carry signed SLSA build provenance for the .deb and .dmg:
   `gh attestation verify zterminal_<version>_amd64.deb -R sbj-ee/zterminal`.
