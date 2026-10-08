@@ -267,6 +267,30 @@ private slots:
         QApplication::sendEvent(w.view(), &ctrlShiftC);
         QVERIFY(!ctrlShiftC.isAccepted());
 
+#if defined(Q_OS_MACOS)
+        // macOS: Cmd+C / Cmd+V (Qt's Meta, see main.cpp) are app shortcuts too.
+        QVERIFY(w.action(QStringLiteral("copy"))->shortcuts().contains(QKeySequence(QStringLiteral("Meta+C"))));
+        QVERIFY(w.action(QStringLiteral("paste"))->shortcuts().contains(QKeySequence(QStringLiteral("Meta+V"))));
+        for (const Qt::Key key : {Qt::Key_C, Qt::Key_V}) {
+            QKeyEvent cmd(QEvent::ShortcutOverride, key, Qt::MetaModifier);
+            cmd.ignore();
+            QApplication::sendEvent(w.view(), &cmd);
+            QVERIFY(!cmd.isAccepted());
+        }
+        // Cmd+C copies the selection and sends nothing to the session.
+        QByteArray sent;
+        connect(w.terminal(), &Terminal::output, &w, [&sent](const QByteArray &b) { sent += b; });
+        w.terminal()->feed("\x1b[2J\x1b[Hcopy me");
+        w.action(QStringLiteral("selectAll"))->trigger();
+        QApplication::clipboard()->setText(QStringLiteral("stale"), QClipboard::Clipboard);
+        w.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&w));
+        w.view()->setFocus();
+        QTest::keyClick(w.view(), Qt::Key_C, Qt::MetaModifier);
+        QTRY_COMPARE(QApplication::clipboard()->text(QClipboard::Clipboard).trimmed(), QStringLiteral("copy me"));
+        QVERIFY(sent.isEmpty());
+#endif
+
         // Program title is appended after the session name.
         w.terminal()->feed("\x1b]2;vim foo.c\x07");
         QCOMPARE(w.windowTitle(), makeWindowTitle(QStringLiteral("local shell"), QStringLiteral("vim foo.c")));
