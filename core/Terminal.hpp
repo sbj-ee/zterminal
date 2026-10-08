@@ -108,6 +108,9 @@ public:
     void sendChar(uint32_t codepoint, VTermModifier mod);
     void sendMouseMove(int row, int col, VTermModifier mod);
     void sendMouseButton(int button, bool pressed, VTermModifier mod);
+    // The view gained or lost keyboard focus: sends ESC[I / ESC[O, but only
+    // while the program has focus reporting on (DECSET 1004).
+    void sendFocus(bool focused);
     // Paste: newline -> CR, wrapped in bracketed-paste markers when the program
     // enabled mode 2004. See preparePasteBytes() for what is removed.
     void paste(const QString &text);

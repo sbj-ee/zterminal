@@ -330,6 +330,27 @@ private slots:
         QApplication::sendEvent(&v, &e);
     }
 
+    void focusIsReportedOnlyWhenTheProgramAsks()
+    {
+        Fixture f;
+        focus(f.view, true);
+        focus(f.view, false);
+        QVERIFY(f.out.isEmpty()); // mode 1004 is off by default
+
+        f.term.feed("\x1b[?1004h");
+        focus(f.view, true);
+        QCOMPARE(f.out, QByteArray("\x1b[I"));
+        f.out.clear();
+        focus(f.view, false);
+        QCOMPARE(f.out, QByteArray("\x1b[O"));
+        f.out.clear();
+
+        f.term.feed("\x1b[?1004l");
+        focus(f.view, true);
+        focus(f.view, false);
+        QVERIFY(f.out.isEmpty());
+    }
+
     // Pixel of the rendered viewport inside cell (row, col), dx/dy from its top-left.
     static QRgb cellPixel(TerminalView &v, int row, int col, int dx, int dy)
     {
