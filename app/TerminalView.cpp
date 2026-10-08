@@ -504,6 +504,7 @@ bool TerminalView::focusNextPrevChild(bool)
 void TerminalView::focusInEvent(QFocusEvent *e)
 {
     m_focused = true;
+    m_term->sendFocus(true);
     updateBlink();
     viewport()->update();
     QAbstractScrollArea::focusInEvent(e);
@@ -512,6 +513,7 @@ void TerminalView::focusInEvent(QFocusEvent *e)
 void TerminalView::focusOutEvent(QFocusEvent *e)
 {
     m_focused = false;
+    m_term->sendFocus(false);
     updateBlink();
     viewport()->update();
     QAbstractScrollArea::focusOutEvent(e);
