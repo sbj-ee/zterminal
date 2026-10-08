@@ -8,6 +8,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # By hand, for a commit on main that got no push run: a Dependabot PR that
+  # merged itself (dependabot-auto-merge.yml) does not start one.
+  workflow_dispatch:
 
 permissions:
   contents: read
