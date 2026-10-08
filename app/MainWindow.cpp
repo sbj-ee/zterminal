@@ -169,10 +169,17 @@ void MainWindow::buildMenus()
 
     // Edit
     QMenu *edit = menuBar()->addMenu(QStringLiteral("&Edit"));
-    connect(addAct(edit, QStringLiteral("copy"), QStringLiteral("&Copy"), QKS(QStringLiteral("Ctrl+Shift+C"))),
-            &QAction::triggered, this, [this]() { view()->copySelection(); });
-    connect(addAct(edit, QStringLiteral("paste"), QStringLiteral("&Paste"), QKS(QStringLiteral("Ctrl+Shift+V"))),
-            &QAction::triggered, this, [this]() { view()->pasteClipboard(); });
+    QAction *copy = addAct(edit, QStringLiteral("copy"), QStringLiteral("&Copy"), QKS(QStringLiteral("Ctrl+Shift+C")));
+    connect(copy, &QAction::triggered, this, [this]() { view()->copySelection(); });
+    QAction *paste = addAct(edit, QStringLiteral("paste"), QStringLiteral("&Paste"), QKS(QStringLiteral("Ctrl+Shift+V")));
+    connect(paste, &QAction::triggered, this, [this]() { view()->pasteClipboard(); });
+#if defined(Q_OS_MACOS)
+    // ⌘C / ⌘V as well, as every Mac app has them. With
+    // AA_MacDontSwapCtrlAndMeta (main.cpp) the Command key is Qt's Meta, so
+    // plain Ctrl+C / Ctrl+V still go to the session.
+    copy->setShortcuts({copy->shortcut(), QKS(QStringLiteral("Meta+C"))});
+    paste->setShortcuts({paste->shortcut(), QKS(QStringLiteral("Meta+V"))});
+#endif
     connect(addAct(edit, QStringLiteral("pastePrimary"), QStringLiteral("Paste P&rimary"),
                    QKS(QStringLiteral("Shift+Insert"))),
             &QAction::triggered, this, [this]() { view()->pastePrimary(); });

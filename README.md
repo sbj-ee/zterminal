@@ -46,7 +46,7 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   select or paste when a program has grabbed the mouse.
 - **App shortcuts** use Ctrl+Shift+… (Copy Ctrl+Shift+C, Paste Ctrl+Shift+V, …)
   plus F11 and Shift+Insert, so plain Ctrl+C / Ctrl+W and the F-keys still reach
-  the program.
+  the program. On macOS, ⌘C and ⌘V copy and paste as well.
 - **Saved sessions** (File → New / Open / Save Session): local, SSH, or serial.
   Session INI files never store passwords. **Export / Import Sessions**
   (File menu or the session dialog) writes re-importable JSON
@@ -269,9 +269,9 @@ what you type.
 ## Copy and paste
 
 Selecting copies (PRIMARY, and CLIPBOARD unless turned off); right-click pastes
-CLIPBOARD; Ctrl+Shift+C/V also work. A paste that contains a line break asks
-first (**Paste N lines?**); Cancel is the default. Single-line pastes go
-straight through. Bracketed paste is honored when the program enabled it.
+CLIPBOARD; Ctrl+Shift+C/V also work, and so do ⌘C/⌘V on macOS. A paste that
+contains a line break asks first (**Paste N lines?**); Cancel is the default.
+Single-line pastes go straight through. Bracketed paste is honored when the program enabled it.
 Pasted text never carries control characters: ESC, the other C0 controls
 (except tab and line breaks), DEL and C1 are removed before sending, so a
 paste can't end a bracketed paste early, inject escape sequences or send
