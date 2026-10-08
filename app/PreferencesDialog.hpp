@@ -21,6 +21,7 @@ class PreferencesDialog : public QDialog
     Q_OBJECT
 public:
     explicit PreferencesDialog(const AppSettings &current, QWidget *parent = nullptr);
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): the dialog's settings, not QDialog's result code
     AppSettings result() const;
 
 signals:

@@ -106,6 +106,9 @@ SecureBuffer SecureBuffer::fromQString(QStringView s)
         n += lengthOf(codePointAt(i));
     }
     SecureBuffer out(n);
+    if (n == 0) {
+        return out; // empty string: no buffer to fill
+    }
     unsigned char *p = out.data();
     for (qsizetype i = 0; i < s.size(); ++i) {
         const char32_t cp = codePointAt(i);

@@ -30,8 +30,9 @@ jobs:
             qt6-base-dev qt6-qpa-plugins libgl1-mesa-dev cmake ninja-build g++ dpkg-dev fonts-dejavu-core \
             xvfb xauth dbus qt6-serialport-dev socat libsodium-dev pkg-config
 
+      # ZTERMINAL_WERROR: a new compiler warning fails CI (off for local builds).
       - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DZTERMINAL_WERROR=ON
 
       - name: Build
         run: cmake --build build
@@ -91,6 +92,7 @@ jobs:
           # CMAKE_OSX_ARCHITECTURES=arm64 is also forced in CMakeLists before project()
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DZTERMINAL_WERROR=ON \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
@@ -186,6 +188,33 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/sanitizers/lsan.supp:print_suppressions=0
         run: ctest --test-dir build --output-on-failure
+
+  clang-tidy:
+    name: clang-tidy (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Qt 6 + clang-tidy
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qt6-base-dev libgl1-mesa-dev cmake ninja-build clang clang-tidy qt6-serialport-dev libsodium-dev pkg-config
+          clang-tidy --version
+
+      - name: Configure (clang, compile_commands.json)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DZTERMINAL_BUILD_TESTS=OFF
+
+      # The analysis needs the generated headers (moc output, version.hpp).
+      - name: Build
+        run: cmake --build build
+
+      # Checks and suppressions are in .clang-tidy; any finding fails the job.
+      - name: Run clang-tidy on core/, app/ and askpass/
+        run: run-clang-tidy -quiet -p build "$PWD/(core|app|askpass)/.*\.(cpp|c)$"
 
   fuzz:
     name: Fuzz (libFuzzer, 60 s per harness)

@@ -32,6 +32,7 @@ public:
     FindBar(Terminal *term, TerminalView *view, QWidget *parent = nullptr);
 
     void open();   // show, focus the text, select it, search
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): replaces QWidget::close() on purpose
     void close();  // hide, drop highlights
     void findNext();     // older
     void findPrevious(); // newer
