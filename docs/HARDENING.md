@@ -68,8 +68,9 @@ CI job **Fuzz** runs each harness for 60 s on a copy of `fuzz/corpus/` and
 uploads crashing inputs as an artifact. Add a minimised reproducer to
 `fuzz/corpus/<harness>/` and a unit test when you fix a finding.
 
-Bugs found so far, all fixed and with a test: ten in the bundled libvterm,
-listed in `third_party/libvterm/README.zterminal.md`. They include two remotely
+Bugs found so far, all fixed: thirteen in the bundled libvterm,
+listed in `third_party/libvterm/README.zterminal.md` with the tests that cover
+them. They include three remotely
 triggerable heap overflows, an out-of-bounds read, a length underflow, a hang,
 an `abort()` and a negative-size `memmove`. Also: an unbounded entry count in
 the vault parser (memory exhaustion) and an undefined double-to-integer

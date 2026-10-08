@@ -1,10 +1,18 @@
-# zterminal: plan (draft for Stephen's approval)
+# zterminal: design notes (original plan)
 
-> Status: **approved by Stephen, 2026-10-03 6:49 PM CT.** Repo: `sbj-ee/zterminal` (public, MIT). The original planning mockup is [`mockup.png`](mockup.png) (a static drawing, not a build).
+> **This is the original plan, kept as design notes.** It was approved by Stephen on 2026-10-03 6:49 PM CT and updated as features landed, but it is not the reference for current behaviour: the [README](../README.md) is. Where the two disagree, the README is right.
+>
+> **Changed since the plan was approved:**
+> - **macOS Apple Silicon is supported** (added 2026-10-05; `.app` bundle and `.dmg`, built and tested in CI). The plan said Linux amd64 only; decisions 1 and 9 in §8 are superseded.
+> - **Releases are signed.** `SHA256SUMS` carries a minisign signature that the updater requires (releases after 1.0.x; see §7 and [RELEASING.md](RELEASING.md)). The plan listed this under "Later".
+> - **Theme editor and brand themes** (Boilermakers, Badgers, Packers) were added; see [THEMES.md](THEMES.md). Solarized Light, listed in §2, is not a built-in scheme.
+> - **Not built yet, although §2 and M6 describe them:** the OSC 52 clipboard option and the vttest/esctest conformance baseline.
+>
+> Repo: `sbj-ee/zterminal` (public, MIT). The original planning mockup is [`mockup.png`](mockup.png) (a static drawing, not a build).
 
-**Approved decisions:** C++20, Qt6 Widgets, bundled libvterm, CMake/CPack. **Linux amd64 only** (no macOS) and **.deb only**. **Tabs since 0.7.0** (each tab one independent session; no split panes; §4.15). Selecting copies to **PRIMARY and CLIPBOARD**. **Right-click pastes CLIPBOARD**. **Ctrl+right-click opens the menu**. **Middle-click is configurable** (default: paste PRIMARY). There is a full menu bar (§3), and the title is `zterminal <ver> — <session>`, with the version coming from CMake. Updates are checked at startup, and the user can install them after a checksum verification (§4.10).
+**Approved decisions:** C++20, Qt6 Widgets, bundled libvterm, CMake/CPack. Originally **Linux amd64 only** and **.deb only** (macOS arm64 and a `.dmg` were added later, see the note above). **Tabs since 0.7.0** (each tab one independent session; no split panes; §4.15). Selecting copies to **PRIMARY and CLIPBOARD**. **Right-click pastes CLIPBOARD**. **Ctrl+right-click opens the menu**. **Middle-click is configurable** (default: paste PRIMARY). There is a full menu bar (§3), and the title is `zterminal <ver> — <session>`, with the version coming from CMake. Updates are checked at startup, and the user can install them after a checksum verification (§4.10).
 
-zterminal is a PuTTY-like terminal for Linux. It has a classic menu bar, saved sessions (local shell, SSH through the system `ssh`, serial console), xterm-grade emulation with 16, 256, and 24-bit color, and X11-style mouse copy/paste.
+zterminal is a PuTTY-like terminal for Linux and, since 2026-10-05, macOS Apple Silicon. It has a classic menu bar, saved sessions (local shell, SSH through the system `ssh`, serial console), xterm-grade emulation with 16, 256, and 24-bit color, and X11-style mouse copy/paste.
 
 ## 1. Recommendation: C++20 + Qt 6 Widgets + libvterm, MIT license
 
@@ -23,9 +31,9 @@ zterminal is a PuTTY-like terminal for Linux. It has a classic menu bar, saved s
 
 ## 2. Scope
 
-### v1 (Linux amd64 only)
+### v1 (planned as Linux amd64 only; macOS arm64 added later)
 - **Sessions:** local shell (`$SHELL`, login optional) and **SSH via `/usr/bin/ssh`** in a PTY. Fields: host, user, port, identity file, `-J` jump host, extra args. `~/.ssh/config` aliases work as-is. **Keepalive** (default 30 s × 3) and a per-tab **Disconnected** banner with Reconnect and optional auto-reconnect with backoff (0.9.0, §4.18). Session files never contain passwords; since 0.4.0 a password can optionally be kept in an **encrypted vault** (§4.12, decision 13). **Serial:** device, baud, data/parity/stop, flow control, plus optional per-character and per-line paste delay for Cisco consoles. Break key (`QSerialPort::setBreakEnabled`) for ROMMON.
-- **Emulation:** xterm-256color, `COLORTERM=truecolor`, 16/256/24-bit color, bold/italic/underline/reverse, altscreen, wide/combining chars, mouse modes 1000/1002/1003/1006, bracketed paste, title (OSC 0/2). **OSC 52 write** is off by default and can be enabled per session. OSC 52 *read* is never allowed.
+- **Emulation:** xterm-256color, `COLORTERM=truecolor`, 16/256/24-bit color, bold/italic/underline/reverse, altscreen, wide/combining chars, mouse modes 1000/1002/1003/1006, bracketed paste, title (OSC 0/2). **OSC 52 write** (planned, not implemented yet): off by default, to be enabled per session. OSC 52 *read* is never allowed.
 - **Mouse/clipboard (Stephen's spec):** see §4.6.
 - **Scrollback:** configurable (default 100,000 lines per tab since 0.8.0, or Unlimited; §4.16), wheel, Shift+PgUp/PgDn, reflow on resize.
 - **Appearance:** font family and size (Ctrl +/−), cursor shape and blink, color schemes (PuTTY default, xterm, Solarized dark/light, user-defined palette of 16 colors plus fg/bg).
@@ -34,10 +42,10 @@ zterminal is a PuTTY-like terminal for Linux. It has a classic menu bar, saved s
 - **Version everywhere:** the window title reads `zterminal 0.1.0 — <session name>`. About and Check for Updates show the same build version (§4.9).
 - **Updates (0.10.0):** a check at startup, at most once a day (can be turned off in Preferences), plus Help → Check for Updates. On a newer release the user picks **Install / Later / Skip this version**. Install downloads the `.deb`, verifies it against `SHA256SUMS`, runs `pkexec apt install`, and offers a restart (§4.10).
 - **`zt` launcher:** the `.deb` installs `/usr/bin/zt`, a tiny POSIX `sh` wrapper (§4.11) that starts zterminal detached, so the calling shell gets its prompt back. Usage: `zt` (local shell), `zt <saved-session>`, `zt ssh user@host [ssh args]`, `zt --version`, `zt --help`.
-- **Packaging:** **`.deb` only**, via CPack (zwriter style, depends on `qt6-wayland`). The file is named `zterminal_<ver>_amd64.deb`, and a tag push publishes it with `SHA256SUMS` to GitHub Releases.
+- **Packaging:** planned as **`.deb` only** (a macOS `.dmg` was added later), via CPack (zwriter style, depends on `qt6-wayland`). The file is named `zterminal_<ver>_amd64.deb`, and a tag push publishes it with `SHA256SUMS` to GitHub Releases.
 
 ### Later
-Split panes (not planned: tabs only), hyperlinks (OSC 8), URL click, sixel/kitty graphics, Telnet/raw TCP, import of PuTTY sessions, keyword highlighting, signed releases (minisign/GPG). macOS is **not planned** (Stephen: Linux only).
+Split panes (not planned: tabs only), hyperlinks (OSC 8), URL click, sixel/kitty graphics, Telnet/raw TCP, import of PuTTY sessions, keyword highlighting. Two items that used to be on this list are done: signed releases (minisign) and macOS (Apple Silicon).
 
 ## 3. Menus (Stephen's spec)
 
@@ -211,7 +219,7 @@ build: project(VERSION) → configure_file(version.hpp.in) → zterminal::kVersi
 - **libvterm limits:** no OSC 8 or sixel, and partial DECRQSS. These are accepted for v1 and tracked in the esctest baseline.
 
 ## 8. Decisions (former open questions, resolved by Stephen on 2026-10-03)
-1. Apple Silicon/macOS: **no**, Linux amd64 only.
+1. Apple Silicon/macOS: originally **no**, Linux amd64 only. **Superseded 2026-10-05:** macOS arm64 is supported.
 2. Copy-on-select goes to **PRIMARY + CLIPBOARD**. Right-click pastes **CLIPBOARD**. Middle-click is configurable, default **paste PRIMARY**.
 3. **Tabs** (changed by Stephen 2026-10-03 for 0.7.0, was "no tabs"): each tab is one independent local/SSH/serial session; **no split panes** (§4.15).
 4. Multi-line paste confirm: **on by default** (Preferences, with "don't ask again for this session"), changed by Stephen 2026-10-03 for 0.6.0 (§4.14). Copied lines have trailing whitespace trimmed, also on by default.
@@ -219,7 +227,7 @@ build: project(VERSION) → configure_file(version.hpp.in) → zterminal::kVersi
 6. SG250 console device and baud: settings per session, default **9600 8N1** (Cisco console default, per Stephen 2026-10-03). To verify on the hardware in M5.
 7. License: **MIT**.
 8. Session logging: originally "later"; **implemented in 0.5.0** (§4.13, approved by Stephen 2026-10-03).
-9. Packaging: **.deb only**.
+9. Packaging: originally **.deb only**. **Superseded 2026-10-05:** a `.dmg` is also built for macOS arm64.
 10. Shortcuts: **Ctrl+Shift+…** as in §3, font size on Ctrl+Shift+=/−/0. *Default, changeable.*
 11. Window title: **append the program's title** after the session name. *Default, changeable.*
 12. UpdateChecker: **copied per repo** for now, and may become a shared library later. *Default, changeable.*
