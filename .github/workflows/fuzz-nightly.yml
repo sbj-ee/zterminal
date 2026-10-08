@@ -1,0 +1,110 @@
+# Nightly fuzzing: each libFuzzer harness in fuzz/ runs for 20 minutes (the PR
+# job in ci.yml gives them 60 s), starting from the seeds in fuzz/corpus/ plus
+# the corpus earlier nightly runs built up, which is kept in the Actions cache.
+# A crash fails the job and uploads the input as an artifact; see
+# docs/HARDENING.md for what to do with it.
+name: Fuzz (nightly)
+
+on:
+  schedule:
+    - cron: "17 7 * * *" # 07:17 UTC, about 2 am Central
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes per harness
+        default: "20"
+  # A change to this file is tried out on its PR: 1 minute per harness, and
+  # the cached corpus is read but not written.
+  pull_request:
+    paths: [.github/workflows/fuzz-nightly.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: fuzz_${{ matrix.harness }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: [vault, session_import, terminal, paste_title, update_json]
+    env:
+      HARNESS: ${{ matrix.harness }}
+      MINUTES: ${{ github.event_name == 'pull_request' && '1' || inputs.minutes || '20' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Qt 6 + clang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qt6-base-dev libgl1-mesa-dev cmake ninja-build clang qt6-serialport-dev libsodium-dev pkg-config
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DZTERMINAL_FUZZ=ON -DZTERMINAL_BUILD_TESTS=OFF
+
+      - name: Build harness
+        run: cmake --build build --target "fuzz_$HARNESS"
+
+      # Caches are immutable, so every run saves under a new key and restores
+      # the newest one by prefix.
+      - name: Restore the corpus from earlier runs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: corpus-cache
+          key: fuzz-corpus-${{ matrix.harness }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.harness }}-
+
+      - name: Fuzz
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          case "$MINUTES" in ''|*[!0-9]*) echo "::error::minutes must be a whole number"; exit 1 ;; esac
+          mkdir -p corpus-cache work crashes
+          echo "cached inputs: $(find corpus-cache -type f | wc -l), seeds: $(find "fuzz/corpus/$HARNESS" -type f | wc -l)"
+          # New inputs go to the first directory; the cache and the seeds are read.
+          "build/fuzz/fuzz_$HARNESS" -max_total_time=$((MINUTES * 60)) -rss_limit_mb=2048 -timeout=10 \
+            -artifact_prefix="crashes/$HARNESS-" -print_final_stats=1 \
+            work corpus-cache "fuzz/corpus/$HARNESS"
+
+      # Keep only the inputs that add coverage, so the cache stays small.
+      - name: Minimise the corpus
+        if: github.event_name != 'pull_request'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          set -euo pipefail
+          mkdir merged
+          "build/fuzz/fuzz_$HARNESS" -merge=1 -rss_limit_mb=2048 -timeout=10 \
+            merged work corpus-cache "fuzz/corpus/$HARNESS"
+          rm -rf corpus-cache
+          mv merged corpus-cache
+          echo "inputs kept: $(find corpus-cache -type f | wc -l) ($(du -sh corpus-cache | cut -f1))"
+
+      - name: Save the corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: corpus-cache
+          key: fuzz-corpus-${{ matrix.harness }}-${{ github.run_id }}
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crashes-${{ matrix.harness }}
+          path: crashes/
+          if-no-files-found: ignore
