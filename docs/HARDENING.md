@@ -125,6 +125,7 @@ conversion of the release asset size.
   updates merge themselves once that holds
   (`.github/workflows/dependabot-auto-merge.yml`, which uses no third-party
   action); a failing update stays open, and a major version bump comes as its
-  own PR and waits for review.
+  own PR and waits for review. A merge made that way does not start CI on
+  `main`; run it by hand with `gh workflow run ci.yml --ref main`.
 - Releases carry signed SLSA build provenance for the .deb and .dmg:
   `gh attestation verify zterminal_<version>_amd64.deb -R sbj-ee/zterminal`.
