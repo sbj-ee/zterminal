@@ -1,0 +1,29 @@
+# Dependabot pull requests merge themselves once the required checks on main
+# pass. This job only switches on GitHub's auto-merge for the PR; the branch
+# protection on main is what holds the merge back until CI is green, so a
+# failing update just stays open.
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    # Only for PRs Dependabot opened, and only on runs Dependabot itself set
+    # off: a push to its branch by anyone else leaves this job skipped.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # merge the PR
+      pull-requests: write # enable auto-merge on it
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --merge "$PR_URL"

@@ -114,10 +114,15 @@ conversion of the release asset size.
 
 ## GitHub Actions
 
-- `permissions: contents: read` at the top of both workflows. Only the release
-  `publish` job gets `contents: write`. The release build jobs get
-  `id-token: write` + `attestations: write` solely for provenance.
+- `permissions: contents: read` at the top of every workflow. Only the release
+  `publish` job and the Dependabot auto-merge job get `contents: write`. The
+  release build jobs get `id-token: write` + `attestations: write` solely for
+  provenance.
 - Every action is pinned to a full commit SHA with the version in a comment.
   Dependabot (`.github/dependabot.yml`) proposes updates weekly.
+- `main` is protected: the five `ci.yml` jobs must pass on a branch that is up
+  to date with `main`, for administrators too. Dependabot's PRs merge
+  themselves once that holds (`.github/workflows/dependabot-auto-merge.yml`,
+  which uses no third-party action); a failing update stays open.
 - Releases carry signed SLSA build provenance for the .deb and .dmg:
   `gh attestation verify zterminal_<version>_amd64.deb -R sbj-ee/zterminal`.
