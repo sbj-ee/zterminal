@@ -17,8 +17,11 @@ Checks: >
   -bugprone-unchecked-optional-access,
   -cert-err33-c,
   -cert-err58-cpp,
+  -clang-analyzer-cplusplus.NewDelete,
+  -clang-analyzer-cplusplus.NewDeleteLeaks,
   -clang-analyzer-optin.core.EnumCastOutOfRange,
-  -clang-analyzer-optin.performance.Padding
+  -clang-analyzer-optin.performance.Padding,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 # easily-swappable-parameters   style opinion; flags most (int, int) signatures
 # exception-escape              Qt code is not exception-safe by design
 # implicit-widening-...         only small constant products (64 * 1024, r * 14)
@@ -29,8 +32,15 @@ Checks: >
 #                               the check loses that across calls. Worth
 #                               revisiting: the code is the stored-password path.
 # cert-err33-c                  unchecked fprintf(stderr)/signal() return values
+# cplusplus.NewDelete, NewDeleteLeaks
+#                               false reports inside Qt's headers (QPointer
+#                               assignment, QMetaObject::invokeMethod) with
+#                               clang-tidy 18; ASan/LSan in CI cover the real thing
 # EnumCastOutOfRange            libvterm's modifier and key enums are bit masks
 # performance.Padding           struct layout advice, not a defect
+# DeprecatedOrUnsafeBufferHandling
+#                               wants memset_s/memcpy_s (C11 Annex K), which glibc
+#                               does not have
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(core|app|askpass)/[^/]*$'
 CheckOptions:
