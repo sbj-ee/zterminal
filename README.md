@@ -6,7 +6,7 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.3.2** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.4.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, in-app updates,
 and a theme editor.
 See [docs/PLAN.md](docs/PLAN.md) for design notes.
