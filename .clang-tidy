@@ -1,0 +1,40 @@
+# Static analysis for zterminal's own code (core/, app/, askpass/); CI job
+# "clang-tidy" fails on any finding. Run it locally with:
+#   cmake -B build -G Ninja && cmake --build build   # moc output, version.hpp
+#   run-clang-tidy -quiet -p build "$PWD/(core|app|askpass)/.*\.(cpp|c)$"
+# Switched off below: checks that only produced noise here. Each has a reason;
+# re-enable one by deleting its line and fixing what it reports.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-signed-bitwise,
+  -bugprone-throwing-static-initialization,
+  -bugprone-unchecked-optional-access,
+  -cert-err33-c,
+  -cert-err58-cpp,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -clang-analyzer-optin.performance.Padding
+# easily-swappable-parameters   style opinion; flags most (int, int) signatures
+# exception-escape              Qt code is not exception-safe by design
+# implicit-widening-...         only small constant products (64 * 1024, r * 14)
+# signed-bitwise                the scrollback/UTF-8 encoders shift ints on purpose
+# throwing-static-initialization, cert-err58-cpp
+#                               every file-scope QString/QStringList constant
+# unchecked-optional-access     SessionWidget checks m_saved at function entry;
+#                               the check loses that across calls. Worth
+#                               revisiting: the code is the stored-password path.
+# cert-err33-c                  unchecked fprintf(stderr)/signal() return values
+# EnumCastOutOfRange            libvterm's modifier and key enums are bit masks
+# performance.Padding           struct layout advice, not a defect
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(core|app|askpass)/[^/]*$'
+CheckOptions:
+  # Feature-test macros the askpass helper has to define before any include.
+  bugprone-reserved-identifier.AllowedIdentifiers: '_GNU_SOURCE;_DARWIN_C_SOURCE'
+  cert-dcl37-c.AllowedIdentifiers: '_GNU_SOURCE;_DARWIN_C_SOURCE'
+  cert-dcl51-cpp.AllowedIdentifiers: '_GNU_SOURCE;_DARWIN_C_SOURCE'

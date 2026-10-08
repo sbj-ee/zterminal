@@ -35,6 +35,25 @@ and `--timestamp`, then `xcrun notarytool submit --wait` and
 `xcrun stapler staple` the .dmg. With a real Team ID, hardened runtime is fine
 because every nested binary shares that Team ID.
 
+## Warnings and static analysis
+
+`cmake/CompilerWarnings.cmake` sets the warning flags for zterminal's own
+targets. `-DZTERMINAL_WERROR=ON` turns them into errors; the CI **Linux** and
+**macOS** jobs build with it, so a new warning fails the PR. It is off by
+default so that a newer compiler doesn't break a local or distro build, and
+off in the Sanitizers job, where GCC reports a false `-Warray-bounds` from
+fortified `string.h`.
+
+CI job **clang-tidy** runs `bugprone-*`, `cert-*` and `clang-analyzer-*` over
+`core/`, `app/` and `askpass/` (not the tests or libvterm) and fails on any
+finding. `.clang-tidy` lists the checks that are switched off and why. To run
+it locally after a build:
+
+    run-clang-tidy -quiet -p build "$PWD/(core|app|askpass)/.*\.(cpp|c)$"
+
+A newer clang-tidy than CI's (Ubuntu 24.04 ships 18) knows more checks and may
+report things CI does not.
+
 ## Sanitizers
 
     cmake -B build-san -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DZTERMINAL_SANITIZE=address,undefined
