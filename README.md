@@ -349,11 +349,16 @@ Bump **only** `project(zterminal VERSION x.y.z)` in `CMakeLists.txt`.
   update logic (no widgets)
 - `app/` — Qt Widgets UI (`MainWindow`, `TerminalView`, Preferences, …)
 - `tests/` — Qt Test suites plus `colortest.sh`
-- `third_party/libvterm/` — bundled, unmodified libvterm 0.3.3 (MIT)
+- `third_party/libvterm/` — bundled libvterm 0.3.3 (MIT) with thirteen local
+  fixes (see `third_party/libvterm/README.zterminal.md`)
 - `askpass/` — `zterminal-askpass` (`SSH_ASKPASS` helper)
 - `assets/icons/` — Zorro-Z PNG set (and macOS `.icns` input)
 - `packaging/` — `zt` launcher and `.desktop` file
 - `cmake/` — packaging, macOS bundle / macdeployqt
+
+## Security
+
+To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 
