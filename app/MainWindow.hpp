@@ -108,6 +108,11 @@ public:
     // Window-level "● REC" marker: shows the *current* tab's logging state
     // (other logging tabs carry "● " in their tab text).
     QLabel *recIndicator() const { return m_recLabel; }
+    // Status-bar vault marker: a padlock (closed = locked, open = unlocked)
+    // and, while unlocked, how long it stays so: "\u221E" when the idle
+    // auto-lock is off, else the timeout. Both hidden while there is no vault.
+    QLabel *vaultIndicatorIcon() const { return m_vaultIcon; }
+    QLabel *vaultIndicatorText() const { return m_vaultText; }
     bool confirmPaste(const QString &text);
     bool pasteConfirmSkipped() const;
 
@@ -134,6 +139,7 @@ private:
     void setMenuBarShown(bool shown);
     void saveSessionInteractive();
     void updateVaultActions();
+    void updateVaultIndicator();
     void updateLoggingUi();
 
     SessionStore m_store;
@@ -149,6 +155,8 @@ private:
     QList<QAction *> m_actions;
     QSet<int> m_reservedKeys;
     QLabel *m_recLabel = nullptr;
+    QLabel *m_vaultIcon = nullptr;
+    QLabel *m_vaultText = nullptr;
     bool m_closingConfirmed = false;
 };
 

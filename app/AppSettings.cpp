@@ -83,6 +83,14 @@ AppSettings AppSettings::load(const QSettings &s)
     a.scrollbackLines = s.value(QStringLiteral("terminal/scrollbackLines"), a.scrollbackLines).toInt();
     a.vaultAutoLockMinutes = std::clamp(
         s.value(QStringLiteral("vault/autoLockMinutes"), a.vaultAutoLockMinutes).toInt(), 0, 24 * 60);
+    // One-time migration (1.5.0): up to 1.4.0 the default was 15 minutes and
+    // every save wrote it out, so a 15 in a file without the marker below is
+    // taken to be that old default, not a choice, and becomes "never". save()
+    // writes the marker, after which a 15 is whatever the user asked for.
+    if (a.vaultAutoLockMinutes == kLegacyVaultAutoLockMinutes
+        && !s.contains(QStringLiteral("vault/autoLockDefaultIsNever"))) {
+        a.vaultAutoLockMinutes = kDefaultVaultAutoLockMinutes;
+    }
     a.logDirectory = s.value(QStringLiteral("logging/directory")).toString();
     a.logTimestamps = s.value(QStringLiteral("logging/timestamps"), a.logTimestamps).toBool();
     a.trimCopiedWhitespace = s.value(QStringLiteral("clipboard/trimTrailingWhitespace"), a.trimCopiedWhitespace).toBool();
@@ -100,6 +108,7 @@ void AppSettings::save(QSettings &s) const
     s.setValue(QStringLiteral("appearance/colorScheme"), colorScheme);
     s.setValue(QStringLiteral("terminal/scrollbackLines"), scrollbackLines);
     s.setValue(QStringLiteral("vault/autoLockMinutes"), vaultAutoLockMinutes);
+    s.setValue(QStringLiteral("vault/autoLockDefaultIsNever"), true); // see load()
     s.setValue(QStringLiteral("logging/directory"), logDirectory);
     s.setValue(QStringLiteral("logging/timestamps"), logTimestamps);
     s.setValue(QStringLiteral("clipboard/trimTrailingWhitespace"), trimCopiedWhitespace);

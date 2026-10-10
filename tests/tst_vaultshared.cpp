@@ -455,6 +455,9 @@ private slots:
     {
         MainWindow a(LaunchRequest{}, {});
         a.show();
+        AppSettings timed = a.settings();
+        timed.vaultAutoLockMinutes = 15; // the default is no timeout
+        a.setSettings(timed);
         unlockOnceViaMenu(a);
         QVERIFY(vm().autoLockArmed());
         vm().setAutoLockIntervalMsForTests(200); // simulated 15-minute idle

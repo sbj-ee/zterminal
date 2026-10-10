@@ -99,6 +99,37 @@ private slots:
         QVERIFY(!a.fontFamily.isEmpty());
     }
 
+    // 1.5.0: the 15 minutes older versions saved as their default become
+    // "never", once; a 15 chosen afterwards is kept.
+    void legacyVaultAutoLockDefaultIsMigratedOnce()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("old.ini"));
+        {
+            QSettings s(path, QSettings::IniFormat);
+            s.setValue(QStringLiteral("vault/autoLockMinutes"), 15); // as 1.4.0 and earlier wrote it
+        }
+        {
+            QSettings s(path, QSettings::IniFormat);
+            AppSettings a = AppSettings::load(s);
+            QCOMPARE(a.vaultAutoLockMinutes, 0);
+            a.vaultAutoLockMinutes = 15; // now a deliberate choice
+            a.save(s);
+        }
+        {
+            const QSettings s(path, QSettings::IniFormat);
+            QCOMPARE(AppSettings::load(s).vaultAutoLockMinutes, 15);
+        }
+        // Any other old value was a choice and is left alone.
+        const QString other = dir.filePath(QStringLiteral("other.ini"));
+        {
+            QSettings s(other, QSettings::IniFormat);
+            s.setValue(QStringLiteral("vault/autoLockMinutes"), 30);
+        }
+        const QSettings s(other, QSettings::IniFormat);
+        QCOMPARE(AppSettings::load(s).vaultAutoLockMinutes, 30);
+    }
+
     void roundTripThroughQSettingsInTempDir()
     {
         QTemporaryDir dir;

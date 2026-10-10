@@ -22,9 +22,12 @@ struct AppSettings {
     MouseSettings mouse;
     // Automatic update check at startup (at most once a day; UpdateManager).
     bool checkForUpdatesOnStartup = true;
-    // Lock the password vault after this many idle minutes (0 = never).
-    int vaultAutoLockMinutes = 15;
-    static constexpr int kDefaultVaultAutoLockMinutes = 15;
+    // Lock the password vault after this many idle minutes. 0 = never: one
+    // unlock lasts until Lock Vault or until zterminal quits (the default
+    // since 1.5.0; it was 15 before).
+    int vaultAutoLockMinutes = 0;
+    static constexpr int kDefaultVaultAutoLockMinutes = 0;
+    static constexpr int kLegacyVaultAutoLockMinutes = 15; // migrated once by load()
     // Session logs: folder (empty = ~/zterminal-logs) and per-line timestamps.
     QString logDirectory;
     bool logTimestamps = false;
