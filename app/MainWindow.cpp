@@ -29,7 +29,11 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 #include <QSet>
+#include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
@@ -41,6 +45,33 @@ namespace zterminal {
 namespace {
 const char *kPlannedProperty = "zterminalPlanned";
 const std::optional<SessionConfig> kNoSession;
+
+// The status-bar padlock, drawn rather than taken from an emoji or icon-theme
+// glyph so it looks the same on every desktop and follows the palette. Open:
+// the shackle is swung clear of the body, its free leg ending in mid-air.
+QPixmap padlockPixmap(bool open, const QColor &color, int height, qreal dpr)
+{
+    const qreal u = height / 16.0; // drawn on an 18 x 16 grid
+    QPixmap pm(qRound(18 * u * dpr), qRound(16 * u * dpr));
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.scale(u, u);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawRoundedRect(QRectF(2, 7.5, 10, 7.5), 1.5, 1.5);
+    const qreal left = open ? 9.5 : 4.5; // the leg that stays in the body
+    QPainterPath shackle;
+    shackle.moveTo(left, 8);
+    shackle.lineTo(left, 4.5);
+    shackle.arcTo(QRectF(left, 2, 5, 5), 180, -180);
+    shackle.lineTo(left + 5, open ? 6 : 8);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(color, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.drawPath(shackle);
+    return pm;
+}
 } // namespace
 
 MainWindow::MainWindow(const LaunchRequest &request, const QStringList &originalArgs, QWidget *parent)
@@ -77,15 +108,23 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
                                              "padding: 1px 8px; border-radius: 3px; margin: 2px 6px; }"));
     m_recLabel->hide();
 
+    m_vaultIcon = new QLabel;
+    m_vaultIcon->setObjectName(QStringLiteral("vaultIndicatorIcon"));
+    m_vaultText = new QLabel;
+    m_vaultText->setObjectName(QStringLiteral("vaultIndicatorText"));
+    statusBar()->addPermanentWidget(m_vaultIcon);
+    statusBar()->addPermanentWidget(m_vaultText);
+
     buildMenus();
     menuBar()->setCornerWidget(m_recLabel, Qt::TopRightCorner);
     connect(&VaultManager::instance(), &VaultManager::lockedChanged, this, &MainWindow::updateVaultActions);
-    updateVaultActions();
+    connect(&VaultManager::instance(), &VaultManager::autoLockMinutesChanged, this, &MainWindow::updateVaultIndicator);
     VaultManager::instance().setAutoLockMinutes(m_settings.vaultAutoLockMinutes);
+    updateVaultActions();
     watchSettingsFile();
 
     addTab(request, originalArgs, /*start=*/false); // the caller starts it (after show())
-    resize(view()->sizeHint() + QSize(0, menuBar()->sizeHint().height()));
+    resize(view()->sizeHint() + QSize(0, menuBar()->sizeHint().height() + statusBar()->sizeHint().height()));
 }
 
 MainWindow::~MainWindow()
@@ -654,6 +693,36 @@ void MainWindow::updateVaultActions()
     if (QAction *a = action(QStringLiteral("changeMasterPassword"))) {
         a->setEnabled(vm.exists());
     }
+    updateVaultIndicator();
+}
+
+void MainWindow::updateVaultIndicator()
+{
+    VaultManager &vm = VaultManager::instance();
+    const bool open = vm.isUnlocked();
+    const bool shown = open || vm.exists();
+    m_vaultIcon->setVisible(shown);
+    m_vaultText->setVisible(shown && open);
+    if (!shown) {
+        return;
+    }
+    m_vaultIcon->setPixmap(padlockPixmap(open, palette().color(QPalette::WindowText),
+                                         fontMetrics().height(), devicePixelRatioF()));
+    const int minutes = vm.autoLockMinutes();
+    QString tip;
+    if (!open) {
+        m_vaultText->clear();
+        tip = QStringLiteral("Password vault is locked");
+    } else if (minutes <= 0) {
+        m_vaultText->setText(QStringLiteral("\u221E"));
+        tip = QStringLiteral("Password vault is unlocked until you lock it (Ctrl+Shift+L) or quit zterminal.\n"
+                             "Preferences > \"Lock vault when idle\" sets a timeout.");
+    } else {
+        m_vaultText->setText(QStringLiteral("%1 min").arg(minutes));
+        tip = QStringLiteral("Password vault is unlocked; it locks after %1 min without input").arg(minutes);
+    }
+    m_vaultIcon->setToolTip(tip);
+    m_vaultText->setToolTip(tip);
 }
 
 MainWindow *MainWindow::openWindow(const QStringList &args, QString *error)

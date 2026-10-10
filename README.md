@@ -223,7 +223,12 @@ recovery: if you forget the master password, the stored passwords are lost.**
   and done at the next unlock, which also removes passwords whose session no
   longer exists.
 - **One unlock per process:** tabs and windows opened from inside zterminal share
-  the unlocked vault. Lock with Ctrl+Shift+L (or idle auto-lock, default 15 min).
+  the unlocked vault. By default it stays unlocked until you lock it
+  (Ctrl+Shift+L) or quit zterminal; the status bar then shows an open padlock
+  with **∞**. Preferences > "Lock vault when idle" sets an idle timeout instead
+  (the status bar shows it, e.g. "15 min"). The 15 minutes
+  that 1.4.0 and earlier saved as their default are dropped once on upgrade; a
+  timeout you set afterwards is kept.
 
 The vault protects passwords **at rest**. It does not protect against malware
 running as your user, root, or keyloggers while the vault is unlocked.

@@ -43,8 +43,12 @@ void VaultManager::setAutoLockMinutes(int minutes)
     if (minutes == m_minutes && (m_idle->isActive() || !m_vault->isUnlocked())) {
         return;
     }
+    const bool changed = minutes != m_minutes;
     m_minutes = minutes;
     restartIdleTimer();
+    if (changed) {
+        emit autoLockMinutesChanged(m_minutes);
+    }
 }
 
 void VaultManager::setAutoLockIntervalMsForTests(int ms)

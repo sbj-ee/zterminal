@@ -189,7 +189,7 @@ private slots:
 
     void preferencesSetAutoLock()
     {
-        QCOMPARE(AppSettings{}.vaultAutoLockMinutes, 15);
+        QCOMPARE(AppSettings{}.vaultAutoLockMinutes, 0); // no timeout unless asked for
         AppSettings s;
         s.vaultAutoLockMinutes = 5;
         PreferencesDialog dlg(s);
@@ -205,6 +205,47 @@ private slots:
         t.vaultAutoLockMinutes = 7;
         w.setSettings(t);
         QCOMPARE(vm().autoLockMinutes(), 7);
+        t.vaultAutoLockMinutes = 15;
+        w.setSettings(t);
+    }
+
+    // By default one unlock lasts for the run, and the status bar says so.
+    void noTimeoutByDefaultAndStatusBarShowsIt()
+    {
+        QCOMPARE(AppSettings::kDefaultVaultAutoLockMinutes, 0);
+        freshVault(false); // no vault file yet: nothing to show
+        MainWindow w(LaunchRequest{}, {});
+        w.show();
+        AppSettings t = w.settings();
+        t.vaultAutoLockMinutes = 0;
+        w.setSettings(t);
+        QVERIFY(w.vaultIndicatorIcon()->isHidden());
+        QVERIFY(w.vaultIndicatorText()->isHidden());
+
+        QVERIFY(vm().vault().create(sb(kMaster)));
+        vm().noteUnlocked();
+        QVERIFY(!vm().autoLockArmed());
+        QVERIFY(w.vaultIndicatorIcon()->isVisible());
+        QVERIFY(w.vaultIndicatorText()->isVisible());
+        QCOMPARE(w.vaultIndicatorText()->text(), QStringLiteral("\u221E"));
+        const QImage openLock = w.vaultIndicatorIcon()->pixmap().toImage();
+        QTest::qWait(300); // "idle": still unlocked, nothing is counting down
+        QVERIFY(vm().isUnlocked());
+
+        // A timeout set in Preferences shows instead of the infinity sign,
+        // in every window.
+        MainWindow other(LaunchRequest{}, {});
+        other.show();
+        t.vaultAutoLockMinutes = 20;
+        w.setSettings(t);
+        QVERIFY(vm().autoLockArmed());
+        QCOMPARE(w.vaultIndicatorText()->text(), QStringLiteral("20 min"));
+        QCOMPARE(other.vaultIndicatorText()->text(), QStringLiteral("20 min"));
+
+        vm().lock();
+        QVERIFY(w.vaultIndicatorIcon()->isVisible()); // closed padlock
+        QVERIFY(w.vaultIndicatorText()->isHidden());
+        QVERIFY(w.vaultIndicatorIcon()->pixmap().toImage() != openLock);
         t.vaultAutoLockMinutes = 15;
         w.setSettings(t);
     }

@@ -112,7 +112,9 @@ PreferencesDialog::PreferencesDialog(const AppSettings &current, QWidget *parent
     m_vaultAutoLock->setSuffix(QStringLiteral(" min"));
     m_vaultAutoLock->setSpecialValueText(QStringLiteral("Never"));
     m_vaultAutoLock->setValue(current.vaultAutoLockMinutes);
-    m_vaultAutoLock->setToolTip(QStringLiteral("Lock the password vault after this long without keyboard or mouse input"));
+    m_vaultAutoLock->setToolTip(QStringLiteral(
+        "Lock the password vault after this long without keyboard or mouse input.\n"
+        "Never: one unlock lasts until Lock Vault or until zterminal quits."));
     termForm->addRow(QStringLiteral("Lock vault when idle:"), m_vaultAutoLock);
 
     auto *logBox = new QGroupBox(QStringLiteral("Session logs"));
