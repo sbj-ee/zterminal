@@ -49,6 +49,11 @@ public:
     int gridCols() const { return m_gridCols; }
     // Terminal size that fits a viewport of the given pixel size.
     QSize gridForPixels(const QSize &px) const;
+    // A view that has never been shown (a tab opened in the background) keeps
+    // Qt's 100x30 default, i.e. a 1x9 terminal, so a session started in it
+    // would get a 1x9 PTY. This sizes it as if it were shown at `outer`
+    // (the current tab's size). No-op once the view is visible.
+    void presize(const QSize &outer);
     QSize sizeHint() const override;
 
     const Selection &selection() const { return m_selection; }

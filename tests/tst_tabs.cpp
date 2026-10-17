@@ -138,6 +138,12 @@ private slots:
         QVERIFY(w.action(QStringLiteral("previousTab"))->shortcuts().contains(QKeySequence(Qt::CTRL | Qt::Key_PageUp)));
         QVERIFY(w.action(QStringLiteral("previousTab"))->shortcuts().contains(QKeySequence(QStringLiteral("Ctrl+Shift+["))));
 
+        // Session groups (1.6.0): the picker is Ctrl+Shift+P. Ctrl+Shift+G stays Start Logging
+        // (the design doc assumed it was free; it isn't).
+        QCOMPARE(w.action(QStringLiteral("openGroupByName"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+P")));
+        QCOMPARE(w.action(QStringLiteral("toggleLogging"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+G")));
+        QVERIFY(w.action(QStringLiteral("manageGroups")));
+        QVERIFY(w.action(QStringLiteral("reconnectAll")));
         // No shortcut is used twice.
         QSet<int> seen;
         for (QAction *a : w.findChildren<QAction *>()) {
@@ -157,6 +163,8 @@ private slots:
         QVERIFY(toSession(Qt::Key_W, Qt::ControlModifier));
         QVERIFY(toSession(Qt::Key_Tab, Qt::ControlModifier));
         // ...the tab shortcuts are the app's.
+        QVERIFY(toSession(Qt::Key_P, Qt::ControlModifier));
+        QVERIFY(!toSession(Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier)); // Open Group by Name
         QVERIFY(!toSession(Qt::Key_T, Qt::ControlModifier | Qt::ShiftModifier));
         QVERIFY(!toSession(Qt::Key_PageDown, Qt::ControlModifier));
         QVERIFY(!toSession(Qt::Key_PageUp, Qt::ControlModifier));

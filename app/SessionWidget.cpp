@@ -36,6 +36,7 @@ namespace zterminal {
 namespace {
 int s_stableMsValue = 5000;
 int s_rebindAnswer = -1;
+bool endsWithInputPrompt(const QByteArray &tail); // below
 } // namespace
 
 void SessionWidget::setRebindAnswerForTests(int answer)
@@ -133,7 +134,7 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
     auto *reconnect = new QPushButton(QStringLiteral("&Reconnect"));
     reconnect->setObjectName(QStringLiteral("reconnect"));
     reconnect->setFocusPolicy(Qt::NoFocus);
-    connect(reconnect, &QPushButton::clicked, this, &SessionWidget::reconnectNow);
+    connect(reconnect, &QPushButton::clicked, this, [this]() { reconnectNow(); });
     m_reconnectButton = reconnect;
     m_cancelReconnectButton = new QPushButton(QStringLiteral("Cancel"));
     m_cancelReconnectButton->setObjectName(QStringLiteral("cancelReconnect"));
@@ -187,6 +188,7 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
         if (m_ptyTail.size() > 4096) {
             m_ptyTail.remove(0, m_ptyTail.size() - 4096);
         }
+        setNeedsInput(endsWithInputPrompt(m_ptyTail));
     });
     m_reconnect = new ReconnectScheduler(this);
     connect(m_reconnect, &ReconnectScheduler::countdown, this, [this]() { updateDisconnectBanner(); });
@@ -416,7 +418,7 @@ SessionWidget::Launch SessionWidget::launchCommand() const
     return l;
 }
 
-void SessionWidget::startSession()
+void SessionWidget::startSession(StartMode mode)
 {
     if (m_saved && m_saved->autoLog && !m_log->isActive()) {
         QString err;
@@ -458,8 +460,9 @@ void SessionWidget::startSession()
         return;
     }
     const QSize grid(m_view->gridCols(), m_view->gridRows());
-    const QStringList env = prepareStoredPasswordFor(!m_autoAttempt);
+    const QStringList env = prepareStoredPasswordFor(!m_autoAttempt && mode == StartMode::Interactive);
     m_ptyTail.clear();
+    setNeedsInput(false);
     m_userStop = false;
     if (!m_pty->start(l.program, l.args, grid.height(), grid.width(), env)) {
         m_term->feed(QStringLiteral("\x1b[31mzterminal: could not start %1: %2\x1b[0m\r\n")
@@ -565,6 +568,19 @@ bool endsWithPasswordPrompt(const QByteArray &tail)
     const QByteArray last = t.mid(nl + 1).toLower();
     return last.contains("assword") && last.endsWith(':');
 }
+
+// Something is waiting for the user: a password or key passphrase, or ssh's
+// host-key question "...(yes/no/[fingerprint])?".
+bool endsWithInputPrompt(const QByteArray &tail)
+{
+    if (endsWithPasswordPrompt(tail)) {
+        return true;
+    }
+    const QByteArray t = tail.trimmed();
+    const qsizetype nl = std::max(t.lastIndexOf('\n'), t.lastIndexOf('\r'));
+    const QByteArray last = t.mid(nl + 1).toLower();
+    return (last.contains("(yes/no") && last.endsWith('?')) || (last.contains("passphrase") && last.endsWith(':'));
+}
 } // namespace
 
 void SessionWidget::onSerialData(const QByteArray &d)
@@ -652,8 +668,17 @@ void SessionWidget::finishLogin(bool sendPassword)
     m_serialTail.clear(); // that prompt has been answered
 }
 
+void SessionWidget::setNeedsInput(bool waiting)
+{
+    if (waiting != m_needsInput) {
+        m_needsInput = waiting;
+        emit needsInputChanged(waiting);
+    }
+}
+
 void SessionWidget::onSessionFinished(int exitCode, bool crashed)
 {
+    setNeedsInput(false);
     m_stable->stop();
     const bool userStop = m_userStop;
     m_userStop = false;
@@ -876,7 +901,7 @@ void SessionWidget::resetModesForReconnect()
     m_term->feed(QByteArrayLiteral("\x1b[0m\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"));
 }
 
-void SessionWidget::reconnectNow()
+void SessionWidget::reconnectNow(StartMode mode)
 {
     if (m_pty->isRunning()) {
         // Disconnected UI can briefly race the PTY reap on some platforms
@@ -894,7 +919,7 @@ void SessionWidget::reconnectNow()
     if (isSerialSession()) {
         m_deviceWatch->stop();
         m_serial->close();
-        startSession();
+        startSession(mode);
         if (m_disconnected && !m_serial->isOpen() && !m_serialWatchPath.isEmpty()) {
             m_deviceWatch->start(); // still gone: keep waiting
             updateDisconnectBanner();
@@ -904,7 +929,7 @@ void SessionWidget::reconnectNow()
     if (m_disconnected) {
         resetModesForReconnect();
     }
-    startSession();
+    startSession(mode);
     updateDisconnectBanner();
 }
 

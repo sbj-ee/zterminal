@@ -1,6 +1,9 @@
 #include "MainWindow.hpp"
 
 #include "ColorScheme.hpp"
+#include "GroupDialog.hpp"
+#include "GroupOpener.hpp"
+#include "GroupPicker.hpp"
 #include "PreferencesDialog.hpp"
 #include "ThemeEditorDialog.hpp"
 #include "Pty.hpp"
@@ -115,6 +118,11 @@ MainWindow::MainWindow(const LaunchRequest &request, const QStringList &original
     statusBar()->addPermanentWidget(m_vaultIcon);
     statusBar()->addPermanentWidget(m_vaultText);
 
+    m_inputLabel = new QLabel;
+    m_inputLabel->setObjectName(QStringLiteral("needsInputIndicator"));
+    m_inputLabel->hide();
+    statusBar()->addPermanentWidget(m_inputLabel);
+
     buildMenus();
     menuBar()->setCornerWidget(m_recLabel, Qt::TopRightCorner);
     connect(&VaultManager::instance(), &VaultManager::lockedChanged, this, &MainWindow::updateVaultActions);
@@ -183,6 +191,17 @@ void MainWindow::buildMenus()
             &QAction::triggered, this, &MainWindow::exportSessionsInteractive);
     connect(addAct(file, QStringLiteral("importSessions"), QStringLiteral("&Import Sessions\u2026")),
             &QAction::triggered, this, &MainWindow::importSessionsInteractive);
+    file->addSeparator();
+    // Groups: a saved list of sessions that opens together as tabs.
+    m_groupMenu = file->addMenu(QStringLiteral("Open &Group"));
+    m_groupMenu->setObjectName(QStringLiteral("openGroupMenu"));
+    connect(m_groupMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildGroupMenu); // re-read each time
+    rebuildGroupMenu();
+    connect(addAct(file, QStringLiteral("openGroupByName"), QStringLiteral("Open Group by &Name\u2026"),
+                   QKS(QStringLiteral("Ctrl+Shift+P"))),
+            &QAction::triggered, this, &MainWindow::showGroupPicker);
+    connect(addAct(file, QStringLiteral("manageGroups"), QStringLiteral("Manage &Groups\u2026")),
+            &QAction::triggered, this, &MainWindow::showGroupDialog);
     file->addSeparator();
     // Tabs (Ctrl+Shift variants and Ctrl+PgUp/PgDn: plain Ctrl+letter keys stay with the session).
     connect(addAct(file, QStringLiteral("newTab"), QStringLiteral("New &Tab"), QKS(QStringLiteral("Ctrl+Shift+T"))),
@@ -275,6 +294,12 @@ void MainWindow::buildMenus()
     connect(addAct(session, QStringLiteral("restartSession"), QStringLiteral("&Restart Session"),
                    QKS(QStringLiteral("Ctrl+Shift+R"))),
             &QAction::triggered, this, [this]() { currentSession()->restartSession(); });
+    connect(addAct(session, QStringLiteral("reconnectAll"), QStringLiteral("Reconnect &All Disconnected")),
+            &QAction::triggered, this, [this]() {
+                if (reconnectAllDisconnected() == 0) {
+                    statusBar()->showMessage(QStringLiteral("No disconnected tabs"), 4000);
+                }
+            });
     QAction *brk = addAct(session, QStringLiteral("sendBreak"), QStringLiteral("Send &Break"), {}, false);
     connect(brk, &QAction::triggered, this, [this]() {
         SessionWidget *s = currentSession();
@@ -382,7 +407,8 @@ SessionWidget *MainWindow::currentSession() const
     return qobject_cast<SessionWidget *>(m_tabs->currentWidget());
 }
 
-SessionWidget *MainWindow::addTab(const LaunchRequest &request, const QStringList &args, bool start)
+SessionWidget *MainWindow::addTab(const LaunchRequest &request, const QStringList &args, bool start,
+                                  bool activate, SessionWidget::StartMode mode)
 {
     auto *s = new SessionWidget(request, args, m_settings, m_tabs);
     s->view()->setAppShortcuts(m_reservedKeys);
@@ -398,6 +424,10 @@ SessionWidget *MainWindow::addTab(const LaunchRequest &request, const QStringLis
             updateLoggingUi();
         }
     });
+    connect(s, &SessionWidget::needsInputChanged, this, [this, s]() {
+        updateTabText(s);
+        updateNeedsInput();
+    });
     connect(s, &SessionWidget::pendingChanged, this, [this, s](qint64 remaining) {
         if (s == currentSession()) {
             action(QStringLiteral("cancelPaste"))->setEnabled(remaining > 0);
@@ -406,12 +436,22 @@ SessionWidget *MainWindow::addTab(const LaunchRequest &request, const QStringLis
     connect(s, &SessionWidget::contextMenuRequested, this, [this](const QPoint &p) { m_contextMenu->popup(p); });
     const int i = m_tabs->addTab(s, s->sessionName());
     updateTabText(s);
-    m_tabs->setCurrentIndex(i);
-    onCurrentTabChanged();
-    if (start) {
-        s->startSession();
+    if (activate) {
+        m_tabs->setCurrentIndex(i);
+        onCurrentTabChanged();
     }
-    s->view()->setFocus();
+    if (!activate && start) {
+        // Starts in the background: give its terminal the size the window shows.
+        if (const SessionWidget *cur = currentSession(); cur && cur != s) {
+            s->view()->presize(cur->view()->size());
+        }
+    }
+    if (start) {
+        s->startSession(mode);
+    }
+    if (activate) {
+        s->view()->setFocus();
+    }
     return s;
 }
 
@@ -450,6 +490,7 @@ bool MainWindow::closeTab(int index, bool force)
     m_tabs->removeTab(index);
     s->shutdown();
     s->deleteLater();
+    updateNeedsInput();
     return true;
 }
 
@@ -473,8 +514,10 @@ void MainWindow::updateTabText(SessionWidget *s)
     if (i < 0) {
         return;
     }
-    // The tab title is the session name; "● " marks a tab that is logging.
-    m_tabs->setTabText(i, (s->isLogging() ? QStringLiteral("\u25CF ") : QString()) + s->sessionName());
+    // The tab title is the session name; "● " marks a tab that is logging and
+    // "? " one that waits for input (a password or yes/no prompt).
+    m_tabs->setTabText(i, (s->needsInput() ? QStringLiteral("? ") : QString())
+                              + (s->isLogging() ? QStringLiteral("\u25CF ") : QString()) + s->sessionName());
     m_tabs->setTabToolTip(i, makeWindowTitle(s->sessionName(), s->terminal()->title())
                                  + (s->isLogging() ? QStringLiteral(" [REC]") : QString()));
 }
@@ -737,8 +780,12 @@ MainWindow *MainWindow::openWindow(const QStringList &args, QString *error)
     case LaunchRequest::Kind::Help:
     case LaunchRequest::Kind::ListSessions:
     case LaunchRequest::Kind::CheckSession:
+    case LaunchRequest::Kind::ListGroups:
+    case LaunchRequest::Kind::CheckGroup:
         why = QStringLiteral("not a session");
         break;
+    case LaunchRequest::Kind::Group:
+        return GroupOpener::openByName(r.groupName, nullptr, error);
     case LaunchRequest::Kind::SavedSession:
         if (const SessionStore store; !store.contains(r.sessionName)) {
             why = store.unknownSessionMessage(r.sessionName);
@@ -761,6 +808,99 @@ MainWindow *MainWindow::openWindow(const QStringList &args, QString *error)
     // would be started twice and lose its one-shot askpass socket.
     w->startSession();
     return w;
+}
+
+// ---- groups ----
+
+void MainWindow::rebuildGroupMenu()
+{
+    m_groupMenu->clear();
+    const QStringList names = m_groups.names();
+    if (names.isEmpty()) {
+        QAction *none = m_groupMenu->addAction(QStringLiteral("(no groups yet)"));
+        none->setEnabled(false);
+        none->setObjectName(QStringLiteral("noGroups"));
+        return;
+    }
+    for (const QString &n : names) {
+        const auto g = m_groups.load(n);
+        const qsizetype count = g ? g->members.size() : 0;
+        QAction *a = m_groupMenu->addAction(QStringLiteral("%1  (%2)").arg(n).arg(count));
+        a->setObjectName(QStringLiteral("openGroup:") + n);
+        a->setData(n);
+        connect(a, &QAction::triggered, this, [this, n]() {
+            QString err;
+            if (!openGroup(n, &err)) {
+                QMessageBox::warning(this, QStringLiteral("Open Group"), err);
+            }
+        });
+    }
+}
+
+MainWindow *MainWindow::openGroup(const QString &name, QString *error)
+{
+    return GroupOpener::openByName(name, this, error);
+}
+
+void MainWindow::showGroupDialog()
+{
+    GroupDialog dlg(m_store, m_groups, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        QString err;
+        if (!GroupOpener::open(dlg.config(), this, &err)) {
+            QMessageBox::warning(this, QStringLiteral("Open Group"), err);
+        }
+    }
+}
+
+void MainWindow::showGroupPicker()
+{
+    GroupPicker picker(m_groups, this);
+    if (picker.exec() == QDialog::Accepted && !picker.chosen().isEmpty()) {
+        QString err;
+        if (!openGroup(picker.chosen(), &err)) {
+            QMessageBox::warning(this, QStringLiteral("Open Group"), err);
+        }
+    }
+}
+
+int MainWindow::reconnectAllDisconnected()
+{
+    QList<SessionWidget *> dropped;
+    bool vault = false;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        SessionWidget *s = sessionAt(i);
+        if (s->isDisconnected()) {
+            dropped << s;
+            vault = vault || (s->savedSession() && s->savedSession()->type == SessionConfig::Type::Ssh
+                              && s->savedSession()->useStoredPassword);
+        }
+    }
+    VaultManager &vm = VaultManager::instance();
+    if (vault && vm.exists() && !vm.isUnlocked()) {
+        vm.ensureUnlocked(this, QStringLiteral("Reconnecting tabs that use stored passwords."));
+    }
+    for (SessionWidget *s : dropped) {
+        s->reconnectNow(SessionWidget::StartMode::Unattended);
+    }
+    return int(dropped.size());
+}
+
+int MainWindow::needsInputCount() const
+{
+    int n = 0;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        n += sessionAt(i)->needsInput() ? 1 : 0;
+    }
+    return n;
+}
+
+void MainWindow::updateNeedsInput()
+{
+    const int n = needsInputCount();
+    m_inputLabel->setVisible(n > 0);
+    m_inputLabel->setText(n == 1 ? QStringLiteral("? 1 tab waiting for input")
+                                 : QStringLiteral("? %1 tabs waiting for input").arg(n));
 }
 
 void MainWindow::duplicateSession()

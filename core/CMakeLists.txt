@@ -13,6 +13,7 @@ add_library(zterminal_core STATIC
   Session.cpp Session.hpp
   SessionStore.cpp SessionStore.hpp
   SessionExport.cpp SessionExport.hpp
+  Group.hpp GroupStore.cpp GroupStore.hpp
   SerialBackend.cpp SerialBackend.hpp
   SecureBuffer.cpp SecureBuffer.hpp
   Vault.cpp Vault.hpp

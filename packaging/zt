@@ -4,7 +4,10 @@
 #   zt <saved-session>      open a saved session
 #   zt ssh user@host [...]  ad-hoc SSH session through the system ssh
 #   zt serial /dev/ttyUSB0 [baud]  ad-hoc serial console
+#   zt --group <name>       open a saved group (its sessions as tabs in one new window)
+#   zt -g <name>            same
 #   zt --list-sessions      print saved session names
+#   zt --list-groups        print saved group names
 #   zt --version | --help
 # ZTERMINAL_BIN overrides the binary (used by the test suite).
 ZT_BIN=${ZTERMINAL_BIN:-zterminal}
@@ -13,6 +16,7 @@ case "$1" in
   -h|--help)
     cat <<'USAGE'
 Usage: zt [SESSION | ssh [user@]host [ssh-args...] | serial DEVICE [BAUD] | -e command [args...]]
+       zt --group GROUP | --list-groups
        zt --version | --help
 
 Starts zterminal in the background (detached from this shell).
@@ -21,15 +25,20 @@ Starts zterminal in the background (detached from this shell).
   zt ssh user@host [args]  open an ad-hoc SSH session using the system ssh
   zt serial DEVICE [BAUD]  open a serial console (default 9600 8N1)
   zt -e prog [args]        run prog in a new zterminal window
+  zt -g, --group GROUP     open a saved group: its sessions as tabs in a new window
   zt --list-sessions       print the saved session names
+  zt --list-groups         print the saved group names
 
 Saved sessions: ~/.config/zterminal/sessions/ (File > New Session, then Save).
+Saved groups:   ~/.config/zterminal/groups/ (File > Manage Groups).
 USAGE
     exit 0 ;;
   -v|--version)
     exec "$ZT_BIN" --version ;;
   --list-sessions)
     exec "$ZT_BIN" --list-sessions ;;
+  --list-groups)
+    exec "$ZT_BIN" --list-groups ;;
 esac
 
 if ! command -v "$ZT_BIN" >/dev/null 2>&1; then

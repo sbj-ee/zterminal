@@ -44,6 +44,9 @@ QString LaunchRequest::displayName() const
     case Kind::Help:
     case Kind::ListSessions:
     case Kind::CheckSession:
+    case Kind::Group:
+    case Kind::ListGroups:
+    case Kind::CheckGroup:
     case Kind::Error:
         break;
     }
@@ -78,6 +81,21 @@ LaunchRequest parseCommandLine(const QStringList &args)
         }
         r.kind = LaunchRequest::Kind::CheckSession;
         r.sessionName = args.at(1);
+        return r;
+    }
+    if (first == QLatin1String("--list-groups")) {
+        r.kind = args.size() == 1 ? LaunchRequest::Kind::ListGroups : LaunchRequest::Kind::Error;
+        r.error = QStringLiteral("--list-groups takes no arguments");
+        return r;
+    }
+    if (first == QLatin1String("--group") || first == QLatin1String("-g") || first == QLatin1String("--check-group")) {
+        if (args.size() != 2) {
+            r.kind = LaunchRequest::Kind::Error;
+            r.error = QStringLiteral("%1 needs exactly one group name (quote it if it has spaces)").arg(first);
+            return r;
+        }
+        r.kind = first == QLatin1String("--check-group") ? LaunchRequest::Kind::CheckGroup : LaunchRequest::Kind::Group;
+        r.groupName = args.at(1);
         return r;
     }
     if (first == QLatin1String("-e") || first == QLatin1String("--command")) {
@@ -145,6 +163,7 @@ QString usageText()
 {
     return QStringLiteral(
         "Usage: zterminal [SESSION | ssh [user@]host [ssh-args...] | serial DEVICE [BAUD] | -e command [args...]]\n"
+        "       zterminal --group GROUP\n"
         "       zterminal --version | --help\n"
         "\n"
         "  (no arguments)           open a local shell\n"
@@ -154,10 +173,14 @@ QString usageText()
         "  -e, --command prog args  run prog in the terminal\n"
         "  --list-sessions          print the saved session names and exit\n"
         "  --check-session SESSION  exit 0 if SESSION is saved, else list the saved ones\n"
+        "  -g, --group GROUP        open a saved group: its sessions as tabs in a new window\n"
+        "  --list-groups            print the saved group names and exit\n"
+        "  --check-group GROUP      exit 0 if GROUP is saved, else list the saved ones\n"
         "  -v, --version            print the version and exit\n"
         "  -h, --help               print this help and exit\n"
         "\n"
-        "Saved sessions live in ~/.config/zterminal/sessions/ (one .ini per session).\n"
+        "Saved sessions live in ~/.config/zterminal/sessions/ (one .ini per session),\n"
+        "saved groups in ~/.config/zterminal/groups/.\n"
         "Use `zt` to start zterminal detached from the calling shell.\n");
 }
 

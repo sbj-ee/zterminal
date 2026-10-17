@@ -41,7 +41,12 @@ public:
                   QWidget *parent = nullptr);
     ~SessionWidget() override;
 
-    void startSession();
+    // Unattended: a group opening many tabs at once (and Reconnect All). Never
+    // pops up the vault unlock dialog or the "stored password belongs to
+    // another target" question; ssh just asks in the tab, like an automatic
+    // reconnect does.
+    enum class StartMode { Interactive, Unattended };
+    void startSession(StartMode mode = StartMode::Interactive);
     void restartSession();
     // Stop logging, close the port / end the process (closing the tab).
     void shutdown();
@@ -82,13 +87,16 @@ public:
     // Serial: the path watched for the device to come back.
     QString serialWatchPath() const { return m_serialWatchPath; }
     bool isWaitingForDevice() const;
-    void reconnectNow();
+    void reconnectNow(StartMode mode = StartMode::Interactive);
     void cancelReconnect();
     // An ssh connection counts as back once it has stayed up this long.
     static void setReconnectStableMsForTests(int ms);
     // Tests: answer the "stored password belongs to another target" prompt
     // without showing it (1 = re-bind and use it, 0 = don't send it, -1 = ask).
     static void setRebindAnswerForTests(int answer);
+    // The last line of the output is a password / passphrase / yes-no prompt
+    // that is waiting for the user (the tab shows "? " in its title).
+    bool needsInput() const { return m_needsInput; }
     // Edit > Find (Ctrl+Shift+F): this tab's find bar under the view.
     FindBar *findBar() const { return m_findBar; }
     void openFind();
@@ -123,9 +131,11 @@ signals:
     void loggingChanged(bool on);
     void pendingChanged(qint64 remaining);
     void contextMenuRequested(const QPoint &globalPos);
+    void needsInputChanged(bool waiting);
 
 private:
     void onSessionFinished(int exitCode, bool crashed);
+    void setNeedsInput(bool waiting);
     void markDisconnected(const QString &reason);
     void markReconnected();
     void updateDisconnectBanner(const QString &note = {});
@@ -161,6 +171,7 @@ private:
     QByteArray m_ptyTail;            // last output, to classify an ssh exit
     bool m_disconnected = false;
     bool m_userStop = false;         // Restart Session terminated the process
+    bool m_needsInput = false;
     bool m_autoAttempt = false;      // the running attempt was started by the scheduler
     QDateTime m_droppedAt;
     QString m_dropReason;
