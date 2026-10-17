@@ -21,6 +21,7 @@ zterminal_add_test(tst_view zterminal_ui)
 zterminal_add_test(tst_settings zterminal_ui)
 zterminal_add_test(tst_sessions zterminal_core)
 zterminal_add_test(tst_sessionui zterminal_ui)
+zterminal_add_test(tst_groups zterminal_core)
 zterminal_add_test(tst_serial zterminal_core)
 zterminal_add_test(tst_serialui zterminal_ui)
 zterminal_add_test(tst_vault zterminal_core)
@@ -56,6 +57,12 @@ add_dependencies(tst_tabs zterminal-askpass)
 set_tests_properties(tst_tabs PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_tabs;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
   TIMEOUT 120)
+# Session groups: dialog, opening, summary, one vault unlock, needs-input marker, picker.
+zterminal_add_test(tst_groupui zterminal_ui)
+add_dependencies(tst_groupui zterminal-askpass)
+set_tests_properties(tst_groupui PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_groupui;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
+  TIMEOUT 180)
 set_tests_properties(tst_logui PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-tst_logui;ZTERMINAL_ASKPASS=$<TARGET_FILE:zterminal-askpass>"
   TIMEOUT 120)
@@ -88,6 +95,28 @@ set_tests_properties(zterminal_list_sessions PROPERTIES ENVIRONMENT "${ZT_FIXTUR
   PASS_REGULAR_EXPRESSION "^core-sw1\nlab box\n$")
 add_test(NAME zterminal_check_session_ok COMMAND zterminal --check-session "lab box")
 set_tests_properties(zterminal_check_session_ok PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}")
+add_test(NAME zterminal_list_groups COMMAND zterminal --list-groups)
+set_tests_properties(zterminal_list_groups PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}"
+  PASS_REGULAR_EXPRESSION "^lab\n$")
+add_test(NAME zterminal_check_group_ok COMMAND zterminal --check-group lab)
+set_tests_properties(zterminal_check_group_ok PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}")
+add_test(NAME zterminal_unknown_group_message COMMAND zterminal --check-group nope)
+set_tests_properties(zterminal_unknown_group_message PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}"
+  PASS_REGULAR_EXPRESSION "unknown group \"nope\"; saved groups: lab")
+add_test(NAME zterminal_unknown_group_fails COMMAND zterminal --group nope)
+set_tests_properties(zterminal_unknown_group_fails PROPERTIES WILL_FAIL ON
+  ENVIRONMENT "${ZT_FIXTURE_ENV};QT_QPA_PLATFORM=offscreen")
+add_test(NAME zt_group_check_passes_through COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt --group nope)
+set_tests_properties(zt_group_check_passes_through PROPERTIES
+  ENVIRONMENT "${ZT_FIXTURE_ENV};ZTERMINAL_BIN=$<TARGET_FILE:zterminal>"
+  PASS_REGULAR_EXPRESSION "zterminal: unknown group \"nope\"; saved groups: lab")
+add_test(NAME zt_group_missing_name COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt --group)
+set_tests_properties(zt_group_missing_name PROPERTIES WILL_FAIL ON
+  ENVIRONMENT "ZTERMINAL_BIN=$<TARGET_FILE:zterminal>")
+add_test(NAME zt_list_groups COMMAND ${CMAKE_SOURCE_DIR}/packaging/zt --list-groups)
+set_tests_properties(zt_list_groups PROPERTIES
+  ENVIRONMENT "${ZT_FIXTURE_ENV};ZTERMINAL_BIN=$<TARGET_FILE:zterminal>"
+  PASS_REGULAR_EXPRESSION "^lab\n$")
 add_test(NAME zterminal_unknown_session_message COMMAND zterminal --check-session nope)
 set_tests_properties(zterminal_unknown_session_message PROPERTIES ENVIRONMENT "${ZT_FIXTURE_ENV}"
   PASS_REGULAR_EXPRESSION "unknown session \"nope\"; saved sessions: core-sw1, lab box")

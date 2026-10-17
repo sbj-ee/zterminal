@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.5.1** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.6.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.5.1 — <session>`), in Help → About and by
+the window title (`zterminal 1.6.0 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -52,6 +52,9 @@ SSH itself.
   CLIPBOARD); double-click word / triple-click line; right-click pastes CLIPBOARD;
   Ctrl+right-click opens the menu; middle-click is configurable. Hold **Shift** to
   select or paste when a program has grabbed the mouse.
+- **Session groups:** an ordered list of saved sessions that opens as tabs
+  (File → Open Group, Ctrl+Shift+P, `zt --group NAME`). See
+  [Session groups](#session-groups).
 - **App shortcuts** use Ctrl+Shift+… (Copy Ctrl+Shift+C, Paste Ctrl+Shift+V, …)
   plus F11 and Shift+Insert, so plain Ctrl+C / Ctrl+W and the F-keys still reach
   the program. On macOS, ⌘C and ⌘V copy and paste as well.
@@ -185,6 +188,8 @@ runtime.
 zt                      # local shell (Linux: detaches from your prompt)
 zt core-sw1             # open a saved session (quote names with spaces)
 zt --list-sessions
+zt --group lab          # open a saved group: its sessions as tabs in one window
+zt --list-groups
 zt ssh user@host        # ad-hoc SSH (all ssh args pass through)
 zt serial /dev/ttyUSB0  # ad-hoc serial at 9600 8N1 (or: zt serial /dev/ttyACM0 115200)
 zt -e htop
@@ -212,6 +217,58 @@ extraArgs=-o ServerAliveInterval=30
 Host, user and jump host are validated (no leading `-`, no spaces or shell
 characters); the host always follows `--` on the ssh argv. `authFromVault=true`
 is the only password-related flag ever written to the session file.
+
+## Session groups
+
+A **group** is a named, ordered list of saved sessions that opens together as
+tabs, e.g. `lab` = `core-sw1`, `edge-sw2`, `build box`. Members are *references
+by session name*, not copies: edit a session and every group that lists it sees
+the change, and its stored vault password keeps working (the vault is keyed by
+session name too). Groups live in `~/.config/zterminal/groups/` (one INI per
+group, owner-only permissions, never a password), a different directory from the
+sessions, so zterminal 1.5.0 and older simply ignore them.
+
+- **Make one:** File → Manage Groups… Pick or create a group, **Add Session…**
+  (multi-select), reorder by drag and drop or **Move Up / Down**, **Remove**,
+  then **Save**. Settings per group: *Open in* (a new window, or this window),
+  *Start each session after* (stagger, 250 ms by default, 0–5000), and *Focus
+  tab* (which member has the focus once the group is open).
+- **Open one:** File → Open Group → *name*; **Ctrl+Shift+P** (File → Open Group
+  by Name…) shows a small filter-as-you-type list, Enter opens the group;
+  `zt --group lab` (or `-g lab`) from a shell. `zterminal --list-groups` and
+  `--check-group NAME` are the scripting helpers.
+- **What happens:** the first session opens at once and the others follow a
+  stagger apart, each in the background so only the focus tab takes the focus.
+  If any member uses a stored password the vault is unlocked **once**, before the
+  first tab (cancel it and the tabs still open; ssh asks in each one). Members
+  start *unattended*: no stack of unlock or "stored password belongs to another
+  target" dialogs, ssh's own password and host-key questions stay in their tabs.
+  A tab that is waiting for one is marked **? name** and the status bar counts
+  them ("? 3 tabs waiting for input"). Tabs are independent: one that fails to
+  connect shows its own banner and the rest carry on; Session → **Reconnect All
+  Disconnected** retries every dropped tab (one unlock).
+- **Missing members:** a session that was deleted, was imported and not reviewed
+  yet, or no longer validates is skipped, and one message says which ("Opened 7
+  of 8; skipped: build box (missing)"). Deleting a session that groups use asks
+  "Used in groups: lab, edge. Remove it from them too?".
+- **Opening the same group twice** opens it twice.
+
+![Manage Groups dialog with the group "lab"](docs/screenshots/groups-manage.png)
+![A window opened from the group "lab": four tabs](docs/screenshots/groups-window.png)
+
+```ini
+[group]
+name=lab
+version=1
+openIn=newWindow
+staggerMs=250
+focusIndex=0
+
+[member]
+1\session=core-sw1
+2\session=build box
+size=2
+```
 
 ## Importing sessions
 
@@ -325,8 +382,8 @@ or tab title.
 
 ## Status and known gaps
 
-Current release: **1.5.0** (tag `v1.5.0`); 1.5.1 is a documentation-only
-change and is not released until it is tagged. What zterminal deliberately does not do (yet), from the
+Current release: **1.5.0** (tag `v1.5.0`); 1.5.1 (documentation only) and 1.6.0
+(session groups) are not released until they are tagged. What zterminal deliberately does not do (yet), from the
 design notes in [docs/PLAN.md](docs/PLAN.md):
 
 - **No split panes.** One session per tab; tabs only.
@@ -341,10 +398,10 @@ design notes in [docs/PLAN.md](docs/PLAN.md):
 - **Platforms:** Linux amd64 and macOS arm64 only; no Windows, no Intel Mac, no
   Linux arm64 package.
 
-**Planned: session groups (Option A).** A feature for grouping saved sessions is
-in development on the `feature/session-groups` branch, targeting 1.6.0. It is
-**not part of any release yet**, so nothing in this README describes it as
-working.
+- **Session groups are launch lists only** (see [Session groups](#session-groups)):
+  no per-member title, startup command or working directory, no nesting, no
+  sidebar, no export/import of groups, no `zterminal://` URL and no hand-off to a
+  running instance.
 
 ## Building
 

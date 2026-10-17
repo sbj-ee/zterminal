@@ -1,5 +1,7 @@
 #include "SessionDialog.hpp"
 
+#include "GroupStore.hpp"
+
 #include "SessionExport.hpp"
 
 #include "AppSettings.hpp"
@@ -623,6 +625,22 @@ bool SessionDialog::deleteSelected()
     }
     const QString name = item->text();
     const std::optional<SessionConfig> old = m_store.load(name);
+    // Groups list sessions by name: offer to drop this one from them too.
+    const GroupStore groups = GroupStore::besides(m_store);
+    const QStringList usedIn = groups.groupsUsing(name);
+    bool prune = false;
+    if (!usedIn.isEmpty()) {
+        const auto ret = QMessageBox::question(
+            this, QStringLiteral("Delete Session"),
+            QStringLiteral("Used in groups: %1.\n\nRemove it from them too? (Otherwise they keep the name and skip it "
+                           "when they open.)")
+                .arg(usedIn.join(QStringLiteral(", "))),
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
+        if (ret == QMessageBox::Cancel) {
+            return false;
+        }
+        prune = ret == QMessageBox::Yes;
+    }
     if (!m_store.remove(name)) {
         setError(QStringLiteral("Can't delete \"%1\".").arg(name));
         return false;
@@ -637,6 +655,9 @@ bool SessionDialog::deleteSelected()
         SessionConfig gone = old.value_or(SessionConfig{});
         gone.name = name;
         vaultbind::queueDeletion(vm.vault(), gone);
+    }
+    if (prune) {
+        groups.removeSessionRef(name);
     }
     setError({});
     refreshList();

@@ -3,6 +3,8 @@
 #include "Terminal.hpp"
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QResizeEvent>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -222,6 +224,20 @@ void TerminalView::updateGrid()
     m_selection.clear();
     updateScrollBar();
     emit gridSizeChanged(m_gridRows, m_gridCols);
+}
+
+void TerminalView::presize(const QSize &outer)
+{
+    if (isVisible() || !outer.isValid() || outer == size()) {
+        return;
+    }
+    const QSize old = size();
+    setGeometry(QRect(QPoint(0, 0), outer));
+    // A hidden widget only gets its resize event when first shown; deliver it
+    // now so the viewport follows, then size the terminal grid to it.
+    QResizeEvent e(outer, old);
+    QCoreApplication::sendEvent(this, &e);
+    updateGrid();
 }
 
 void TerminalView::resizeEvent(QResizeEvent *e)

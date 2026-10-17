@@ -1,4 +1,6 @@
 #include "CommandLine.hpp"
+#include "GroupOpener.hpp"
+#include "GroupStore.hpp"
 #include "MainWindow.hpp"
 #include "ProcessHardening.hpp"
 #include "SessionStore.hpp"
@@ -6,6 +8,7 @@
 #include "version.hpp"
 
 #include <QApplication>
+#include <QMessageBox>
 #include <QSettings>
 
 #include <cstdio>
@@ -61,7 +64,22 @@ int main(int argc, char *argv[])
                 return 0;
             }
         }
-        if (checkOnly) {
+        // Likewise saved groups (a group opens its sessions as tabs; each
+        // member is validated when it opens, a missing one is skipped).
+        const zterminal::GroupStore groups;
+        if (r.kind == zterminal::LaunchRequest::Kind::ListGroups) {
+            for (const QString &n : groups.names()) {
+                std::printf("%s\n", n.toLocal8Bit().constData());
+            }
+            return 0;
+        }
+        if (r.kind == zterminal::LaunchRequest::Kind::CheckGroup || r.kind == zterminal::LaunchRequest::Kind::Group) {
+            if (!groups.contains(r.groupName)) {
+                std::fprintf(stderr, "zterminal: %s\n", groups.unknownGroupMessage(r.groupName).toLocal8Bit().constData());
+                return 2;
+            }
+        }
+        if (checkOnly || r.kind == zterminal::LaunchRequest::Kind::CheckGroup) {
             return 0;
         }
     }
@@ -83,6 +101,19 @@ int main(int argc, char *argv[])
         std::fprintf(stderr, "zterminal: %s\n\n%s", request.error.toLocal8Bit().constData(),
                      zterminal::usageText().toLocal8Bit().constData());
         return 2;
+    }
+
+    if (request.kind == zterminal::LaunchRequest::Kind::Group) {
+        // The group's first window lives until closed (WA_DeleteOnClose), like File > New Window.
+        QString err;
+        zterminal::MainWindow *gw = zterminal::GroupOpener::openByName(request.groupName, nullptr, &err);
+        if (!gw) {
+            std::fprintf(stderr, "zterminal: %s\n", err.toLocal8Bit().constData());
+            QMessageBox::warning(nullptr, QStringLiteral("Open Group"), err);
+            return 1;
+        }
+        zterminal::UpdateManager::instance().scheduleStartupCheck(gw);
+        return QApplication::exec();
     }
 
     zterminal::MainWindow w(request, args);

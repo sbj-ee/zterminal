@@ -8,6 +8,25 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.0 — unreleased
+
+- **Session groups.** A group is an ordered list of saved-session names that
+  opens as tabs in a new window (or this one): File → Open Group, File → Manage
+  Groups…, Open Group by Name (Ctrl+Shift+P), `zterminal --group NAME` / `-g`,
+  `--list-groups`, `--check-group`, and `zt --group`. One vault unlock for the
+  whole group, staggered unattended starts (no dialog per tab), missing or
+  unreviewed members skipped with one summary. Groups are stored in
+  `~/.config/zterminal/groups/` (older versions ignore them); no per-member
+  overrides, nesting, sidebar, splits or export yet.
+- Session → Reconnect All Disconnected.
+- Tabs that are waiting for a password or a host-key answer are marked `? ` and
+  counted in the status bar.
+- Deleting a saved session that groups use offers to remove it from them.
+- Fix: a tab started in the background (a group's tabs, or any future
+  background open) began with a 1×9 terminal because a never-shown view keeps
+  Qt's default size; it now starts at the window's terminal size.
+- Tests: `tst_groups`, `tst_groupui` (both required to run, not skip, in CI).
+
 ## 1.5.1 — unreleased
 
 - Documentation only: README expanded (what zterminal is, install and release
