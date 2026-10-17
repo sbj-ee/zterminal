@@ -253,6 +253,9 @@ sessions, so zterminal 1.5.0 and older simply ignore them.
   "Used in groups: lab, edge. Remove it from them too?".
 - **Opening the same group twice** opens it twice.
 
+![Manage Groups dialog with the group "lab"](docs/screenshots/groups-manage.png)
+![A window opened from the group "lab": four tabs](docs/screenshots/groups-window.png)
+
 ```ini
 [group]
 name=lab
