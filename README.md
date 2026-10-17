@@ -6,10 +6,18 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.4.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
-vault, session logging, safe paste, Find, keepalive/reconnect, in-app updates,
-and a theme editor.
-See [docs/PLAN.md](docs/PLAN.md) for design notes.
+**1.6.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
+vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
+updates, and brand colour themes with a theme editor. The version is shown in
+the window title (`zterminal 1.6.0 — <session>`), in Help → About and by
+`zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
+notes: [docs/PLAN.md](docs/PLAN.md).
+
+zterminal is a classic PuTTY-style terminal: a menu bar, a session dialog with
+saved sessions, one session per tab, and PuTTY/X11 mouse behaviour (select to
+copy, right-click to paste). It runs your local shell, or uses the system
+`ssh` (no shell, validated arguments) or a serial port. It does not implement
+SSH itself.
 
 ![zterminal running a colour test, with a selection highlighted](docs/screenshot.png)
 
@@ -44,6 +52,9 @@ See [docs/PLAN.md](docs/PLAN.md) for design notes.
   CLIPBOARD); double-click word / triple-click line; right-click pastes CLIPBOARD;
   Ctrl+right-click opens the menu; middle-click is configurable. Hold **Shift** to
   select or paste when a program has grabbed the mouse.
+- **Session groups:** an ordered list of saved sessions that opens as tabs
+  (File → Open Group, Ctrl+Shift+P, `zt --group NAME`). See
+  [Session groups](#session-groups).
 - **App shortcuts** use Ctrl+Shift+… (Copy Ctrl+Shift+C, Paste Ctrl+Shift+V, …)
   plus F11 and Shift+Insert, so plain Ctrl+C / Ctrl+W and the F-keys still reach
   the program. On macOS, ⌘C and ⌘V copy and paste as well.
@@ -143,12 +154,42 @@ sudo apt install ./zterminal_*_amd64.deb
 right-click → Open. Allow Local Network access when prompted if you use SSH / LAN
 tools from a local shell.
 
+### Verifying a release
+
+Every release carries `SHA256SUMS` and `SHA256SUMS.minisig`, a
+[minisign](https://jedisct1.github.io/minisign/) signature made in CI by the
+release workflow. The public key is compiled into the app
+(`core/UpdateSigningKey.cpp`, which the in-app updater checks) and repeated in
+[docs/RELEASING.md](docs/RELEASING.md). Key ID `32960BBA77B36F1F`:
+
+```
+RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9
+```
+
+To check a download by hand (`minisign` is `brew install minisign` or
+`sudo apt install minisign`):
+
+```sh
+minisign -Vm SHA256SUMS -P RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9
+sha256sum -c --ignore-missing SHA256SUMS          # Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS      # macOS
+```
+
+The first command proves `SHA256SUMS` was signed by the release key; the
+second proves your package matches it. Releases before 1.3.0 are not signed
+(see "Upgrading from 1.0.x" above). The macOS `.app` is ad-hoc signed and not
+notarized, which is why Gatekeeper asks on first launch; see
+[docs/HARDENING.md](docs/HARDENING.md) for why it is signed without the hardened
+runtime.
+
 ## Usage
 
 ```sh
 zt                      # local shell (Linux: detaches from your prompt)
 zt core-sw1             # open a saved session (quote names with spaces)
 zt --list-sessions
+zt --group lab          # open a saved group: its sessions as tabs in one window
+zt --list-groups
 zt ssh user@host        # ad-hoc SSH (all ssh args pass through)
 zt serial /dev/ttyUSB0  # ad-hoc serial at 9600 8N1 (or: zt serial /dev/ttyACM0 115200)
 zt -e htop
@@ -176,6 +217,55 @@ extraArgs=-o ServerAliveInterval=30
 Host, user and jump host are validated (no leading `-`, no spaces or shell
 characters); the host always follows `--` on the ssh argv. `authFromVault=true`
 is the only password-related flag ever written to the session file.
+
+## Session groups
+
+A **group** is a named, ordered list of saved sessions that opens together as
+tabs, e.g. `lab` = `core-sw1`, `edge-sw2`, `build box`. Members are *references
+by session name*, not copies: edit a session and every group that lists it sees
+the change, and its stored vault password keeps working (the vault is keyed by
+session name too). Groups live in `~/.config/zterminal/groups/` (one INI per
+group, owner-only permissions, never a password), a different directory from the
+sessions, so zterminal 1.5.0 and older simply ignore them.
+
+- **Make one:** File → Manage Groups… Pick or create a group, **Add Session…**
+  (multi-select), reorder by drag and drop or **Move Up / Down**, **Remove**,
+  then **Save**. Settings per group: *Open in* (a new window, or this window),
+  *Start each session after* (stagger, 250 ms by default, 0–5000), and *Focus
+  tab* (which member has the focus once the group is open).
+- **Open one:** File → Open Group → *name*; **Ctrl+Shift+P** (File → Open Group
+  by Name…) shows a small filter-as-you-type list, Enter opens the group;
+  `zt --group lab` (or `-g lab`) from a shell. `zterminal --list-groups` and
+  `--check-group NAME` are the scripting helpers.
+- **What happens:** the first session opens at once and the others follow a
+  stagger apart, each in the background so only the focus tab takes the focus.
+  If any member uses a stored password the vault is unlocked **once**, before the
+  first tab (cancel it and the tabs still open; ssh asks in each one). Members
+  start *unattended*: no stack of unlock or "stored password belongs to another
+  target" dialogs, ssh's own password and host-key questions stay in their tabs.
+  A tab that is waiting for one is marked **? name** and the status bar counts
+  them ("? 3 tabs waiting for input"). Tabs are independent: one that fails to
+  connect shows its own banner and the rest carry on; Session → **Reconnect All
+  Disconnected** retries every dropped tab (one unlock).
+- **Missing members:** a session that was deleted, was imported and not reviewed
+  yet, or no longer validates is skipped, and one message says which ("Opened 7
+  of 8; skipped: build box (missing)"). Deleting a session that groups use asks
+  "Used in groups: lab, edge. Remove it from them too?".
+- **Opening the same group twice** opens it twice.
+
+```ini
+[group]
+name=lab
+version=1
+openIn=newWindow
+staggerMs=250
+focusIndex=0
+
+[member]
+1\session=core-sw1
+2\session=build box
+size=2
+```
 
 ## Importing sessions
 
@@ -287,6 +377,29 @@ Titles set by programs (OSC 0/2) are cut at 4 KB, and control and
 bidirectional formatting characters are removed before they reach the window
 or tab title.
 
+## Status and known gaps
+
+Current release: **1.5.0** (tag `v1.5.0`); 1.5.1 (documentation only) and 1.6.0
+(session groups) are not released until they are tagged. What zterminal deliberately does not do (yet), from the
+design notes in [docs/PLAN.md](docs/PLAN.md):
+
+- **No split panes.** One session per tab; tabs only.
+- **No hand-off to a running instance.** A zterminal started separately
+  (`zt name` from a shell) is its own process and unlocks the vault on its own;
+  tabs and windows opened from inside the app share one unlock.
+- **Not implemented:** OSC 52 clipboard write (OSC 52 read is never allowed),
+  OSC 8 hyperlinks and click-to-open URLs, sixel/kitty graphics, Telnet / raw
+  TCP, PuTTY session import.
+- **macOS:** Apple Silicon only (macOS 14+); the app is ad-hoc signed, not
+  Developer ID signed or notarized, so first launch needs right-click → Open.
+- **Platforms:** Linux amd64 and macOS arm64 only; no Windows, no Intel Mac, no
+  Linux arm64 package.
+
+- **Session groups are launch lists only** (see [Session groups](#session-groups)):
+  no per-member title, startup command or working directory, no nesting, no
+  sidebar, no export/import of groups, no `zterminal://` URL and no hand-off to a
+  running instance.
+
 ## Building
 
 Requires CMake 3.21+, a C++20 compiler, Ninja, Qt 6.4+ (Widgets, SerialPort,
@@ -330,6 +443,22 @@ ctest --test-dir build --output-on-failure      # headless (QT_QPA_PLATFORM=offs
 ./tests/scripts/colortest.sh                    # run inside zterminal: 16/256/truecolor
 ```
 
+The suites in `tests/` are Qt Test executables registered with CTest (see
+`tests/CMakeLists.txt`). Each one runs with `QT_QPA_PLATFORM=offscreen` and its
+own `XDG_CONFIG_HOME` under the build tree, so tests never read or write your
+real `~/.config/zterminal`, and receives the CMake version as
+`ZTERMINAL_EXPECTED_VERSION`. The serial suites need `socat`; CI installs it
+and fails if they skip. Use `ctest -R tst_vault` to run a subset.
+
+CI (`.github/workflows/ci.yml`) builds and tests every push to `main` and every
+pull request on **Ubuntu 24.04** (Release, warnings as errors, `.deb`
+packaging checks) and **macOS 14** (arm64, `.dmg` packaging and bundle
+checks), plus an ASan/UBSan test run, clang-tidy on `core/`, `app/` and
+`askpass/`, and 60-second libFuzzer runs of the harnesses in `fuzz/`. A nightly
+workflow fuzzes each harness for 20 minutes (`fuzz-nightly.yml`).
+Dependabot updates the pinned GitHub Actions weekly; minor and patch updates
+merge themselves once CI passes.
+
 ### Packages
 
 ```sh
@@ -344,9 +473,18 @@ see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Version bumps
 
+**Every pull request bumps the version** (rule of 2026-10-17), following
+[semantic versioning](https://semver.org/): a **patch** bump for fixes and
+documentation, a **minor** bump for features. A PR that bumps the version also
+adds an entry to [CHANGELOG.md](CHANGELOG.md). Tags and releases are made
+separately, only after review ([docs/RELEASING.md](docs/RELEASING.md)).
+
 Bump **only** `project(zterminal VERSION x.y.z)` in `CMakeLists.txt`.
 `src/version.hpp.in` is generated into the build tree; the window title, About,
-`--version`, Info.plist, and the `.deb` / `.dmg` names all follow from it.
+`--version`, Info.plist, and the `.deb` / `.dmg` names all follow from it, and
+the test suites compare against it (`ZTERMINAL_EXPECTED_VERSION`). There is no
+separate Debian changelog or packaging file to edit: `cmake/Packaging.cmake`
+(CPack) reads the same version.
 
 ## Layout
 
@@ -359,9 +497,26 @@ Bump **only** `project(zterminal VERSION x.y.z)` in `CMakeLists.txt`.
 - `askpass/` — `zterminal-askpass` (`SSH_ASKPASS` helper)
 - `assets/icons/` — Zorro-Z PNG set (and macOS `.icns` input)
 - `packaging/` — `zt` launcher and `.desktop` file
-- `cmake/` — packaging, macOS bundle / macdeployqt
+- `cmake/` — packaging, macOS bundle / macdeployqt, compiler warnings
+- `fuzz/` — libFuzzer harnesses and seed corpus
+- `tools/` — macOS bundle check, sanitizer suppressions
+- `docs/` — design notes (`PLAN.md`), `RELEASING.md`, `HARDENING.md`, `THEMES.md`
 
 ## Security
+
+In short (details in the sections above and in [SECURITY.md](SECURITY.md)):
+
+- The vault encrypts stored passwords **at rest** (Argon2id +
+  XChaCha20-Poly1305); there is no recovery if you forget the master password,
+  and it does not defend against malware running as you.
+- Stored passwords are bound to the session's real target and are only sent to
+  that target's own password prompt via `zterminal-askpass`.
+- **Imported session files are untrusted.** They are shown for review before
+  anything is written, and sessions with dangerous ssh options (including
+  `StrictHostKeyChecking=no`, `ProxyCommand`, `LocalCommand`) are refused.
+- Pastes are stripped of control characters; program-set titles are sanitized.
+- Updates install only if `SHA256SUMS` verifies against the built-in minisign
+  key (see [Verifying a release](#verifying-a-release)).
 
 To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 

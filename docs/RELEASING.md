@@ -1,6 +1,6 @@
 # Releasing zterminal
 
-1. Bump `project(zterminal VERSION x.y.z)` in `CMakeLists.txt` (nothing else).
+1. Make sure `project(zterminal VERSION x.y.z)` in `CMakeLists.txt` has the version to release (every PR already bumps it, and adds its `CHANGELOG.md` entry; change nothing else). Replace "unreleased" in the CHANGELOG heading with the release date.
 2. Merge to `main`, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 3. `.github/workflows/release.yml` builds and tests on Linux and macOS, packages
    the `.deb` and `.dmg`, writes `SHA256SUMS`, **signs it** with minisign
