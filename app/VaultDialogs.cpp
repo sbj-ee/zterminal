@@ -4,6 +4,7 @@
 #include "Vault.hpp"
 
 #include <QApplication>
+#include <QCursor>
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -64,12 +65,44 @@ QString tildePath(const QString &p)
     return s;
 }
 
-struct WaitCursor {
-    WaitCursor() { QApplication::setOverrideCursor(Qt::WaitCursor); }
-    ~WaitCursor() { QApplication::restoreOverrideCursor(); }
+// RAII busy cursor around the (Argon2-bound, briefly blocking) vault calls.
+// It is a no-op where busyCursorEnabled() is false (macOS): Qt's Cocoa plugin
+// has no native wait cursor, so it converts a bundled cursor image with
+// QImage::toCGImage(), and Qt 6.11.0/6.11.1 hand CGImageCreate a dangling
+// CGColorSpaceRef there (QTBUG-147602), which traps (EXC_BREAKPOINT, PAC)
+// on macOS 27. The guard always restores exactly what it set, also on
+// exceptions, and is not copyable.
+class WaitCursor {
+public:
+    WaitCursor() : m_active(busyCursorEnabled())
+    {
+        if (m_active) {
+            QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+        }
+    }
+    ~WaitCursor()
+    {
+        if (m_active) {
+            QApplication::restoreOverrideCursor();
+        }
+    }
+    WaitCursor(const WaitCursor &) = delete;
+    WaitCursor &operator=(const WaitCursor &) = delete;
+
+private:
+    bool m_active;
 };
 
 } // namespace
+
+bool busyCursorEnabled()
+{
+#ifdef Q_OS_MACOS
+    return false;
+#else
+    return true;
+#endif
+}
 
 QString noRecoveryWarning()
 {

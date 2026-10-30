@@ -8,6 +8,18 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.1 — unreleased
+
+- **Fix (macOS): crash when unlocking the vault.** Opening a session with a
+  stored password (or creating the vault / changing the master password)
+  crashed with `EXC_BREAKPOINT` (pointer-authentication trap) on macOS 27 with
+  Qt 6.11.1. The busy cursor shown during unlock goes through Qt's Cocoa
+  cursor conversion (`QImage::toCGImage`), which in Qt 6.11.0/6.11.1 passes a
+  dangling colour space to `CGImageCreate` (QTBUG-147602, fixed in Qt 6.11.2).
+  The vault dialogs no longer set an override cursor on macOS; on Linux the
+  wait cursor is unchanged and always restored by an RAII guard.
+- Tests: `tst_vaultui` checks the override-cursor stack is empty after unlock.
+
 ## 1.6.0 — unreleased
 
 - **Session groups.** A group is an ordered list of saved-session names that
