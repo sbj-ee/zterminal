@@ -292,9 +292,21 @@ private slots:
         QVERIFY(d.errorText().contains(QStringLiteral("Wrong master password")));
         QVERIFY(pw->text().isEmpty());
         QVERIFY(!vm().isUnlocked());
+        QVERIFY(!QApplication::overrideCursor());
         pw->setText(QString::fromUtf8(kMaster));
         QVERIFY(d.tryUnlock());
         QVERIFY(vm().isUnlocked());
+        // The busy-cursor guard leaves nothing on the override stack.
+        QVERIFY(!QApplication::overrideCursor());
+    }
+
+    void busyCursorOffOnMac()
+    {
+#ifdef Q_OS_MACOS
+        QVERIFY(!busyCursorEnabled());
+#else
+        QVERIFY(busyCursorEnabled());
+#endif
     }
 
     void changeMasterPasswordDialog()

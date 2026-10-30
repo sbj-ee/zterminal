@@ -69,6 +69,11 @@ private:
 };
 
 // The warning shown when creating a vault (also used in tests/README).
+// Whether the vault dialogs show a busy (override) cursor while unlocking,
+// creating or re-keying. False on macOS to avoid the Qt 6.11 Cocoa cursor
+// crash (QTBUG-147602); see VaultDialogs.cpp.
+bool busyCursorEnabled();
+
 QString noRecoveryWarning();
 
 } // namespace zterminal
