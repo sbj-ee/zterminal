@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.1** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.6.3** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.1 — <session>`), in Help → About and by
+the window title (`zterminal 1.6.3 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -382,8 +382,8 @@ or tab title.
 
 ## Status and known gaps
 
-Current release: **1.5.0** (tag `v1.5.0`); 1.5.1 (documentation only), 1.6.0
-(session groups) and 1.6.1 (macOS unlock crash fix) are not released until they are tagged. What zterminal deliberately does not do (yet), from the
+Current release: **1.6.2** (tag `v1.6.2`); 1.6.3 is not released until it is
+tagged. 1.5.1 (documentation only) was never tagged; its changes shipped in 1.6.0. What zterminal deliberately does not do (yet), from the
 design notes in [docs/PLAN.md](docs/PLAN.md):
 
 - **No split panes.** One session per tab; tabs only.
@@ -455,7 +455,7 @@ and fails if they skip. Use `ctest -R tst_vault` to run a subset.
 
 CI (`.github/workflows/ci.yml`) builds and tests every push to `main` and every
 pull request on **Ubuntu 24.04** (Release, warnings as errors, `.deb`
-packaging checks) and **macOS 14** (arm64, `.dmg` packaging and bundle
+packaging checks) and **macOS 15** (`macos-15` runner, arm64, `.dmg` packaging and bundle
 checks), plus an ASan/UBSan test run, clang-tidy on `core/`, `app/` and
 `askpass/`, and 60-second libFuzzer runs of the harnesses in `fuzz/`. A nightly
 workflow fuzzes each harness for 20 minutes (`fuzz-nightly.yml`).
