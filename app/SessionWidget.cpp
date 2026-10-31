@@ -371,7 +371,13 @@ SessionWidget::Launch SessionWidget::launchCommand() const
         l.args = m_request.args;
         break;
     case LaunchRequest::Kind::Serial: {
-        SessionConfig s = *currentSessionConfig();
+        // Always set for a serial request (currentSessionConfig()).
+        const std::optional<SessionConfig> cfg = currentSessionConfig();
+        if (!cfg) {
+            l.error = QStringLiteral("no serial settings");
+            break;
+        }
+        const SessionConfig &s = *cfg;
         if (const QString e = validateSerial(s); !e.isEmpty()) {
             l.error = e;
         } else {
@@ -655,10 +661,12 @@ void SessionWidget::finishLogin(bool sendPassword)
         return;
     }
     VaultManager &vm = VaultManager::instance();
-    const SecureBuffer *pw = vm.isUnlocked() && m_saved
-        ? vm.vault().secret(vaultbind::serialSecretKey(m_saved->name))
-        : nullptr;
-    if (!pw || vaultbind::check(vm.vault(), *m_saved) != vaultbind::Status::Match) {
+    if (!vm.isUnlocked() || !m_saved) {
+        return;
+    }
+    const SessionConfig &cfg = *m_saved;
+    const SecureBuffer *pw = vm.vault().secret(vaultbind::serialSecretKey(cfg.name));
+    if (!pw || vaultbind::check(vm.vault(), cfg) != vaultbind::Status::Match) {
         return;
     }
     vm.touch();

@@ -634,7 +634,8 @@ void MainWindow::updateSavedEverywhere(const SessionConfig &cfg)
     m_store.save(cfg);
     for (int i = 0; i < m_tabs->count(); ++i) {
         SessionWidget *s = sessionAt(i);
-        if (s->savedSession() && s->savedSession()->name == cfg.name) {
+        const std::optional<SessionConfig> &saved = s->savedSession();
+        if (saved && saved->name == cfg.name) {
             s->setSavedSession(cfg);
         }
     }
@@ -872,8 +873,8 @@ int MainWindow::reconnectAllDisconnected()
         SessionWidget *s = sessionAt(i);
         if (s->isDisconnected()) {
             dropped << s;
-            vault = vault || (s->savedSession() && s->savedSession()->type == SessionConfig::Type::Ssh
-                              && s->savedSession()->useStoredPassword);
+            const std::optional<SessionConfig> &saved = s->savedSession();
+            vault = vault || (saved && saved->type == SessionConfig::Type::Ssh && saved->useStoredPassword);
         }
     }
     VaultManager &vm = VaultManager::instance();
@@ -914,8 +915,8 @@ void MainWindow::showSessionDialog(bool focusSaved)
     // New Session starts blank; Open Saved Session starts on this tab's saved
     // session (if any) with the list focused.
     SessionConfig initial;
-    if (focusSaved && savedSession()) {
-        initial = *savedSession();
+    if (const std::optional<SessionConfig> &saved = savedSession(); focusSaved && saved) {
+        initial = *saved;
     }
     SessionDialog dlg(m_store, initial, this);
     if (focusSaved) {
