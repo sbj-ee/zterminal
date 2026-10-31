@@ -39,6 +39,16 @@ foreach(_lp IN ITEMS @ZTERMINAL_EXTRA_LIBPATHS@)
 endforeach()
 _run("@ZTERMINAL_MACDEPLOYQT@" "${_app}" -always-overwrite -verbose=1 ${_libpaths})
 
+# macdeployqt from Qt <= 6.11 wrote Contents/Resources/qt.conf; Homebrew Qt
+# 6.12.0's macdeployqt no longer does. Without it QtCore cannot find the bundled
+# PlugIns (cocoa platform plugin) at runtime. Write the same file ourselves,
+# before signing, if macdeployqt did not.
+if(NOT EXISTS "${_app}/Contents/Resources/qt.conf")
+  message(STATUS "zterminal deploy: writing Contents/Resources/qt.conf (macdeployqt did not)")
+  file(MAKE_DIRECTORY "${_app}/Contents/Resources")
+  file(WRITE "${_app}/Contents/Resources/qt.conf" "[Paths]\nPlugins = PlugIns\n")
+endif()
+
 # Drop input-method plugins we do not need (pulls unresolved QtVirtualKeyboard).
 file(REMOVE_RECURSE "${_app}/Contents/PlugIns/platforminputcontexts")
 

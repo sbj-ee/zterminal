@@ -13,7 +13,13 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
 ### Changed
 
 - CI and release macOS builds moved from the `macos-14` to the `macos-15` runner image,
-  which GitHub retires on November 2, 2026. No code changes.
+  which GitHub retires on November 2, 2026.
+
+### Fixed
+
+- macOS packaging: Homebrew Qt 6.12's `macdeployqt` no longer writes
+  `Contents/Resources/qt.conf`, so the `.dmg` build now writes it itself
+  (`[Paths] Plugins = PlugIns`) when missing, keeping bundled plugins found at runtime.
 
 ## 1.6.1
 
