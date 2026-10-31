@@ -30,11 +30,18 @@ readme_title=$(grep -m1 -oE 'zterminal [0-9]+\.[0-9]+\.[0-9]+ — <session>' REA
 [ "$readme_title" = "$version" ] || err "README title example says '${readme_title:-none}', expected $version"
 
 current=$(grep -m1 -oE '^Current release: \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*' README.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
-# "Current release" is the newest tagged release: this version once it is
-# tagged, or the CHANGELOG entry just below it while this one is in a PR.
-prev=$(grep -E '^## [0-9]' CHANGELOG.md | sed -n 2p | sed -nE 's/^## ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
-if [ "$current" != "$version" ] && [ "$current" != "$prev" ]; then
-  err "README 'Current release' says '${current:-none}', expected $version or $prev"
+# "Current release" names the newest tagged release: this version, or (while
+# this version is still in a PR or being tagged) the newest other v* tag.
+# Needs the tags (actions/checkout with fetch-depth: 0); skipped without them.
+latest_other=$(git tag -l 'v[0-9]*' 2>/dev/null | sed 's/^v//' | grep -vxF "$version" | sort -V | tail -n1 || true)
+if [ -n "$latest_other" ]; then
+  if [ "$current" != "$version" ] && [ "$current" != "$latest_other" ]; then
+    err "README 'Current release' says '${current:-none}', expected $latest_other (newest tag) or $version"
+  fi
+elif [ -z "$current" ]; then
+  err "README has no 'Current release: **x.y.z**' line"
+else
+  echo "check-version: no v* tags fetched; not checking 'Current release' ($current)" >&2
 fi
 
 if [ -n "$tag" ]; then
