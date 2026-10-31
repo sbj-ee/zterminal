@@ -99,6 +99,8 @@ private:
     QString m_verifiedSha;
     QString m_dir;
     QString m_current; // asset being downloaded
+    QString m_tag;     // release tag, e.g. "v1.6.2" (signed comment, asset URLs)
+    QString m_blockedRedirect; // set when a redirect left GitHub's asset hosts
     int m_stage = 0;   // 0 idle, 1 SHA256SUMS, 2 SHA256SUMS.minisig, 3 package
     int m_stallMs = 30000;
     bool m_cancelled = false;

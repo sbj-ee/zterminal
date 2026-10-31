@@ -247,6 +247,67 @@ bool isTrustedReleasePageUrl(const QString &url)
         && u.path().startsWith(QLatin1String("/sbj-ee/zterminal/releases/"));
 }
 
+namespace {
+QString &assetBaseForTests()
+{
+    static QString base;
+    return base;
+}
+
+bool isPlainPathSegment(const QString &s)
+{
+    static const QRegularExpression ok(QStringLiteral("^[A-Za-z0-9._~+-]+$"));
+    return ok.match(s).hasMatch() && s != QLatin1String(".") && s != QLatin1String("..");
+}
+} // namespace
+
+void setReleaseAssetBaseForTests(const QString &base)
+{
+    assetBaseForTests() = base;
+}
+
+bool isTrustedAssetUrl(const QString &url, const QString &tag, const QString &name)
+{
+    if (!isPlainPathSegment(tag) || !isPlainPathSegment(name)) {
+        return false;
+    }
+    const QUrl u(url, QUrl::StrictMode);
+    if (!u.isValid() || !u.userInfo().isEmpty() || u.hasQuery() || u.hasFragment()) {
+        return false;
+    }
+    const QString path = u.path(QUrl::FullyEncoded);
+    const QString &testBase = assetBaseForTests();
+    if (!testBase.isEmpty()) {
+        const QUrl b(testBase);
+        return u.scheme() == b.scheme() && u.host() == b.host() && u.port() == b.port()
+            && path == b.path() + QStringLiteral("/download/") + tag + QLatin1Char('/') + name;
+    }
+    return u.scheme() == QLatin1String("https") && u.host() == QLatin1String("github.com") && u.port() == -1
+        && path == QStringLiteral("/sbj-ee/zterminal/releases/download/") + tag + QLatin1Char('/') + name;
+}
+
+bool isTrustedAssetRedirect(const QUrl &url)
+{
+    if (!url.isValid() || !url.userInfo().isEmpty()) {
+        return false;
+    }
+    const QString &testBase = assetBaseForTests();
+    if (!testBase.isEmpty()) {
+        const QUrl b(testBase);
+        if (url.scheme() == b.scheme() && url.host() == b.host() && url.port() == b.port()) {
+            return true;
+        }
+    }
+    return url.scheme() == QLatin1String("https") && url.port() == -1
+        && (url.host() == QLatin1String("release-assets.githubusercontent.com")
+            || url.host() == QLatin1String("objects.githubusercontent.com"));
+}
+
+QString expectedSignedComment(const QString &tag)
+{
+    return QStringLiteral("zterminal %1 SHA256SUMS").arg(tag);
+}
+
 QString checksumFor(const QByteArray &sha256sums, const QString &fileName)
 {
     static const QRegularExpression line(QStringLiteral("^([0-9a-fA-F]{64}) [ *](.+)$"));

@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.3** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.6.4** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.3 — <session>`), in Help → About and by
+the window title (`zterminal 1.6.4 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -176,7 +176,11 @@ shasum -a 256 -c --ignore-missing SHA256SUMS      # macOS
 ```
 
 The first command proves `SHA256SUMS` was signed by the release key; the
-second proves your package matches it. Releases before 1.3.0 are not signed
+second proves your package matches it. The trusted comment it prints must be
+`zterminal vX.Y.Z SHA256SUMS` for the release you downloaded; the in-app
+updater (from 1.6.4) refuses any other, and downloads only from
+`github.com/sbj-ee/zterminal/releases/download/vX.Y.Z/` (following redirects
+only to GitHub's release-asset hosts). Releases before 1.3.0 are not signed
 (see "Upgrading from 1.0.x" above). The macOS `.app` is ad-hoc signed and not
 notarized, which is why Gatekeeper asks on first launch; see
 [docs/HARDENING.md](docs/HARDENING.md) for why it is signed without the hardened
@@ -382,8 +386,8 @@ or tab title.
 
 ## Status and known gaps
 
-Current release: **1.6.2** (tag `v1.6.2`); 1.6.3 is not released until it is
-tagged. 1.5.1 (documentation only) was never tagged; its changes shipped in 1.6.0. What zterminal deliberately does not do (yet), from the
+Current release: **1.6.2** (tag `v1.6.2`); 1.6.3 and 1.6.4 are not released until
+they are tagged. 1.5.1 (documentation only) was never tagged; its changes shipped in 1.6.0. What zterminal deliberately does not do (yet), from the
 design notes in [docs/PLAN.md](docs/PLAN.md):
 
 - **No split panes.** One session per tab; tabs only.

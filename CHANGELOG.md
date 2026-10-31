@@ -8,6 +8,19 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.4 — 2026-10-31
+
+### Security
+
+- Updater: the minisign trusted comment of `SHA256SUMS.minisig` must be exactly
+  `zterminal <tag> SHA256SUMS` for the release being installed (the release workflow
+  signs that text), so a validly signed `SHA256SUMS` from another release can't be
+  replayed; anything else fails closed before the package is fetched.
+- Updater: release assets are downloaded only from
+  `https://github.com/sbj-ee/zterminal/releases/download/<tag>/<name>`, and a redirect
+  is followed only to `https` on GitHub's release-asset hosts
+  (`release-assets.githubusercontent.com`, `objects.githubusercontent.com`).
+
 ## 1.6.3 — 2026-10-31
 
 ### Fixed
