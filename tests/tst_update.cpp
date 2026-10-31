@@ -592,6 +592,7 @@ private slots:
         }
         // A redirect within the trusted (mock) host still works end to end.
         {
+            gh.routes[sumsPath] = MockGitHub::Route{}; // drop the 302 above
             serveRelease(gh);
             gh.routes[QStringLiteral("/moved/SHA256SUMS")] = gh.routes[sumsPath];
             MockGitHub::Route redirect;
