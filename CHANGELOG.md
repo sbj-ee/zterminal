@@ -8,7 +8,14 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
-## 1.6.1 — unreleased
+## 1.6.2 — unreleased
+
+### Changed
+
+- CI and release macOS builds moved from the `macos-14` to the `macos-15` runner image,
+  which GitHub retires on November 2, 2026. No code changes.
+
+## 1.6.1
 
 - **Fix (macOS): crash when unlocking the vault.** Opening a session with a
   stored password (or creating the vault / changing the master password)
