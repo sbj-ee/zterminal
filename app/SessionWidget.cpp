@@ -44,15 +44,15 @@ void SessionWidget::setRebindAnswerForTests(int answer)
     s_rebindAnswer = answer;
 }
 
-bool SessionWidget::storedPasswordBindingOk(bool mayPrompt, const QString &what)
+bool SessionWidget::storedPasswordBindingOk(const SessionConfig &cfg, bool mayPrompt, const QString &what)
 {
     VaultManager &vm = VaultManager::instance();
     QString stored;
-    const vaultbind::Status st = vaultbind::check(vm.vault(), *m_saved, &stored);
+    const vaultbind::Status st = vaultbind::check(vm.vault(), cfg, &stored);
     if (st == vaultbind::Status::Match || st == vaultbind::Status::NoSecret) {
         return true;
     }
-    const QString now = vaultBindingFor(*m_saved);
+    const QString now = vaultBindingFor(cfg);
     auto pretty = [](QString b) { return b.section(QLatin1Char(':'), 1); }; // drop "ssh:" / "serial:"
     const QString was = st == vaultbind::Status::Unbound
         ? QStringLiteral("an unknown target (stored by an older zterminal and never confirmed)")
@@ -71,7 +71,7 @@ bool SessionWidget::storedPasswordBindingOk(bool mayPrompt, const QString &what)
                         QStringLiteral("The stored password for \"%1\" was saved for %2, but the session now "
                                        "connects to %3.\n\nzterminal has not sent it. Only use it if you trust the "
                                        "new target (the session may have been edited or replaced by an import).")
-                            .arg(m_saved->name, was, pretty(now)),
+                            .arg(cfg.name, was, pretty(now)),
                         QMessageBox::NoButton, this);
         box.setObjectName(QStringLiteral("vaultBindingMismatch"));
         QPushButton *rebind = box.addButton(QStringLiteral("Use It for %1").arg(pretty(now)), QMessageBox::AcceptRole);
@@ -88,7 +88,7 @@ bool SessionWidget::storedPasswordBindingOk(bool mayPrompt, const QString &what)
                                        "type it, or re-enter it in the session's settings]\x1b[0m\r\n"));
         return false;
     }
-    if (!vaultbind::rebind(vm.vault(), *m_saved)) {
+    if (!vaultbind::rebind(vm.vault(), cfg)) {
         m_term->feed(QStringLiteral("\x1b[31m[zterminal: re-binding the stored password failed: %1]\x1b[0m\r\n")
                          .arg(vm.vault().lastError())
                          .toUtf8());
@@ -492,6 +492,8 @@ QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
     if (!m_saved || m_saved->type != SessionConfig::Type::Ssh || !m_saved->useStoredPassword) {
         return {};
     }
+    // Checked above; m_saved stays engaged for the widget's lifetime once set.
+    const SessionConfig &cfg = *m_saved;
     auto note = [this](const QString &m) {
         m_term->feed(QStringLiteral("\x1b[2m[zterminal: %1]\x1b[0m\r\n").arg(m).toUtf8());
     };
@@ -512,7 +514,7 @@ QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
         note(QStringLiteral("vault locked; ssh will ask for the password (Reconnect asks to unlock)"));
         return {};
     }
-    if (!vm.ensureUnlocked(this, QStringLiteral("Session \"%1\" uses a stored password.").arg(m_saved->name.toHtmlEscaped()))) {
+    if (!vm.ensureUnlocked(this, QStringLiteral("Session \"%1\" uses a stored password.").arg(cfg.name.toHtmlEscaped()))) {
         note(QStringLiteral("vault locked; ssh will ask for the password"));
         return {};
     }
@@ -521,16 +523,16 @@ QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
         return {};
     }
     vm.touch(); // using a stored password counts as activity
-    const SecureBuffer *secret = vm.vault().secret(vaultbind::sshSecretKey(m_saved->name));
+    const SecureBuffer *secret = vm.vault().secret(vaultbind::sshSecretKey(cfg.name));
     if (!secret) {
         note(QStringLiteral("no stored password for this session; ssh will ask for it"));
         return {};
     }
     // The secret is keyed by name: only send it to the target it was stored for.
-    if (!storedPasswordBindingOk(mayPrompt, QStringLiteral("Stored Password"))) {
+    if (!storedPasswordBindingOk(cfg, mayPrompt, QStringLiteral("Stored Password"))) {
         return {};
     }
-    secret = vm.vault().secret(vaultbind::sshSecretKey(m_saved->name)); // update() rebuilt the entries
+    secret = vm.vault().secret(vaultbind::sshSecretKey(cfg.name)); // update() rebuilt the entries
     if (!secret) {
         return {};
     }
@@ -548,12 +550,12 @@ QStringList SessionWidget::prepareStoredPasswordFor(bool mayPrompt)
     // Tell the helper which prompt is the target's, so a jump host (-J) never
     // gets this password (askpass/askpass_policy.h).
     AskpassTarget fallback;
-    fallback.user = m_saved->user;
-    fallback.host = m_saved->host;
-    fallback.viaJump = !m_saved->jumpHost.isEmpty() || m_saved->extraArgs.contains(QLatin1String("proxyjump"), Qt::CaseInsensitive)
-        || m_saved->extraArgs.contains(QLatin1String("proxycommand"), Qt::CaseInsensitive)
-        || QProcess::splitCommand(m_saved->extraArgs).contains(QStringLiteral("-J"));
-    const SshCommand cmd = buildSshCommand(*m_saved);
+    fallback.user = cfg.user;
+    fallback.host = cfg.host;
+    fallback.viaJump = !cfg.jumpHost.isEmpty() || cfg.extraArgs.contains(QLatin1String("proxyjump"), Qt::CaseInsensitive)
+        || cfg.extraArgs.contains(QLatin1String("proxycommand"), Qt::CaseInsensitive)
+        || QProcess::splitCommand(cfg.extraArgs).contains(QStringLiteral("-J"));
+    const SshCommand cmd = buildSshCommand(cfg);
     m_askpass->setTarget(cmd.ok() ? AskpassServer::resolveTarget(cmd.program, cmd.args, fallback) : fallback);
     return m_askpass->sshEnvironment(helper);
 }
@@ -599,13 +601,15 @@ bool SessionWidget::sendStoredLogin()
     if (!m_saved || m_saved->type != SessionConfig::Type::Serial || !m_serial->isOpen() || m_loginWait) {
         return false;
     }
+    // Checked above; m_saved stays engaged for the widget's lifetime once set.
+    const SessionConfig &cfg = *m_saved;
     VaultManager &vm = VaultManager::instance();
     if (!vm.exists()) {
         QMessageBox::information(this, QStringLiteral("Send Stored Login"),
                                  QStringLiteral("There is no password vault yet. Store a login password in File > New Session (Save)."));
         return false;
     }
-    if (!vm.ensureUnlocked(this, QStringLiteral("Send Stored Login for \"%1\".").arg(m_saved->name.toHtmlEscaped()))) {
+    if (!vm.ensureUnlocked(this, QStringLiteral("Send Stored Login for \"%1\".").arg(cfg.name.toHtmlEscaped()))) {
         return false;
     }
     if (!vm.refresh()) {
@@ -613,12 +617,12 @@ bool SessionWidget::sendStoredLogin()
         return false;
     }
     vm.touch();
-    if (!vm.vault().secret(vaultbind::serialSecretKey(m_saved->name))) {
+    if (!vm.vault().secret(vaultbind::serialSecretKey(cfg.name))) {
         QMessageBox::information(this, QStringLiteral("Send Stored Login"),
-                                 QStringLiteral("No login password is stored for \"%1\".").arg(m_saved->name));
+                                 QStringLiteral("No login password is stored for \"%1\".").arg(cfg.name));
         return false;
     }
-    if (!storedPasswordBindingOk(true, QStringLiteral("Send Stored Login"))) {
+    if (!storedPasswordBindingOk(cfg, true, QStringLiteral("Send Stored Login"))) {
         return false;
     }
     m_log->suspend(QStringLiteral("Send Stored Login"));
@@ -632,8 +636,8 @@ bool SessionWidget::sendStoredLogin()
         finishLogin(true);
         return true;
     }
-    if (!m_saved->loginUser.isEmpty()) {
-        m_serial->write(m_saved->loginUser.toUtf8() + '\r'); // write() maps CR to the session's Enter
+    if (!cfg.loginUser.isEmpty()) {
+        m_serial->write(cfg.loginUser.toUtf8() + '\r'); // write() maps CR to the session's Enter
     }
     m_loginWait->start();
     return true;

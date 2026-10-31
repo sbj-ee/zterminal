@@ -8,6 +8,15 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.5 — 2026-10-31
+
+### Changed
+
+- Stored-password path: `SessionWidget::storedPasswordBindingOk` takes the
+  `const SessionConfig &` its callers already checked (`prepareStoredPasswordFor`,
+  `sendStoredLogin`) instead of dereferencing `m_saved` itself, and clang-tidy's
+  `bugprone-unchecked-optional-access` is enabled again. No behaviour change.
+
 ## 1.6.4 — 2026-10-31
 
 ### Security
