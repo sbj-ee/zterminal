@@ -17,7 +17,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
   `sendStoredLogin`) instead of dereferencing `m_saved` itself, and clang-tidy's
   `bugprone-unchecked-optional-access` is enabled again. No behaviour change.
 
-## 1.6.4 — 2026-10-31
+## 1.6.4 — unreleased (never released separately; shipped in 1.6.5)
 
 ### Security
 
@@ -30,7 +30,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
   is followed only to `https` on GitHub's release-asset hosts
   (`release-assets.githubusercontent.com`, `objects.githubusercontent.com`).
 
-## 1.6.3 — 2026-10-31
+## 1.6.3 — unreleased (never released separately; shipped in 1.6.5)
 
 ### Fixed
 
