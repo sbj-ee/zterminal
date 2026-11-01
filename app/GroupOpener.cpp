@@ -63,7 +63,7 @@ GroupOpener::Plan GroupOpener::plan(const GroupConfig &g, const SessionStore &se
             continue;
         }
         p.openable.append({name, i});
-        p.needsVault = p.needsVault || (cfg->type == SessionConfig::Type::Ssh && cfg->useStoredPassword);
+        p.needsVault = p.needsVault || (cfg && cfg->type == SessionConfig::Type::Ssh && cfg->useStoredPassword);
     }
     return p;
 }

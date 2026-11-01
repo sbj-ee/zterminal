@@ -143,9 +143,10 @@ private:
     void checkDeviceBack();
     void resetModesForReconnect();
     QStringList prepareStoredPasswordFor(bool mayPrompt);
-    // The vault entry for m_saved must be bound to its current target. On a
-    // mismatch (or an unbound secret) asks before re-binding, if allowed.
-    bool storedPasswordBindingOk(bool mayPrompt, const QString &what);
+    // The vault entry for cfg (the caller's checked *m_saved) must be bound to
+    // its current target. On a mismatch (or an unbound secret) asks before
+    // re-binding, if allowed.
+    bool storedPasswordBindingOk(const SessionConfig &cfg, bool mayPrompt, const QString &what);
     void onSerialDisconnected(const QString &reason);
     void updatePasteBar(qint64 remaining);
     QStringList prepareStoredPassword();

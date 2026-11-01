@@ -14,7 +14,6 @@ Checks: >
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-signed-bitwise,
   -bugprone-throwing-static-initialization,
-  -bugprone-unchecked-optional-access,
   -cert-err33-c,
   -cert-err58-cpp,
   -clang-analyzer-cplusplus.NewDelete,
@@ -28,9 +27,6 @@ Checks: >
 # signed-bitwise                the scrollback/UTF-8 encoders shift ints on purpose
 # throwing-static-initialization, cert-err58-cpp
 #                               every file-scope QString/QStringList constant
-# unchecked-optional-access     SessionWidget checks m_saved at function entry;
-#                               the check loses that across calls. Worth
-#                               revisiting: the code is the stored-password path.
 # cert-err33-c                  unchecked fprintf(stderr)/signal() return values
 # cplusplus.NewDelete, NewDeleteLeaks
 #                               false reports inside Qt's headers (QPointer
