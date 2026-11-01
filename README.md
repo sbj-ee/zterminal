@@ -386,8 +386,9 @@ or tab title.
 
 ## Status and known gaps
 
-Current release: **1.6.2** (tag `v1.6.2`); 1.6.3 to 1.6.5 are not released until
-they are tagged. 1.5.1 (documentation only) was never tagged; its changes shipped in 1.6.0. What zterminal deliberately does not do (yet), from the
+Current release: **1.6.5** (tag `v1.6.5`); 1.6.3 and 1.6.4 were never tagged
+separately and shipped in 1.6.5. 1.5.1 (documentation only) was never tagged; its
+changes shipped in 1.6.0. What zterminal deliberately does not do (yet), from the
 design notes in [docs/PLAN.md](docs/PLAN.md):
 
 - **No split panes.** One session per tab; tabs only.
