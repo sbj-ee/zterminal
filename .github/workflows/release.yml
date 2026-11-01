@@ -1,5 +1,5 @@
 # Publish a release when a v* tag is pushed (e.g. `git push origin v1.0.0`):
-# build + test on Ubuntu 24.04 and macOS 14, package .deb + .dmg, write
+# build + test on Ubuntu 24.04 and macOS 15 (macos-15), package .deb + .dmg, write
 # SHA256SUMS (lists both assets so the Linux updater still finds its .deb line),
 # sign it with minisign (SHA256SUMS.minisig) and create the GitHub Release.
 #
@@ -34,6 +34,11 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Before building: the tag must be v$VERSION and the top CHANGELOG
+      # heading dated (not "unreleased"); CMake, CHANGELOG and README agree.
+      - name: Check version and changelog for this tag
+        run: scripts/check-version.sh --tag "${GITHUB_REF_NAME}"
 
       - name: Install Qt 6 + build tools
         run: |
@@ -98,6 +103,11 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Before building: the tag must be v$VERSION and the top CHANGELOG
+      # heading dated (not "unreleased"); CMake, CHANGELOG and README agree.
+      - name: Check version and changelog for this tag
+        run: scripts/check-version.sh --tag "${GITHUB_REF_NAME}"
 
       - name: Install Qt + build tools (brew)
         run: brew install qt cmake ninja libsodium pkg-config socat

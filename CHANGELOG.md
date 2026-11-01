@@ -8,7 +8,22 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
-## 1.6.2 — unreleased
+## 1.6.3 — 2026-10-31
+
+### Fixed
+
+- Version drift in the docs: the README header, title example and "Status and known
+  gaps" now name the current version and release, the CHANGELOG headings of released
+  versions carry their release dates, and the CI/release workflow comments name the
+  `macos-15` runner.
+
+### Added
+
+- `scripts/check-version.sh`: CI fails when the `CMakeLists.txt` version, the top
+  CHANGELOG heading and the README header disagree; on a tag build the release
+  workflow also requires the tag to be `v$VERSION` and the top heading to be dated.
+
+## 1.6.2 — 2026-10-31
 
 ### Changed
 
@@ -21,7 +36,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
   `Contents/Resources/qt.conf`, so the `.dmg` build now writes it itself
   (`[Paths] Plugins = PlugIns`) when missing, keeping bundled plugins found at runtime.
 
-## 1.6.1
+## 1.6.1 — 2026-10-30
 
 - **Fix (macOS): crash when unlocking the vault.** Opening a session with a
   stored password (or creating the vault / changing the master password)
@@ -33,7 +48,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
   wait cursor is unchanged and always restored by an RAII guard.
 - Tests: `tst_vaultui` checks the override-cursor stack is empty after unlock.
 
-## 1.6.0 — unreleased
+## 1.6.0 — 2026-10-17
 
 - **Session groups.** A group is an ordered list of saved-session names that
   opens as tabs in a new window (or this one): File → Open Group, File → Manage
@@ -52,7 +67,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
   Qt's default size; it now starts at the window's terminal size.
 - Tests: `tst_groups`, `tst_groupui` (both required to run, not skip, in CI).
 
-## 1.5.1 — unreleased
+## 1.5.1 — unreleased (never released; shipped in 1.6.0)
 
 - Documentation only: README expanded (what zterminal is, install and release
   verification with minisign, status and known gaps, tests and CI, security
