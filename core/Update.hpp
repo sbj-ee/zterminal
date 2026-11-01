@@ -86,6 +86,23 @@ ChecksumResult verifyChecksum(const QString &filePath, const QByteArray &sha256s
 // (the URL comes from the API response, so don't open anything else).
 bool isTrustedReleasePageUrl(const QString &url);
 
+// A release asset we may download: exactly
+//   https://github.com/sbj-ee/zterminal/releases/download/<tag>/<name>
+// (browser_download_url comes from the API response, so nothing else).
+bool isTrustedAssetUrl(const QString &url, const QString &tag, const QString &name);
+// Where GitHub may redirect such a download: https on its release-asset hosts
+// (release-assets.githubusercontent.com today, objects.githubusercontent.com
+// before), default port, no user info.
+bool isTrustedAssetRedirect(const QUrl &url);
+// Tests serve assets from a local mock: base "http://127.0.0.1:<port>" makes
+// <base>/download/<tag>/<name> (and redirects to that host) the trusted
+// locations instead. Empty: back to github.com.
+void setReleaseAssetBaseForTests(const QString &base);
+
+// The trusted comment the release workflow signs SHA256SUMS with, binding the
+// signature to the tag: "zterminal v1.6.2 SHA256SUMS".
+QString expectedSignedComment(const QString &tag);
+
 // Updates are only installed when SHA256SUMS carries a valid minisign
 // signature (SHA256SUMS.minisig) by the release key: base64 public key line,
 // compiled in (core/UpdateSigningKey.cpp). Empty: this build can't verify

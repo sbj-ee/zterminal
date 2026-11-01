@@ -56,6 +56,8 @@ public:
     MockGitHub()
     {
         server.listen(QHostAddress::LocalHost);
+        // Downloads are only trusted from this mock (instead of github.com).
+        setReleaseAssetBaseForTests(base());
         connect(&server, &QTcpServer::newConnection, this, [this]() {
             while (QTcpSocket *s = server.nextPendingConnection()) {
                 auto *buf = new QByteArray;
@@ -71,6 +73,7 @@ public:
             }
         });
     }
+    ~MockGitHub() override { setReleaseAssetBaseForTests(QString()); }
     QString base() const { return QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()); }
     QString url(const QString &path) const { return base() + path; }
 
@@ -169,8 +172,9 @@ class TstUpdate : public QObject
             + QByteArray(64, 'a') + "  other.tar.gz\n";
         const QByteArray &sums = gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS")].body;
         gh.routes[QStringLiteral("/download/v0.10.0/SHA256SUMS.minisig")].body =
-            goodSignature ? signKey.sign(sums) : otherKey.sign(sums);
+            goodSignature ? signKey.sign(sums, kSignedComment) : otherKey.sign(sums, kSignedComment);
     }
+    static constexpr const char *kSignedComment = "zterminal v0.10.0 SHA256SUMS";
 
     static QString platformPackageName()
     {
@@ -492,6 +496,115 @@ private slots:
         r = done.takeFirst().at(0).value<UpdateChecker::Result>();
         QCOMPARE(r.outcome, UpdateChecker::Outcome::Error);
         QVERIFY2(r.error.contains(QStringLiteral("Couldn't reach GitHub")), qPrintable(r.error));
+    }
+
+    // 1.6.4: the signature is bound to the tag, and assets come only from this
+    // release on GitHub (or GitHub's release-asset hosts after a redirect).
+    void downloaderBindsRelease()
+    {
+        MockGitHub gh;
+        serveRelease(gh);
+        const auto rel = ReleaseInfo::fromJson(fixture(QStringLiteral("release-0.10.0.json"), gh.base()));
+        QVERIFY(rel);
+        UpdateDownloader d;
+        QSignalSpy done(&d, &UpdateDownloader::finished);
+        const QString sumsPath = QStringLiteral("/download/v0.10.0/SHA256SUMS");
+        const QString sigPath = QStringLiteral("/download/v0.10.0/SHA256SUMS.minisig");
+        auto expectRefused = [&](const ReleaseInfo &r, const QString &needle) {
+            gh.requests.clear();
+            QTemporaryDir dir;
+            d.start(r, dir.path());
+            QVERIFY(done.wait(5000));
+            const auto args = done.takeFirst();
+            QVERIFY(!args.at(0).toBool());
+            QVERIFY2(args.at(2).toString().contains(needle), qPrintable(args.at(2).toString()));
+            for (const QString &req : gh.requests) {
+                QVERIFY2(!req.contains(platformPackageName()), qPrintable(req));
+            }
+            QVERIFY(!QFile::exists(dir.filePath(platformPackageName())));
+        };
+
+        // Mismatched trusted comment (valid signature, wrong text).
+        gh.routes[sigPath].body = signKey.sign(gh.routes[sumsPath].body, "timestamp:0 file:SHA256SUMS hashed");
+        expectRefused(*rel, QStringLiteral("not \"zterminal v0.10.0 SHA256SUMS\""));
+        // An older release's signed SHA256SUMS replayed under this tag.
+        gh.routes[sigPath].body = signKey.sign(gh.routes[sumsPath].body, "zterminal v0.9.0 SHA256SUMS");
+        expectRefused(*rel, QStringLiteral("signed for \"zterminal v0.9.0 SHA256SUMS\""));
+        serveRelease(gh);
+
+        // Asset URLs under another tag's download path.
+        {
+            QByteArray json = fixture(QStringLiteral("release-0.10.0.json"), gh.base());
+            json.replace("/download/v0.10.0/", "/download/v0.9.0/");
+            const auto r = ReleaseInfo::fromJson(json);
+            QVERIFY(r);
+            expectRefused(*r, QStringLiteral("is not on github.com/sbj-ee/zterminal/releases/download/v0.10.0/"));
+            QVERIFY(gh.requests.isEmpty());
+        }
+        // A foreign host, and plain http, in the real (non-test) rules.
+        setReleaseAssetBaseForTests(QString());
+        const QString ok = QStringLiteral("https://github.com/sbj-ee/zterminal/releases/download/v1.6.2/SHA256SUMS");
+        QVERIFY(isTrustedAssetUrl(ok, QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(ok, QStringLiteral("v1.6.1"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(ok, QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS.minisig")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("http://github.com/sbj-ee/zterminal/releases/download/v1.6.2/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("https://evil.example/sbj-ee/zterminal/releases/download/v1.6.2/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("https://github.com.evil.example/sbj-ee/zterminal/releases/download/v1.6.2/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("https://user@github.com/sbj-ee/zterminal/releases/download/v1.6.2/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("https://github.com:8443/sbj-ee/zterminal/releases/download/v1.6.2/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("https://github.com/other/zterminal/releases/download/v1.6.2/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(!isTrustedAssetUrl(QStringLiteral("https://github.com/sbj-ee/zterminal/releases/download/v1.6.2/../v1.0.0/SHA256SUMS"),
+                                   QStringLiteral("v1.6.2"), QStringLiteral("SHA256SUMS")));
+        QVERIFY(isTrustedAssetRedirect(QUrl(QStringLiteral("https://release-assets.githubusercontent.com/github-production-release-asset/1"))));
+        QVERIFY(isTrustedAssetRedirect(QUrl(QStringLiteral("https://objects.githubusercontent.com/x"))));
+        QVERIFY(!isTrustedAssetRedirect(QUrl(QStringLiteral("http://release-assets.githubusercontent.com/x"))));
+        QVERIFY(!isTrustedAssetRedirect(QUrl(QStringLiteral("https://evil.example/x"))));
+        QVERIFY(!isTrustedAssetRedirect(QUrl(QStringLiteral("https://release-assets.githubusercontent.com.evil.example/x"))));
+        // ...and a foreign host in a release JSON is refused before any request.
+        {
+            QByteArray json = fixture(QStringLiteral("release-0.10.0.json"), QStringLiteral("https://evil.example"));
+            const auto r = ReleaseInfo::fromJson(json);
+            QVERIFY(r);
+            expectRefused(*r, QStringLiteral("https://evil.example/download/v0.10.0/"));
+        }
+        setReleaseAssetBaseForTests(gh.base());
+        // http from the mock is fine in test mode, but not some other http host.
+        {
+            QByteArray json = fixture(QStringLiteral("release-0.10.0.json"), QStringLiteral("http://localhost.evil:1"));
+            const auto r = ReleaseInfo::fromJson(json);
+            QVERIFY(r);
+            expectRefused(*r, QStringLiteral("is not on github.com"));
+        }
+        // A redirect away from GitHub's asset hosts: refused, nothing installed.
+        {
+            serveRelease(gh);
+            MockGitHub::Route redirect;
+            redirect.status = 302;
+            redirect.headers << qMakePair(QByteArray("Location"), QByteArray("https://evil.example/SHA256SUMS"));
+            gh.routes[sumsPath] = redirect;
+            expectRefused(*rel, QStringLiteral("redirected to https://evil.example/SHA256SUMS"));
+        }
+        // A redirect within the trusted (mock) host still works end to end.
+        {
+            gh.routes[sumsPath] = MockGitHub::Route{}; // drop the 302 above
+            serveRelease(gh);
+            gh.routes[QStringLiteral("/moved/SHA256SUMS")] = gh.routes[sumsPath];
+            MockGitHub::Route redirect;
+            redirect.status = 302;
+            redirect.headers << qMakePair(QByteArray("Location"), gh.url(QStringLiteral("/moved/SHA256SUMS")).toUtf8());
+            gh.routes[sumsPath] = redirect;
+            QTemporaryDir dir;
+            d.start(*rel, dir.path());
+            QVERIFY(done.wait(5000));
+            const auto args = done.takeFirst();
+            QVERIFY2(args.at(0).toBool(), qPrintable(args.at(2).toString()));
+        }
     }
 
     void downloaderVerifies()

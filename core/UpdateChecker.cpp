@@ -202,6 +202,19 @@ void UpdateDownloader::start(const ReleaseInfo &release, const QString &dir)
         QMetaObject::invokeMethod(this, [this, msg] { emit finished(false, QString(), msg); }, Qt::QueuedConnection);
         return;
     }
+    // Download only from this release on github.com, never from a host the
+    // API response names.
+    for (const ReleaseAsset *a : {&*pkg, &*sums, &*sig}) {
+        if (!isTrustedAssetUrl(a->url, release.tag, a->name)) {
+            const QString msg = QStringLiteral("Release %1 lists %2 at %3, which is not on "
+                                               "github.com/sbj-ee/zterminal/releases/download/%1/, so nothing "
+                                               "was downloaded or installed.")
+                                    .arg(release.tag, a->name, a->url);
+            QMetaObject::invokeMethod(this, [this, msg] { emit finished(false, QString(), msg); }, Qt::QueuedConnection);
+            return;
+        }
+    }
+    m_tag = release.tag;
     m_deb = *pkg;
     m_sums = *sums;
     m_sig = *sig;
@@ -218,7 +231,23 @@ void UpdateDownloader::fetch(const ReleaseAsset &asset, const QString &path)
         return;
     }
     m_current = asset.name;
-    m_reply = m_nam->get(makeRequest(QUrl(asset.url), m_stallMs, "application/octet-stream"));
+    m_blockedRedirect.clear();
+    QNetworkRequest req = makeRequest(QUrl(asset.url), m_stallMs, "application/octet-stream");
+    // Follow a redirect only to GitHub's release-asset hosts.
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::UserVerifiedRedirectPolicy);
+    m_reply = m_nam->get(req);
+    connect(m_reply, &QNetworkReply::redirected, this, [this](const QUrl &to) {
+        QNetworkReply *r = m_reply;
+        if (!r) {
+            return;
+        }
+        if (isTrustedAssetRedirect(to)) {
+            emit r->redirectAllowed();
+        } else {
+            m_blockedRedirect = to.toString();
+            r->abort();
+        }
+    });
     connect(m_reply, &QNetworkReply::readyRead, this, &UpdateDownloader::onReadyRead);
     connect(m_reply, &QNetworkReply::downloadProgress, this, [this, asset](qint64 got, qint64 total) {
         emit progress(asset.name, got, total > 0 ? total : (asset.size > 0 ? asset.size : -1));
@@ -262,6 +291,12 @@ void UpdateDownloader::onFinished()
     }
     reply->deleteLater();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (!m_blockedRedirect.isEmpty()) {
+        fail(QStringLiteral("The download of %1 was redirected to %2, which is not a GitHub release-asset "
+                            "host, so nothing was installed.")
+                 .arg(m_current, m_blockedRedirect));
+        return;
+    }
     if (m_cancelled) {
         fail(QStringLiteral("Download cancelled."));
         return;
@@ -304,6 +339,16 @@ void UpdateDownloader::onFinished()
             fail(QStringLiteral("The release's SHA256SUMS signature is not valid (%1), so nothing was downloaded "
                                 "or installed.")
                      .arg(sig.error));
+            return;
+        }
+        // The signature must be for this release: the workflow signs the
+        // comment "zterminal <tag> SHA256SUMS", so an older release's signed
+        // SHA256SUMS can't be replayed under a newer tag.
+        if (sig.trustedComment != expectedSignedComment(m_tag)) {
+            m_sumsBytes.clear();
+            fail(QStringLiteral("The release's SHA256SUMS is signed for \"%1\", not \"%2\", so nothing was "
+                                "downloaded or installed.")
+                     .arg(sig.trustedComment, expectedSignedComment(m_tag)));
             return;
         }
         m_stage = 3;
