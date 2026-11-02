@@ -24,6 +24,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -114,6 +115,46 @@ QString str(const SecureBuffer *b)
 }
 
 } // namespace
+
+// Measures UI-thread responsiveness while a call runs a nested event loop:
+// counts ticks of a precise 10 ms timer and records the longest gap between
+// them (start -> first tick, ..., last tick -> stop). Tick counts alone are
+// unreliable on macOS, where timer coalescing on busy CI runners bunches
+// firings (9 instead of >= 10 on macos arm64); the longest gap is what a
+// frozen UI inflates.
+struct TickGapProbe {
+    QTimer timer;
+    QElapsedTimer clock;
+    qint64 last = 0;
+    qint64 maxGapMs = 0;
+    int ticks = 0;
+    TickGapProbe()
+    {
+        timer.setTimerType(Qt::PreciseTimer);
+        timer.setInterval(10);
+        QObject::connect(&timer, &QTimer::timeout, [this]() {
+            mark();
+            ++ticks;
+        });
+    }
+    void mark()
+    {
+        const qint64 now = clock.elapsed();
+        maxGapMs = qMax(maxGapMs, now - last);
+        last = now;
+    }
+    void start()
+    {
+        clock.start();
+        last = 0;
+        timer.start();
+    }
+    void stop()
+    {
+        mark();
+        timer.stop();
+    }
+};
 
 class TstVaultUi : public QObject
 {
@@ -306,21 +347,23 @@ private slots:
         vm().lock();
         UnlockVaultDialog d(vm().vault(), QString());
         child<QLineEdit>(&d, "masterPassword")->setText(QString::fromUtf8(kMaster));
-        int ticks = 0;
-        QTimer tick;
-        connect(&tick, &QTimer::timeout, this, [&ticks, &d]() {
-            ++ticks;
-            QVERIFY(!d.isEnabled()); // no second submit while deriving
+        TickGapProbe probe;
+        bool enabledDuringKdf = false;
+        connect(&probe.timer, &QTimer::timeout, this, [&d, &enabledDuringKdf]() {
+            enabledDuringKdf |= d.isEnabled(); // no second submit while deriving
         });
-        tick.start(10);
         Vault::setKdfDelayForTests(400); // Argon2 stand-in: slow, off the UI thread
+        probe.start();
         const bool ok = d.tryUnlock();
+        probe.stop();
         Vault::setKdfDelayForTests(0);
-        tick.stop();
         QVERIFY(ok);
         QVERIFY(vm().isUnlocked());
         QVERIFY(d.isEnabled());
-        QVERIFY2(ticks >= 10, qPrintable(QString::number(ticks))); // timers kept firing
+        QVERIFY(!enabledDuringKdf);
+        // The event loop kept running: a frozen UI shows one ~400 ms gap.
+        QVERIFY2(probe.ticks >= 3, qPrintable(QString::number(probe.ticks)));
+        QVERIFY2(probe.maxGapMs < 200, qPrintable(QString::number(probe.maxGapMs)));
         QVERIFY(!QApplication::overrideCursor());
     }
 
@@ -329,18 +372,19 @@ private slots:
         freshVault();
         Vault::setKdfDelayForTests(200);
         ChangeMasterPasswordDialog d(vm().vault());
-        int ticks = 0;
-        QTimer tick;
-        connect(&tick, &QTimer::timeout, this, [&ticks]() { ++ticks; });
-        tick.start(10);
         QVERIFY(vm().vault().setSecret(QStringLiteral("k"), sb("v")));
         child<QLineEdit>(&d, "currentPassword")->setText(QString::fromUtf8(kMaster));
         child<QLineEdit>(&d, "newPassword")->setText(QStringLiteral("new master 2"));
         child<QLineEdit>(&d, "confirmPassword")->setText(QStringLiteral("new master 2"));
+        TickGapProbe probe;
+        probe.start();
         const bool ok = d.tryChange();
+        probe.stop();
         Vault::setKdfDelayForTests(0);
         QVERIFY2(ok, qPrintable(d.errorText()));
-        QVERIFY2(ticks >= 10, qPrintable(QString::number(ticks)));
+        // A frozen UI shows one ~200 ms gap per derivation.
+        QVERIFY2(probe.ticks >= 3, qPrintable(QString::number(probe.ticks)));
+        QVERIFY2(probe.maxGapMs < 150, qPrintable(QString::number(probe.maxGapMs)));
         QVERIFY(vm().isUnlocked()); // the shared vault adopted the new key + secrets
         QCOMPARE(str(vm().vault().secret(QStringLiteral("k"))), QStringLiteral("v"));
         vm().lock();
