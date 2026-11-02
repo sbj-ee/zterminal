@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.11** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.6.12** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.11 — <session>`), in Help → About and by
+the window title (`zterminal 1.6.12 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -85,7 +85,7 @@ SSH itself.
   package matches it.
   - **Linux:** downloads `SHA256SUMS` + `.minisig`, then
     `zterminal_<ver>_amd64.deb`; runs `/usr/bin/pkexec /usr/bin/apt install`
-    on a re-verified private copy, offers restart.
+    on a re-verified private copy, offers restart; the restart reopens every window with all of its tabs.
   - **macOS:** same checks for `zterminal-<ver>-Darwin.dmg`, then opens the
     disk image for a drag-to-Applications install (no automated replace).
   - **Upgrading from 1.0.x:** 1.0.x only checks SHA-256, so install the first

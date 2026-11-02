@@ -8,6 +8,11 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.12 — unreleased
+
+### Fixed
+- Restarting after an update now reopens every window with all of its tabs (and the tab that was current), not just each window's current tab. The old process writes a private (0600) restore file that the new one reads once and deletes (`zterminal --restore FILE`, internal); only local-shell, saved-session, ssh, serial and command tabs are restored.
+
 ## 1.6.11 — unreleased
 
 ### Fixed
