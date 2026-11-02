@@ -8,6 +8,20 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.10 — unreleased
+
+### Fixed
+
+- Bell: at most one beep per 250 ms per tab, so a program printing BEL in a
+  loop no longer floods the desktop's sound system.
+- Serial errors shown in the session banner are HTML-escaped (the banner is
+  rich text).
+- Vault: a write (create, set/remove a secret, change password) is refused with
+  an error when the vault's lock file can't be opened or locked, instead of
+  going ahead without the lock.
+- Session logs: a failed write (disk full, file size limit) stops logging and
+  says why in the session banner instead of being silently ignored.
+
 ## 1.6.9 — unreleased
 
 ### Fixed

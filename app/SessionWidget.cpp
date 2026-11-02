@@ -213,7 +213,16 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
     connect(m_view, &TerminalView::gridSizeChanged, this, [this](int, int cols) { m_log->setColumns(cols); });
     m_view->setPasteGuard([this](const QString &t) { return confirmPaste(t); });
     connect(m_term, &Terminal::titleChanged, this, &SessionWidget::titleChanged);
-    connect(m_term, &Terminal::bell, this, []() { QApplication::beep(); });
+    // At most one beep per kBellIntervalMs: a program printing BEL in a loop
+    // must not flood the desktop's sound/notification system.
+    connect(m_term, &Terminal::bell, this, [this]() {
+        if (m_lastBell.isValid() && m_lastBell.elapsed() < kBellIntervalMs) {
+            return;
+        }
+        m_lastBell.start();
+        ++m_beeps;
+        QApplication::beep();
+    });
     connect(m_view, &TerminalView::contextMenuRequested, this, &SessionWidget::contextMenuRequested);
     // Each tab pauses its own log while a vault dialog is open.
     connect(&VaultManager::instance(), &VaultManager::dialogOpenChanged, this, [this](bool open) {
@@ -365,6 +374,11 @@ void SessionWidget::logOutput(const QByteArray &d, bool fromPty)
         m_log->resume(why);
     }
     m_log->feed(d);
+    if (m_log->writeFailed()) {
+        const QString why = m_log->errorString();
+        stopLogging();
+        showBanner(QStringLiteral("<b>Logging stopped.</b> %1").arg(why.toHtmlEscaped()));
+    }
 }
 
 SessionWidget::Launch SessionWidget::launchCommand() const
@@ -449,7 +463,7 @@ void SessionWidget::startSession(StartMode mode)
             m_term->feed(QStringLiteral("\x1b[31mzterminal: %1\x1b[0m\r\n")
                              .arg(QString(m_serial->errorString()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")))
                              .toUtf8());
-            showBanner(m_serial->errorString());
+            showBanner(m_serial->errorString().toHtmlEscaped()); // the banner is rich text
             return;
         }
         hideBanner();

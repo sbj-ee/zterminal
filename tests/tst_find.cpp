@@ -276,6 +276,23 @@ private slots:
         QTRY_VERIFY(h.bar->matchCount() <= 1);
     }
 
+    void bellIsThrottled()
+    {
+        MainWindow w(parseCommandLine({QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
+                                       QStringLiteral("exec cat")}), {});
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        w.startSession();
+        SessionWidget *s = w.currentSession();
+        for (int i = 0; i < 200; ++i) {
+            s->terminal()->feed("\a");
+        }
+        QCOMPARE(s->beepCount(), 1);
+        QTest::qWait(SessionWidget::kBellIntervalMs + 50);
+        s->terminal()->feed("\a");
+        QCOMPARE(s->beepCount(), 2);
+    }
+
     void perTabFromMainWindow()
     {
         auto shArgs = [](const QString &script) {

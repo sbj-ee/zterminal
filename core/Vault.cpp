@@ -61,12 +61,25 @@ class FileLock
 public:
     explicit FileLock(const QString &path)
     {
+        QDir().mkpath(QFileInfo(path).absolutePath());
         m_fd = ::open(QFile::encodeName(path).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
-        if (m_fd >= 0) {
-            while (::flock(m_fd, LOCK_EX) < 0 && errno == EINTR) {
-            }
+        if (m_fd < 0) {
+            m_error = QStringLiteral("Cannot lock the vault (%1): %2").arg(path, QString::fromLocal8Bit(std::strerror(errno)));
+            return;
+        }
+        int r;
+        while ((r = ::flock(m_fd, LOCK_EX)) < 0 && errno == EINTR) {
+        }
+        if (r < 0) {
+            m_error = QStringLiteral("Cannot lock the vault (%1): %2").arg(path, QString::fromLocal8Bit(std::strerror(errno)));
+            ::close(m_fd);
+            m_fd = -1;
         }
     }
+    // Writes must not go ahead without the lock: another zterminal could be
+    // writing the vault at the same time.
+    bool ok() const { return m_fd >= 0; }
+    QString error() const { return m_error; }
     ~FileLock()
     {
         if (m_fd >= 0) {
@@ -79,6 +92,7 @@ public:
 
 private:
     int m_fd = -1;
+    QString m_error;
 };
 
 bool writeAll(int fd, const unsigned char *p, std::size_t n)
@@ -433,6 +447,9 @@ bool Vault::writeWith(const Header &hIn, const SecureBuffer &key, const std::map
 bool Vault::create(const SecureBuffer &password)
 {
     FileLock fl(m_path + QStringLiteral(".lock"));
+    if (!fl.ok()) {
+        return fail(fl.error());
+    }
     if (exists()) {
         return fail(QStringLiteral("A vault already exists at %1.").arg(m_path));
     }
@@ -534,6 +551,9 @@ bool Vault::removeSecret(const QString &key)
 bool Vault::update(std::map<QString, SecureBuffer> set, const QStringList &remove)
 {
     FileLock fl(m_path + QStringLiteral(".lock"));
+    if (!fl.ok()) {
+        return fail(fl.error());
+    }
     if (!refresh()) {
         return false;
     }
@@ -563,6 +583,9 @@ bool Vault::update(std::map<QString, SecureBuffer> set, const QStringList &remov
 bool Vault::changePassword(const SecureBuffer &oldPassword, const SecureBuffer &newPassword)
 {
     FileLock fl(m_path + QStringLiteral(".lock"));
+    if (!fl.ok()) {
+        return fail(fl.error());
+    }
     if (newPassword.isEmpty()) {
         return fail(QStringLiteral("The master password must not be empty."));
     }

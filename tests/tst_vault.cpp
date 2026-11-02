@@ -80,6 +80,23 @@ class TstVault : public QObject
     }
 
 private slots:
+    void refusesWriteWithoutLock()
+    {
+        if (::geteuid() == 0) {
+            QSKIP("root ignores directory permissions");
+        }
+        const QString p = makeVault();
+        Vault v(p);
+        QVERIFY(v.unlock(pw("correct horse")));
+        const QString dir = QFileInfo(p).absolutePath();
+        QFile::remove(p + QStringLiteral(".lock"));
+        QVERIFY(QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        const bool wrote = v.setSecret(QStringLiteral("ssh-password/new"), pw("x"));
+        QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QVERIFY(!wrote);
+        QVERIFY2(v.lastError().contains(QStringLiteral("lock")), qPrintable(v.lastError()));
+    }
+
     void initTestCase()
     {
         QVERIFY(SecureBuffer::ensureSodium());

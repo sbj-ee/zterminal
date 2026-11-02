@@ -9,6 +9,7 @@
 #include <optional>
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QWidget>
 
 class QLabel;
@@ -126,6 +127,10 @@ public:
     bool confirmPaste(const QString &text);
     bool pasteConfirmSkipped() const { return m_skipPasteConfirm; }
 
+    // Beeps actually played for BEL (throttled to one per kBellIntervalMs).
+    int beepCount() const { return m_beeps; }
+    static constexpr int kBellIntervalMs = 250;
+
 signals:
     void titleChanged();         // program title (OSC 0/2) or session name changed
     void loggingChanged(bool on);
@@ -134,6 +139,8 @@ signals:
     void needsInputChanged(bool waiting);
 
 private:
+    QElapsedTimer m_lastBell;
+    int m_beeps = 0;
     void onSessionFinished(int exitCode, bool crashed);
     void setNeedsInput(bool waiting);
     void markDisconnected(const QString &reason);
