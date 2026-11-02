@@ -8,12 +8,20 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
-## 1.7.1 — unreleased
+## 1.7.2 — 2026-11-02
+
+First release since 1.6.5; it ships everything in 1.6.6–1.7.1. The `v1.7.1` tag exists but its release build stopped at the version check (undated changelog heading), so nothing was published for it.
+
+### Fixed
+- Tests: `tst_vaultui` `unlockKeepsUiResponsive` / `changePasswordOffUiThread` no longer count 10 ms timer ticks, which macOS timer coalescing on CI runners can bunch up (9 of an expected ≥10 on macOS arm64). They now use a precise timer and assert the longest gap between event-loop ticks stays well under the simulated KDF delay, which is what a frozen UI would violate.
+- Changelog headings for 1.6.6–1.7.1 are dated so the release version check passes.
+
+## 1.7.1 — 2026-11-02 (not released separately; shipped in 1.7.2)
 
 ### Fixed
 - Creating, unlocking and changing the master password of the vault no longer freeze the window for the ~0.5–1 s Argon2 derivation: the work runs on a scratch `Vault` in a worker thread while the UI keeps painting (the dialog is disabled meanwhile), and the shared vault adopts the result on the UI thread (`Vault::adopt`).
 
-## 1.7.0 — unreleased
+## 1.7.0 — 2026-11-02 (not released separately; shipped in 1.7.2)
 
 ### Added
 - Input method support (IBus, Fcitx, macOS input sources): `inputMethodEvent` sends committed text to the session as UTF-8, the preedit (composition) is drawn underlined at the cursor with its caret, and `inputMethodQuery` reports the cursor cell (after the composition) so the candidate window follows the cursor; it is updated whenever the cursor moves.
@@ -46,7 +54,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
 - Session logs: a failed write (disk full, file size limit) stops logging and
   says why in the session banner instead of being silently ignored.
 
-## 1.6.9 — unreleased
+## 1.6.9 — 2026-11-02 (not released separately; shipped in 1.7.2)
 
 ### Fixed
 
@@ -55,7 +63,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
   the platform sends them (one cell height = one line); a mouse notch still
   scrolls 3 lines.
 
-## 1.6.8 — unreleased
+## 1.6.8 — 2026-11-02 (not released separately; shipped in 1.7.2)
 
 ### Fixed
 
@@ -66,7 +74,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
 - PTY: reaping the child after its terminal closes no longer blocks the UI
   (`waitpid(WNOHANG)` polled by a timer) when the child keeps running.
 
-## 1.6.7 — unreleased
+## 1.6.7 — 2026-11-02 (not released separately; shipped in 1.7.2)
 
 ### Changed
 
@@ -77,7 +85,7 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
 - Dependabot waits 7 days (`cooldown`) after an action version is published
   before proposing it, so the auto-merged minor/patch updates are never brand new.
 
-## 1.6.6 — unreleased
+## 1.6.6 — 2026-11-02 (not released separately; shipped in 1.7.2)
 
 ### Changed
 
