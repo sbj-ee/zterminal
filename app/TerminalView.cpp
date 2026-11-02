@@ -721,11 +721,30 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
 
 void TerminalView::wheelEvent(QWheelEvent *e)
 {
-    const int steps = e->angleDelta().y() / 120;
-    if (steps == 0) {
+    // Trackpads send many small deltas (pixelDelta, or angleDelta well under
+    // one 120-unit notch): add them up instead of dropping each one. One
+    // notch (120) = 3 lines; with pixelDelta, one cell height = 1 line.
+    double lines = 0;
+    if (!e->pixelDelta().isNull() && m_cellH > 0) {
+        lines = double(e->pixelDelta().y()) / m_cellH;
+    } else {
+        lines = e->angleDelta().y() / 40.0;
+    }
+    if (lines == 0) {
         return;
     }
+    if ((lines > 0) != (m_wheelLines > 0) && m_wheelLines != 0) {
+        m_wheelLines = 0; // direction changed: drop the old remainder
+    }
+    m_wheelLines += lines;
+    e->accept();
     if (m_term->mouseMode() != VTERM_PROP_MOUSE_NONE && !(e->modifiers() & Qt::ShiftModifier)) {
+        // One button-4/5 press per notch's worth (3 lines).
+        const int steps = int(m_wheelLines / 3);
+        if (steps == 0) {
+            return;
+        }
+        m_wheelLines -= steps * 3;
         const CellPos c = cellAt(e->position().toPoint(), false);
         const VTermModifier mod = vtermMods(e->modifiers());
         m_term->sendMouseMove(c.line - firstVisibleLine(), c.col, mod);
@@ -734,14 +753,19 @@ void TerminalView::wheelEvent(QWheelEvent *e)
         }
         return;
     }
+    const int whole = int(m_wheelLines);
+    if (whole == 0) {
+        return;
+    }
+    m_wheelLines -= whole;
     if (m_term->altScreen()) {
         // Full-screen programs without mouse support (less, man): wheel = arrow keys.
-        for (int i = 0; i < std::abs(steps) * 3; ++i) {
-            m_term->sendKey(steps > 0 ? VTERM_KEY_UP : VTERM_KEY_DOWN, VTERM_MOD_NONE);
+        for (int i = 0; i < std::abs(whole); ++i) {
+            m_term->sendKey(whole > 0 ? VTERM_KEY_UP : VTERM_KEY_DOWN, VTERM_MOD_NONE);
         }
         return;
     }
-    scrollBy(steps * 3);
+    scrollBy(whole);
 }
 
 QString TerminalView::selectedText() const

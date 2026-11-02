@@ -17,6 +17,7 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTest>
+#include <QWheelEvent>
 
 // Settings go to $XDG_CONFIG_HOME (set per test by CMake), never the real ~/.config.
 
@@ -215,6 +216,38 @@ private slots:
         QTest::keyClick(&f.view, Qt::Key_F1);
         QTest::keyClick(&f.view, Qt::Key_X, Qt::AltModifier);
         QCOMPARE(f.out, QByteArray("a\x03\x1b\r\t\x1b[A\x1bOP\x1bx"));
+    }
+
+    static void wheel(Fixture &f, QPoint pixel, QPoint angle)
+    {
+        const QPointF pos(f.at(2, 2));
+        QWheelEvent ev(pos, f.view.viewport()->mapToGlobal(pos), pixel, angle, Qt::NoButton, Qt::NoModifier,
+                       Qt::ScrollUpdate, false);
+        QApplication::sendEvent(f.view.viewport(), &ev);
+    }
+
+    void smallWheelDeltasAccumulate()
+    {
+        Fixture f;
+        for (int i = 0; i < 60; ++i) {
+            f.term.feed(QStringLiteral("line %1\r\n").arg(i).toUtf8());
+        }
+        // Trackpad without pixel deltas: 15 units at a time (1/8 notch).
+        for (int i = 0; i < 7; ++i) {
+            wheel(f, {}, {0, 15});
+        }
+        QCOMPARE(f.view.scrollOffset(), 2); // 105 units = 2.6 lines
+        wheel(f, {}, {0, 15});
+        QCOMPARE(f.view.scrollOffset(), 3); // one full notch = 3 lines
+        // Pixel deltas: one line per cell height, remainders kept.
+        const int h = f.view.cellSize().height();
+        wheel(f, {0, h / 2}, {0, 1});
+        QCOMPARE(f.view.scrollOffset(), 3);
+        wheel(f, {0, h - h / 2}, {0, 1});
+        QCOMPARE(f.view.scrollOffset(), 4);
+        // A full mouse notch still scrolls 3 lines; down goes back.
+        wheel(f, {}, {0, -120});
+        QCOMPARE(f.view.scrollOffset(), 1);
     }
 
     void shiftPageUpScrollsHistoryLocally()

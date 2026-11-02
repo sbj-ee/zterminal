@@ -8,6 +8,15 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.9 — unreleased
+
+### Fixed
+
+- Scrolling: small trackpad movements add up instead of being dropped (each
+  delta under one wheel notch used to be ignored). Pixel deltas are used when
+  the platform sends them (one cell height = one line); a mouse notch still
+  scrolls 3 lines.
+
 ## 1.6.8 — unreleased
 
 ### Fixed

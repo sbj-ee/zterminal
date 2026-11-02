@@ -133,6 +133,7 @@ private:
     int m_gridRows = 24;
     int m_gridCols = 80;
     int m_scrollOffset = 0;
+    double m_wheelLines = 0; // wheel/trackpad movement not yet scrolled (lines; + = up)
     static constexpr int kMargin = 2;
 
     MouseSettings m_mouse;
