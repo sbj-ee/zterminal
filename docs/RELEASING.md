@@ -30,12 +30,19 @@ alone can't push malware to users.
    If it is lost, users on the old key can't update in-app any more (they'd
    install the next release by hand); if it leaks, rotate it (below).
 
-3. **Give CI the key** (repository secrets, never committed):
+3. **Give CI the key** as secrets of the protected `release` environment
+   (never committed). The environment requires a reviewer's approval before
+   the publish job runs, and only `v*` tags may deploy to it:
 
    ```sh
-   gh secret set MINISIGN_SECRET_KEY -R sbj-ee/zterminal < zterminal-release.key
-   gh secret set MINISIGN_PASSWORD   -R sbj-ee/zterminal    # paste the password when asked
+   gh secret set MINISIGN_SECRET_KEY -R sbj-ee/zterminal --env release < zterminal-release.key
+   gh secret set MINISIGN_PASSWORD   -R sbj-ee/zterminal --env release   # paste the password when asked
    ```
+
+   Then remove any repository-wide copies so no other job can read them:
+   `gh secret delete MINISIGN_SECRET_KEY -R sbj-ee/zterminal` and the same for
+   `MINISIGN_PASSWORD`. On each release, approve the waiting **Publish** job
+   (Actions → the run → Review deployments).
 
 4. **Embed the public key:** copy the second line of `zterminal-release.pub`
    (it starts with `RW`) into `kUpdateSigningPublicKey` in

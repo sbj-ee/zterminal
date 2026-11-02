@@ -8,6 +8,28 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.8 — unreleased
+
+### Fixed
+
+- PTY: at most 256 KiB of child output is read per event-loop pass, so a
+  flood (`yes`, `cat` of a huge file) no longer freezes the window or other tabs.
+- PTY: input queued for a child that isn't reading is capped at 8 MiB; more is
+  dropped with a banner instead of growing memory without limit.
+- PTY: reaping the child after its terminal closes no longer blocks the UI
+  (`waitpid(WNOHANG)` polled by a timer) when the child keeps running.
+
+## 1.6.7 — unreleased
+
+### Changed
+
+- Release workflow: the publish job (the only one that reads the minisign
+  signing secrets) runs in the protected `release` environment, which needs a
+  reviewer's approval and accepts only `v*` tags. docs/RELEASING.md now keeps
+  the signing secrets in that environment rather than repository-wide.
+- Dependabot waits 7 days (`cooldown`) after an action version is published
+  before proposing it, so the auto-merged minor/patch updates are never brand new.
+
 ## 1.6.6 — unreleased
 
 ### Changed
