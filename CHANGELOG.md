@@ -8,6 +8,17 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.7 — unreleased
+
+### Changed
+
+- Release workflow: the publish job (the only one that reads the minisign
+  signing secrets) runs in the protected `release` environment, which needs a
+  reviewer's approval and accepts only `v*` tags. docs/RELEASING.md now keeps
+  the signing secrets in that environment rather than repository-wide.
+- Dependabot waits 7 days (`cooldown`) after an action version is published
+  before proposing it, so the auto-merged minor/patch updates are never brand new.
+
 ## 1.6.5 — 2026-10-31
 
 ### Changed
