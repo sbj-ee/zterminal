@@ -8,6 +8,15 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.11 — unreleased
+
+### Fixed
+
+- Process hardening: zterminal sets only its own soft core-dump limit to 0 and
+  leaves the hard limit alone; shells and programs started in a tab get the
+  original limit back, so `ulimit -c unlimited` works in them again. zterminal
+  itself still writes no core dumps (and stays non-dumpable on Linux).
+
 ## 1.6.10 — unreleased
 
 ### Fixed

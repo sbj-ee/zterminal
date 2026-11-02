@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.10** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.6.11** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.10 — <session>`), in Help → About and by
+the window title (`zterminal 1.6.11 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -346,10 +346,11 @@ password prompt that comes from the session's own target, as resolved by
 - Anything else (passphrases, host-key questions) is never answered from the
   vault. When a password prompt is refused, a note on the terminal says so.
 
-**Process hardening (release builds).** zterminal disables core dumps (soft
-and hard limit 0) and, on Linux, marks itself non-dumpable, so other processes
+**Process hardening (release builds).** zterminal disables its own core dumps
+(soft limit 0) and, on Linux, marks itself non-dumpable, so other processes
 of your user can't attach a debugger or read its memory through `/proc`, and a
-crash doesn't write secrets to disk. Debug builds skip this.
+crash doesn't write secrets to disk. Shells and programs it starts get your
+original core-dump limit back. Debug builds skip this.
 
 **Limits of memory hygiene.** The vault key and decrypted passwords live in
 locked, guarded libsodium memory, and zterminal zeroes its own temporary

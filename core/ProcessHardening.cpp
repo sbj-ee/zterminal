@@ -10,11 +10,22 @@
 
 namespace zterminal {
 
+namespace {
+rlimit g_originalCore{};
+bool g_haveOriginalCore = false;
+} // namespace
+
 bool applyProcessHardening(QString *why)
 {
     bool ok = true;
     QString errors;
-    const rlimit none{0, 0};
+    rlimit cur{};
+    if (!g_haveOriginalCore && ::getrlimit(RLIMIT_CORE, &cur) == 0) {
+        g_originalCore = cur;
+        g_haveOriginalCore = true;
+    }
+    // Soft limit 0, hard limit unchanged: children can get the original back.
+    const rlimit none{0, g_haveOriginalCore ? g_originalCore.rlim_max : 0};
     if (::setrlimit(RLIMIT_CORE, &none) != 0) {
         ok = false;
         errors += QStringLiteral("setrlimit(RLIMIT_CORE): ") + QString::fromLocal8Bit(std::strerror(errno)) + QLatin1Char(' ');
@@ -29,6 +40,13 @@ bool applyProcessHardening(QString *why)
         *why = errors.trimmed();
     }
     return ok;
+}
+
+void restoreChildResourceLimits()
+{
+    if (g_haveOriginalCore) {
+        (void)::setrlimit(RLIMIT_CORE, &g_originalCore);
+    }
 }
 
 } // namespace zterminal
