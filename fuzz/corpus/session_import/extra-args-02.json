@@ -1,0 +1,1 @@
+{"format": "zterminal-sessions", "formatVersion": 1, "exportedAt": "2026-11-01T00:00:00Z", "sessions": [{"name": "s1", "type": "ssh", "host": "sw1.example.com", "user": "admin", "port": 22, "extraArgs": "-Pxo -F/tmp/cfg"}]}

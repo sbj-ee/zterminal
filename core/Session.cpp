@@ -8,8 +8,12 @@ namespace zterminal {
 
 namespace {
 
-// ssh(1) options that take a value as the next argument.
-const QString kSshOptsWithValue = QStringLiteral("BbcDEeFIiJLlmOopQRSWw");
+// ssh(1)'s option letters, from its getopt string (OpenSSH 10):
+//   "1246ab:c:e:fgi:kl:m:no:p:qstvxAB:CD:E:F:GI:J:KL:MNO:P:Q:R:S:TVw:W:XYy"
+// Every parser here uses these two tables, so zterminal reads an argument
+// list exactly the way ssh will. A letter in neither table is refused.
+const QString kSshFlags = QStringLiteral("1246afgknqstvxACGKMNTVXYy");
+const QString kSshOptsWithValue = QStringLiteral("bceilmopBDEFIJLOPQRSWw");
 
 bool hasControlChars(const QString &s)
 {
@@ -23,36 +27,60 @@ bool hasControlChars(const QString &s)
 
 struct SshOpt {
     QChar letter;
-    QString value; // empty for flags
+    QString value;          // empty for flags
+    bool clustered = false; // shared its argument with another option letter
 };
 
-// getopt-style walk over the extra arguments (same rules as buildSshCommand):
-// in a cluster such as "-4vo", the first letter that takes a value swallows
-// the rest of the cluster, or the next argument if it is the last letter.
-// Returns false for anything that isn't an option.
-bool parseSshOptions(const QStringList &extra, QList<SshOpt> *out)
+// getopt-style walk over the extra arguments (shared by buildSshCommand,
+// validateImportedSession and sessionFromSshArgs): in a cluster such as
+// "-4vo", the first letter that takes a value swallows the rest of the
+// cluster, or the next argument if it is the last letter. Returns false for
+// anything that isn't an option, an unknown option letter, or a missing value.
+bool parseSshOptions(const QStringList &extra, QList<SshOpt> *out, QString *why = nullptr)
 {
+    auto fail = [why](const QString &m) {
+        if (why) {
+            *why = m;
+        }
+        return false;
+    };
     for (qsizetype i = 0; i < extra.size(); ++i) {
         const QString &a = extra.at(i);
-        if (!a.startsWith(QLatin1Char('-')) || a.size() < 2 || a.startsWith(QLatin1String("--"))) {
-            return false;
+        if (a == QLatin1String("--")) {
+            return fail(QStringLiteral("Extra arguments must not contain \"--\"."));
         }
+        if (!a.startsWith(QLatin1Char('-')) || a.size() < 2) {
+            return fail(QStringLiteral("Extra arguments must be ssh options; \"%1\" is not "
+                                       "(use the Host field for the destination).").arg(a));
+        }
+        if (a.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("Extra argument \"%1\" is not an ssh option.").arg(a));
+        }
+        const qsizetype first = out->size();
         for (qsizetype j = 1; j < a.size(); ++j) {
             const QChar c = a.at(j);
             if (kSshOptsWithValue.contains(c)) {
                 QString v;
                 if (j == a.size() - 1) {
                     if (i + 1 >= extra.size()) {
-                        return false;
+                        return fail(QStringLiteral("Extra argument %1 needs a value.").arg(a));
                     }
                     v = extra.at(++i);
                 } else {
                     v = a.mid(j + 1);
                 }
-                out->append({c, v});
+                out->append({c, v, j > 1});
                 break;
             }
-            out->append({c, QString()});
+            if (!kSshFlags.contains(c)) {
+                return fail(QStringLiteral("Extra argument \"%1\": -%2 is not an ssh option.").arg(a, QString(c)));
+            }
+            out->append({c, QString(), false});
+        }
+        if (out->size() - first > 1) {
+            for (qsizetype k = first; k < out->size(); ++k) {
+                (*out)[k].clustered = true;
+            }
         }
     }
     return true;
@@ -63,11 +91,34 @@ bool parseSshOptions(const QStringList &extra, QList<SshOpt> *out)
 std::pair<QString, QString> splitSshConfigOption(const QString &opt)
 {
     const QString t = opt.trimmed();
+    // ssh unquotes the keyword like a shell word ("Proxy"'Command' is ProxyCommand).
+    QString key;
     qsizetype k = 0;
-    while (k < t.size() && !t.at(k).isSpace() && t.at(k) != QLatin1Char('=')) {
-        ++k;
+    QChar quote;
+    for (; k < t.size(); ++k) {
+        const QChar c = t.at(k);
+        if (!quote.isNull()) {
+            if (c == quote) {
+                quote = QChar();
+            } else {
+                key += c;
+            }
+            continue;
+        }
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+            quote = c;
+            continue;
+        }
+        if (c == QLatin1Char('\\') && k + 1 < t.size()) {
+            key += t.at(++k);
+            continue;
+        }
+        if (c.isSpace() || c == QLatin1Char('=')) {
+            break;
+        }
+        key += c;
     }
-    const QString key = t.left(k).toLower();
+    key = key.toLower();
     QString rest = t.mid(k).trimmed();
     if (rest.startsWith(QLatin1Char('='))) {
         rest = rest.mid(1).trimmed();
@@ -202,28 +253,64 @@ QString validateImportedSession(const SessionConfig &s)
         return cmd.error;
     }
     QList<SshOpt> opts;
-    if (!parseSshOptions(QProcess::splitCommand(s.extraArgs), &opts)) {
-        return QStringLiteral("Extra arguments must be ssh options.");
+    if (QString why; !parseSshOptions(QProcess::splitCommand(s.extraArgs), &opts, &why)) {
+        return why;
     }
+    // An imported file is untrusted, so its extra arguments are held to an
+    // allowlist: separate options only (no clusters), a short list of letters,
+    // a short list of -o keywords, and plain values.
     auto refuse = [](const QString &what, const QString &why) {
         return QStringLiteral("imported extra argument %1 is not allowed (%2).").arg(what, why);
     };
+    static const QRegularExpression plainValue(QStringLiteral("^[A-Za-z0-9._,:@+/~^\\[\\]-]+$"));
+    static const QStringList allowedKeys{
+        QStringLiteral("serveraliveinterval"),     QStringLiteral("serveralivecountmax"),
+        QStringLiteral("connecttimeout"),          QStringLiteral("connectionattempts"),
+        QStringLiteral("compression"),             QStringLiteral("tcpkeepalive"),
+        QStringLiteral("addressfamily"),           QStringLiteral("loglevel"),
+        QStringLiteral("ciphers"),                 QStringLiteral("macs"),
+        QStringLiteral("kexalgorithms"),           QStringLiteral("hostkeyalgorithms"),
+        QStringLiteral("pubkeyacceptedalgorithms"), QStringLiteral("pubkeyacceptedkeytypes"),
+        QStringLiteral("casignaturealgorithms"),   QStringLiteral("preferredauthentications"),
+        QStringLiteral("pubkeyauthentication"),    QStringLiteral("passwordauthentication"),
+        QStringLiteral("kbdinteractiveauthentication"), QStringLiteral("challengeresponseauthentication"),
+        QStringLiteral("gssapiauthentication"),    QStringLiteral("identitiesonly"),
+        QStringLiteral("numberofpasswordprompts"), QStringLiteral("batchmode"),
+        QStringLiteral("requesttty"),              QStringLiteral("escapechar"),
+        QStringLiteral("ipqos"),                   QStringLiteral("rekeylimit"),
+        QStringLiteral("visualhostkey"),           QStringLiteral("checkhostip"),
+        QStringLiteral("exitonforwardfailure"),    QStringLiteral("fingerprinthash"),
+        QStringLiteral("stricthostkeychecking"),   QStringLiteral("forwardagent"),
+        QStringLiteral("forwardx11"),              QStringLiteral("proxyjump"),
+        QStringLiteral("port"),                    QStringLiteral("user"),
+    };
     for (const SshOpt &o : opts) {
         const QString flag = QStringLiteral("-") + o.letter;
+        if (o.clustered) {
+            return refuse(flag, QStringLiteral("write each option as its own argument"));
+        }
+        const bool hasValue = kSshOptsWithValue.contains(o.letter);
+        if (hasValue && (o.value.startsWith(QLatin1Char('-')) || !plainValue.match(o.value).hasMatch())
+            && o.letter != QLatin1Char('o')) {
+            return refuse(flag, QStringLiteral("unexpected characters in its value"));
+        }
         switch (o.letter.toLatin1()) {
-        case 'F':
-            return refuse(flag, QStringLiteral("loads another ssh config file"));
-        case 'E':
-            return refuse(flag, QStringLiteral("writes ssh's log to a file"));
-        case 'I':
-            return refuse(flag, QStringLiteral("loads a PKCS#11 library"));
-        case 'S':
-        case 'M':
-            return refuse(flag, QStringLiteral("connection sharing / control socket"));
-        case 'A':
-            return refuse(flag, QStringLiteral("forwards your ssh agent to the server"));
-        case 'Y':
-            return refuse(flag, QStringLiteral("trusted X11 forwarding gives the server your display"));
+        case '4': case '6': case 'C': case 'q': case 'v': case 'x': case 'k': case 'T': case 't':
+        case 'c': case 'm': case 'e': case 'b': case 'L': case 'D':
+            break;
+        case 'p': {
+            bool num = false;
+            const int port = o.value.toInt(&num);
+            if (!num || port < 1 || port > 65535) {
+                return refuse(flag, QStringLiteral("not a port number"));
+            }
+            break;
+        }
+        case 'l':
+            if (const QString e = validateSshUser(o.value); !e.isEmpty()) {
+                return e;
+            }
+            break;
         case 'J':
             if (const QString e = validateJumpHost(o.value); !e.isEmpty()) {
                 return e;
@@ -232,48 +319,33 @@ QString validateImportedSession(const SessionConfig &s)
         case 'o': {
             const auto [key, val] = splitSshConfigOption(o.value);
             const QString lv = val.toLower();
-            const QString shown = QStringLiteral("-o ") + key;
-            static const QStringList runsOrLoads{
-                QStringLiteral("proxycommand"),       QStringLiteral("localcommand"),
-                QStringLiteral("permitlocalcommand"), QStringLiteral("knownhostscommand"),
-                QStringLiteral("match"),              QStringLiteral("include"),
-                QStringLiteral("pkcs11provider"),     QStringLiteral("securitykeyprovider"),
-                QStringLiteral("remotecommand"),      QStringLiteral("controlpath"),
-                QStringLiteral("controlmaster"),      QStringLiteral("controlpersist"),
-                QStringLiteral("sendenv"),            QStringLiteral("hostname"),
-                QStringLiteral("forwardx11trusted"),
-            };
-            if (key.isEmpty()) {
-                return refuse(QStringLiteral("-o"), QStringLiteral("empty option"));
+            const QString shown = QStringLiteral("-o ") + (key.isEmpty() ? QStringLiteral("(empty)") : key);
+            if (!allowedKeys.contains(key)) {
+                return refuse(shown, QStringLiteral("not an option an imported session may set"));
             }
-            if (runsOrLoads.contains(key)) {
-                return refuse(shown, key == QLatin1String("hostname")
-                                         ? QStringLiteral("connects somewhere other than the Host field")
-                                         : QStringLiteral("runs a command, loads code or config, or shares connections"));
+            if (val.startsWith(QLatin1Char('-')) || !plainValue.match(val).hasMatch()) {
+                return refuse(shown, QStringLiteral("unexpected characters in its value"));
             }
-            if (key == QLatin1String("forwardagent") && lv != QLatin1String("no")) {
-                return refuse(shown, QStringLiteral("forwards your ssh agent to the server"));
+            if (key == QLatin1String("stricthostkeychecking") && lv != QLatin1String("yes") && lv != QLatin1String("ask")) {
+                return refuse(shown, QStringLiteral("only yes or ask"));
             }
-            if (key == QLatin1String("stricthostkeychecking")
-                && (lv == QLatin1String("no") || lv == QLatin1String("off") || lv == QLatin1String("false"))) {
-                return refuse(shown + QLatin1Char('=') + val, QStringLiteral("disables host-key checking"));
-            }
-            if (key == QLatin1String("userknownhostsfile") || key == QLatin1String("globalknownhostsfile")) {
-                for (const QString &f : val.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
-                    if (f == QLatin1String("/dev/null") || f.toLower() == QLatin1String("none")) {
-                        return refuse(shown + QLatin1Char('=') + val, QStringLiteral("disables host-key checking"));
-                    }
-                }
+            if ((key == QLatin1String("forwardagent") || key == QLatin1String("forwardx11")) && lv != QLatin1String("no")) {
+                return refuse(shown, QStringLiteral("only no"));
             }
             if (key == QLatin1String("proxyjump") && lv != QLatin1String("none")) {
                 if (const QString e = validateJumpHost(val); !e.isEmpty()) {
                     return e;
                 }
             }
+            if (key == QLatin1String("user")) {
+                if (const QString e = validateSshUser(val); !e.isEmpty()) {
+                    return e;
+                }
+            }
             break;
         }
         default:
-            break;
+            return refuse(flag, QStringLiteral("not an option an imported session may set"));
         }
     }
     return {};
@@ -482,33 +554,9 @@ SshCommand buildSshCommand(const SessionConfig &s)
     // given to a shell. They must all be ssh options (or option values), so they
     // can't supply a destination or a remote command.
     const QStringList extra = QProcess::splitCommand(s.extraArgs);
-    for (qsizetype i = 0; i < extra.size(); ++i) {
-        const QString &a = extra.at(i);
-        if (a == QLatin1String("--")) {
-            return fail(QStringLiteral("Extra arguments must not contain \"--\"."));
-        }
-        if (!a.startsWith(QLatin1Char('-')) || a.size() < 2) {
-            return fail(QStringLiteral("Extra arguments must be ssh options; \"%1\" is not "
-                                       "(use the Host field for the destination).").arg(a));
-        }
-        if (a.startsWith(QLatin1String("--"))) {
-            return fail(QStringLiteral("Extra argument \"%1\" is not an ssh option.").arg(a));
-        }
-        // getopt rules: in a cluster like "-4vo", the first letter that takes a
-        // value swallows the rest of the cluster, or the next argument if it is
-        // the last letter ("-o X", "-L spec"). Values are never checked further:
-        // they can't become a destination.
-        for (qsizetype j = 1; j < a.size(); ++j) {
-            if (kSshOptsWithValue.contains(a.at(j))) {
-                if (j == a.size() - 1) {
-                    if (i + 1 >= extra.size()) {
-                        return fail(QStringLiteral("Extra argument %1 needs a value.").arg(a));
-                    }
-                    ++i;
-                }
-                break;
-            }
-        }
+    QList<SshOpt> opts;
+    if (QString why; !parseSshOptions(extra, &opts, &why)) {
+        return fail(why);
     }
     c.args << extra;
     if (s.keepaliveInterval > 0) {
@@ -586,7 +634,17 @@ std::optional<SessionConfig> sessionFromSshArgs(const QStringList &args, QString
                     extra << a << v;
                 }
             } else {
+                // A cluster ("-vp", "-Pxo"): same table as buildSshCommand. A
+                // value letter at the end takes the next argument as its value.
                 extra << a;
+                for (qsizetype j = 1; j < a.size(); ++j) {
+                    if (kSshOptsWithValue.contains(a.at(j))) {
+                        if (j == a.size() - 1 && i + 1 < args.size()) {
+                            extra << args.at(++i);
+                        }
+                        break;
+                    }
+                }
             }
             continue;
         }

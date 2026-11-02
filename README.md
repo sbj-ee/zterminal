@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.5** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.6.6** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.5 — <session>`), in Help → About and by
+the window title (`zterminal 1.6.6 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -284,17 +284,21 @@ An import file is treated as untrusted input:
   **Import**. Sessions imported without that review (only possible through the
   API) are marked unapproved and won't launch until you open them in the
   session dialog and press **Save**.
-- **Refused options.** Sessions whose extra ssh options run local commands,
-  load other config files or libraries, defeat host-key checking or forward
-  credentials are refused: `ProxyCommand`, `LocalCommand`,
-  `PermitLocalCommand`, `KnownHostsCommand`, `Match`, `Include`,
-  `PKCS11Provider`, `SecurityKeyProvider`, `RemoteCommand`, `ControlPath`,
-  `ControlMaster`, `ControlPersist`, `SendEnv`, `HostName`, `ForwardAgent`,
-  `ForwardX11Trusted`, `StrictHostKeyChecking=no/off`,
-  `User/GlobalKnownHostsFile=/dev/null`, and `-F -E -I -S -M -A -Y`. Keys
-  match case-insensitively in every `-o` spelling (`-oKey=v`, `-o Key=v`,
-  `-o "Key v"`, clusters such as `-4oKey=v`). You can still add such options
-  by hand to a session you create yourself.
+- **Allowed options.** An imported session's extra ssh arguments must each be
+  a single option from a short allowlist: `-4 -6 -C -q -v -x -k -t -T`,
+  `-p port`, `-l user`, `-J jump`, `-c`, `-m`, `-e`, `-b`, `-L`, `-D`, and `-o`
+  with one of these keywords: `ServerAliveInterval`, `ServerAliveCountMax`,
+  `ConnectTimeout`, `ConnectionAttempts`, `Compression`, `TCPKeepAlive`,
+  `AddressFamily`, `LogLevel`, `Ciphers`, `MACs`, `KexAlgorithms`,
+  `HostKeyAlgorithms`, `PubkeyAcceptedAlgorithms`, `CASignatureAlgorithms`,
+  `PreferredAuthentications`, the `*Authentication` switches, `IdentitiesOnly`,
+  `NumberOfPasswordPrompts`, `BatchMode`, `RequestTTY`, `EscapeChar`, `IPQoS`,
+  `RekeyLimit`, `VisualHostKey`, `CheckHostIP`, `ExitOnForwardFailure`,
+  `FingerprintHash`, `Port`, `User`, `ProxyJump`, `StrictHostKeyChecking=yes/ask`,
+  `ForwardAgent=no` and `ForwardX11=no`. Values must be plain (letters, digits
+  and `. _ , : @ + / ~ ^ [ ] -`, not starting with `-`), and options can't be
+  clustered (`-4C` is written `-4 -C`). Anything else is refused in the review.
+  You can still add other options by hand to a session you create yourself.
 - **No stored passwords.** “Use stored password” is switched off on every
   imported or replaced session.
 
@@ -520,8 +524,9 @@ In short (details in the sections above and in [SECURITY.md](SECURITY.md)):
 - Stored passwords are bound to the session's real target and are only sent to
   that target's own password prompt via `zterminal-askpass`.
 - **Imported session files are untrusted.** They are shown for review before
-  anything is written, and sessions with dangerous ssh options (including
-  `StrictHostKeyChecking=no`, `ProxyCommand`, `LocalCommand`) are refused.
+  anything is written, and their extra ssh options must come from a short
+  allowlist; anything else (such as `ProxyCommand` or
+  `StrictHostKeyChecking=no`) is refused.
 - Pastes are stripped of control characters; program-set titles are sanitized.
 - Updates install only if `SHA256SUMS` verifies against the built-in minisign
   key (see [Verifying a release](#verifying-a-release)).

@@ -249,6 +249,27 @@ private slots:
         QVERIFY(c.args.isEmpty());
     }
 
+    void optionTableMatchesSsh()
+    {
+        // -P takes a value in ssh (a tag), so "-Pxo X" is -P xo followed by X.
+        SessionConfig s;
+        s.type = SessionConfig::Type::Ssh;
+        s.host = QStringLiteral("sw1.example.com");
+        s.extraArgs = QStringLiteral("-Pxo evil.example.com");
+        QVERIFY(!buildSshCommand(s).ok());
+        s.extraArgs = QStringLiteral("-Z");
+        QVERIFY(!buildSshCommand(s).ok());
+        s.extraArgs = QStringLiteral("-P lab -4");
+        QVERIFY2(buildSshCommand(s).ok(), qPrintable(buildSshCommand(s).error));
+        // zt ssh: a cluster ending in a value letter takes the next argument.
+        QString why;
+        QVERIFY(!sessionFromSshArgs({QStringLiteral("-Pxo"), QStringLiteral("evil.example.com"),
+                                     QStringLiteral("sw1.example.com")}, &why));
+        const auto ok = sessionFromSshArgs({QStringLiteral("-vp"), QStringLiteral("2222"), QStringLiteral("sw1.example.com")}, &why);
+        QVERIFY2(ok, qPrintable(why));
+        QCOMPARE(ok->host, QStringLiteral("sw1.example.com"));
+    }
+
     void hostIsAlwaysAfterDoubleDash()
     {
         SessionConfig s;
@@ -479,6 +500,32 @@ private slots:
         QTest::newRow("-Y") << QStringLiteral("-Y");
         QTest::newRow("-4A cluster") << QStringLiteral("-4A");
         QTest::newRow("-J injection") << QStringLiteral("-J -oProxyCommand=x");
+        // Option letters the parser must know take a value, quoting of the
+        // keyword, and host-key / X11 settings outside the import allowlist.
+        QTest::newRow("-P swallows -o") << QStringLiteral("-Pxo \"-oProxyCommand=touch /tmp/pwned\"");
+        QTest::newRow("-P swallows -F") << QStringLiteral("-Pxo -F/tmp/evil_config");
+        QTest::newRow("-P destination") << QStringLiteral("-Pxo evil.example.com");
+        QTest::newRow("-P tag") << QStringLiteral("-P lab");
+        QTest::newRow("quoted key") << QStringLiteral("-o \"\"\"ProxyCommand\"\"\"=true");
+        QTest::newRow("single-quoted key") << QStringLiteral("-o \"'ProxyCommand'=true\"");
+        QTest::newRow("split quoted key") << QStringLiteral("-o \"Proxy\"\"\"\"\"\"Command=true\"");
+        QTest::newRow("escaped key") << QStringLiteral("-o \"Proxy\\\\Command=true\"");
+        QTest::newRow("accept-new") << QStringLiteral("-o StrictHostKeyChecking=accept-new");
+        QTest::newRow("known hosts dev null alias") << QStringLiteral("-o UserKnownHostsFile=/dev/./null");
+        QTest::newRow("known hosts file") << QStringLiteral("-o UserKnownHostsFile=~/.ssh/known_hosts_lab");
+        QTest::newRow("XAuthLocation") << QStringLiteral("-X -o XAuthLocation=/tmp/x");
+        QTest::newRow("-X") << QStringLiteral("-X");
+        QTest::newRow("-R") << QStringLiteral("-R 2222:localhost:22");
+        QTest::newRow("-W") << QStringLiteral("-W evil.example.com:22");
+        QTest::newRow("-w tunnel") << QStringLiteral("-w 0:0");
+        QTest::newRow("-G") << QStringLiteral("-G");
+        QTest::newRow("unknown letter") << QStringLiteral("-Z");
+        QTest::newRow("flag cluster") << QStringLiteral("-4C");
+        QTest::newRow("value cluster") << QStringLiteral("-vp 2222");
+        QTest::newRow("-o space value") << QStringLiteral("-o \"ServerAliveInterval 30 x\"");
+        QTest::newRow("-o dash value") << QStringLiteral("-o ProxyJump=-oProxyCommand=x");
+        QTest::newRow("-L dash value") << QStringLiteral("-L -oProxyCommand=x");
+        QTest::newRow("-p not a port") << QStringLiteral("-p 99999");
     }
 
     void importBlocksDangerousOptions()
@@ -501,12 +548,9 @@ private slots:
         QTest::addColumn<QString>("extra");
         QTest::newRow("-4") << QStringLiteral("-4");
         QTest::newRow("-C") << QStringLiteral("-C");
-        QTest::newRow("-4C") << QStringLiteral("-4C");
         QTest::newRow("-v -C") << QStringLiteral("-v -C");
         QTest::newRow("ServerAlive") << QStringLiteral("-o ServerAliveInterval=30");
-        QTest::newRow("accept-new") << QStringLiteral("-o StrictHostKeyChecking=accept-new");
         QTest::newRow("strict yes") << QStringLiteral("-oStrictHostKeyChecking=yes");
-        QTest::newRow("known hosts file") << QStringLiteral("-o UserKnownHostsFile=~/.ssh/known_hosts_lab");
         QTest::newRow("ForwardAgent no") << QStringLiteral("-o ForwardAgent=no");
         QTest::newRow("ciphers") << QStringLiteral("-c aes256-gcm@openssh.com -m hmac-sha2-256");
         QTest::newRow("legacy kex") << QStringLiteral("-o KexAlgorithms=+diffie-hellman-group14-sha1 -o HostKeyAlgorithms=+ssh-rsa");
@@ -514,6 +558,9 @@ private slots:
         QTest::newRow("-J ok") << QStringLiteral("-J sbj@vertex:22");
         QTest::newRow("ProxyJump ok") << QStringLiteral("-o ProxyJump=sbj@vertex");
         QTest::newRow("ProxyJump none") << QStringLiteral("-o ProxyJump=none");
+        QTest::newRow("port") << QStringLiteral("-p 2222");
+        QTest::newRow("dynamic forward") << QStringLiteral("-D 1080");
+        QTest::newRow("strict ask") << QStringLiteral("-o StrictHostKeyChecking=ask");
     }
 
     void importAllowsBenignOptions()

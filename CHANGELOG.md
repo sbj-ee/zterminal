@@ -8,6 +8,18 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.6.6 — unreleased
+
+### Changed
+
+- ssh option parsing: one shared parser (used for the session dialog, `zt ssh`
+  and import) built from ssh's complete option table; an unknown option letter
+  is refused instead of passed through.
+- Session import: an imported session's extra ssh arguments are checked
+  against a short allowlist of options and `-o` keywords with plain values,
+  one option per argument. Anything else is listed as refused in the import
+  review. Sessions you create or edit yourself are unaffected.
+
 ## 1.6.5 — 2026-10-31
 
 ### Changed
