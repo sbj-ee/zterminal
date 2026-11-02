@@ -3,6 +3,7 @@
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QSocketNotifier>
+#include <QTimer>
 
 #include <cerrno>
 #include <csignal>
@@ -238,33 +239,49 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
 
 void Pty::onReadable()
 {
+    // At most kMaxReadPerPass bytes per pass: the notifier is level-triggered,
+    // so whatever is left fires it again after the event loop has had a turn
+    // (painting, input, other tabs).
+    QByteArray chunk;
     char buf[16384];
-    for (;;) {
+    bool eof = false;
+    while (chunk.size() < kMaxReadPerPass) {
         const ssize_t n = ::read(m_master, buf, sizeof buf);
         if (n > 0) {
-            emit dataReceived(QByteArray(buf, static_cast<qsizetype>(n)));
+            chunk.append(buf, static_cast<qsizetype>(n));
             continue;
-        }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            return;
         }
         if (n < 0 && errno == EINTR) {
             continue;
         }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            break;
+        }
         // EOF / EIO: the slave side is closed, so the child has exited (or closed its tty).
+        eof = true;
+        break;
+    }
+    if (!chunk.isEmpty()) {
+        emit dataReceived(chunk);
+    }
+    if (eof && m_master >= 0) {
         closeMaster();
         reap();
-        return;
     }
 }
 
-void Pty::write(const QByteArray &data)
+bool Pty::write(const QByteArray &data)
 {
     if (m_master < 0 || data.isEmpty()) {
-        return;
+        return false;
+    }
+    if (m_pendingWrite.size() + data.size() > kMaxPendingWrite) {
+        emit writeRefused(data.size());
+        return false;
     }
     m_pendingWrite.append(data);
     onWritable();
+    return true;
 }
 
 void Pty::onWritable()
@@ -318,8 +335,22 @@ void Pty::reap()
     int status = 0;
     pid_t r;
     do {
-        r = ::waitpid(static_cast<pid_t>(m_pid), &status, 0);
+        r = ::waitpid(static_cast<pid_t>(m_pid), &status, WNOHANG);
     } while (r < 0 && errno == EINTR);
+    if (r == 0) {
+        // The tty closed but the child is still running (it closed its
+        // terminal, or is still exiting): poll instead of blocking the UI.
+        if (!m_reapTimer) {
+            m_reapTimer = new QTimer(this);
+            m_reapTimer->setInterval(50);
+            connect(m_reapTimer, &QTimer::timeout, this, &Pty::reap);
+        }
+        m_reapTimer->start();
+        return;
+    }
+    if (m_reapTimer) {
+        m_reapTimer->stop();
+    }
     m_pid = -1;
     if (r < 0) {
         emit finished(-1, true);
@@ -332,6 +363,9 @@ void Pty::reap()
 
 void Pty::terminate()
 {
+    if (m_reapTimer) {
+        m_reapTimer->stop();
+    }
     if (m_pid > 0) {
         ::kill(-static_cast<pid_t>(m_pid), SIGHUP);
         ::kill(static_cast<pid_t>(m_pid), SIGHUP);

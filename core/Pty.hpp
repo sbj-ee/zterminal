@@ -6,6 +6,7 @@
 #include <QStringList>
 
 class QSocketNotifier;
+class QTimer;
 
 namespace zterminal {
 
@@ -25,7 +26,15 @@ public:
     // user's home and gets HOME/USER/LOGNAME/SHELL plus a sane PATH.
     bool start(const QString &program, const QStringList &args, int rows, int cols,
                const QStringList &extraEnv = {});
-    void write(const QByteArray &data);
+    // Most bytes read from the child per event-loop pass (the rest waits for
+    // the next pass, so a flood such as `yes` can't starve the UI).
+    static constexpr qsizetype kMaxReadPerPass = 256 * 1024;
+    // Most bytes queued for a child that isn't reading its input. A write that
+    // would go past this is refused (returns false, emits writeRefused).
+    static constexpr qsizetype kMaxPendingWrite = 8 * 1024 * 1024;
+
+    bool write(const QByteArray &data);
+    qsizetype pendingWriteBytes() const { return m_pendingWrite.size(); }
     void resize(int rows, int cols);
     // Sends SIGHUP to the child's process group and closes the master side.
     void terminate();
@@ -44,17 +53,20 @@ public:
 signals:
     void dataReceived(const QByteArray &data);
     void finished(int exitCode, bool crashed);
+    // Input was dropped because kMaxPendingWrite bytes are already waiting.
+    void writeRefused(qsizetype bytes);
 
 private:
     void onReadable();
     void onWritable();
-    void reap();
+    void reap(); // non-blocking; polls with m_reapTimer until the child exits
     void closeMaster();
 
     int m_master = -1;
     qint64 m_pid = -1;
     QSocketNotifier *m_readNotifier = nullptr;
     QSocketNotifier *m_writeNotifier = nullptr;
+    QTimer *m_reapTimer = nullptr;
     QByteArray m_pendingWrite;
     QString m_error;
 };

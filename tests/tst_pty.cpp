@@ -3,6 +3,8 @@
 #include "Pty.hpp"
 
 #include <QDir>
+#include <QElapsedTimer>
+#include <QTimer>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -27,6 +29,62 @@ class TstPty : public QObject
     }
 
 private slots:
+    void floodDoesNotStarveEventLoop()
+    {
+        Pty pty;
+        QVERIFY(pty.start(QStringLiteral("yes"), {}, 24, 80));
+        qsizetype biggest = 0;
+        qint64 total = 0;
+        connect(&pty, &Pty::dataReceived, this, [&](const QByteArray &b) {
+            biggest = std::max(biggest, b.size());
+            total += b.size();
+        });
+        // Timers keep firing while the child floods the pty.
+        int ticks = 0;
+        QTimer tick;
+        connect(&tick, &QTimer::timeout, this, [&ticks]() { ++ticks; });
+        tick.start(5);
+        QTRY_VERIFY_WITH_TIMEOUT(ticks >= 20, 5000);
+        QVERIFY(total > 0);
+        QVERIFY2(biggest <= Pty::kMaxReadPerPass, qPrintable(QString::number(biggest)));
+        pty.terminate();
+    }
+
+    void pendingWriteIsCapped()
+    {
+        Pty pty;
+        // A child that never reads its input.
+        QVERIFY(pty.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("exec sleep 30")}, 24, 80));
+        QSignalSpy refused(&pty, &Pty::writeRefused);
+        const QByteArray mib(1024 * 1024, 'x');
+        bool sawRefusal = false;
+        for (int i = 0; i < 12 && !sawRefusal; ++i) {
+            sawRefusal = !pty.write(mib);
+        }
+        QVERIFY(sawRefusal);
+        QCOMPARE(refused.size(), 1);
+        QVERIFY(pty.pendingWriteBytes() <= Pty::kMaxPendingWrite);
+        pty.terminate();
+        QVERIFY(!pty.isRunning());
+    }
+
+    void reapDoesNotBlockWhenChildOutlivesTty()
+    {
+        Pty pty;
+        // Ignores the hangup, closes every tty descriptor, then keeps running.
+        QVERIFY(pty.start(QStringLiteral("/bin/sh"),
+                          {QStringLiteral("-c"), QStringLiteral("trap '' HUP; exec </dev/null >/dev/null 2>&1; sleep 1; exit 7")}, 24, 80));
+        QSignalSpy finished(&pty, &Pty::finished);
+        int ticks = 0;
+        QTimer tick;
+        connect(&tick, &QTimer::timeout, this, [&ticks]() { ++ticks; });
+        tick.start(20);
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(finished.first().at(0).toInt(), 7);
+        QVERIFY2(ticks >= 10, qPrintable(QString::number(ticks))); // the loop kept running during the wait
+        QVERIFY(!pty.isRunning());
+    }
+
     void outputAndEnvironment()
     {
         Pty pty;
