@@ -12,6 +12,7 @@
 #include <QClipboard>
 #include <QFocusEvent>
 #include <QImage>
+#include <QInputMethodEvent>
 #include <QMenuBar>
 #include <QMouseEvent>
 #include <QSettings>
@@ -480,6 +481,45 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(w.terminal()->lineText(0).contains(QStringLiteral("TRUECOLOR")), 10000);
         QCOMPARE(w.terminal()->cell(0, 0).fg, qRgb(255, 100, 0));
         QTRY_VERIFY_WITH_TIMEOUT(!w.pty()->isRunning(), 10000);
+    }
+
+    void inputMethodPreeditAndCommit()
+    {
+        Fixture f;
+        QVERIFY(f.view.testAttribute(Qt::WA_InputMethodEnabled));
+        QVERIFY(f.view.inputMethodQuery(Qt::ImEnabled).toBool());
+        f.term.feed("ab");
+        // Preedit: shown, nothing sent yet.
+        QInputMethodEvent pre(QStringLiteral("ni"), {});
+        QApplication::sendEvent(&f.view, &pre);
+        QCOMPARE(f.view.preeditText(), QStringLiteral("ni"));
+        QVERIFY(f.out.isEmpty());
+        f.view.grab(); // paints the composition without crashing
+        // The candidate window goes after the composition, on the cursor row.
+        const QRect r = f.view.inputMethodQuery(Qt::ImCursorRectangle).toRect();
+        const QSize c = f.view.cellSize();
+        const QPoint cellTopLeft = f.view.viewport()->mapTo(&f.view, QPoint(2 + 2 * c.width(), 2));
+        QCOMPARE(r.top(), cellTopLeft.y());
+        QVERIFY2(r.left() > cellTopLeft.x(), qPrintable(QStringLiteral("%1 vs %2").arg(r.left()).arg(cellTopLeft.x())));
+        QCOMPARE(r.height(), c.height());
+        QCOMPARE(f.view.inputMethodQuery(Qt::ImFont).value<QFont>(), f.view.terminalFont());
+        // Commit: sent as UTF-8, preedit cleared.
+        QInputMethodEvent commit;
+        commit.setCommitString(QStringLiteral("你"));
+        QApplication::sendEvent(&f.view, &commit);
+        QCOMPARE(f.out, QStringLiteral("你").toUtf8());
+        QVERIFY(f.view.preeditText().isEmpty());
+    }
+
+    void inputMethodCursorFollowsTerminal()
+    {
+        Fixture f;
+        const QRect r0 = f.view.inputMethodQuery(Qt::ImCursorRectangle).toRect();
+        f.term.feed("\r\n\r\n   ");
+        const QRect r1 = f.view.inputMethodQuery(Qt::ImCursorRectangle).toRect();
+        const QSize c = f.view.cellSize();
+        QCOMPARE(r1.top() - r0.top(), 2 * c.height());
+        QCOMPARE(r1.left() - r0.left(), 3 * c.width());
     }
 };
 

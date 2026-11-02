@@ -1,5 +1,9 @@
 #include "Vault.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <thread>
+
 #include "ConfigPaths.hpp"
 
 #include <QDir>
@@ -138,6 +142,29 @@ bool Vault::fail(const QString &msg)
 {
     m_error = msg;
     return false;
+}
+
+void Vault::adopt(Vault &other)
+{
+    if (&other == this) {
+        return;
+    }
+    lock();
+    m_key = std::move(other.m_key);
+    m_header = other.m_header;
+    m_params = other.m_params;
+    m_entries = std::move(other.m_entries);
+    m_error = other.m_error;
+    other.lock();
+}
+
+namespace {
+std::atomic<int> g_kdfDelayMs{0};
+} // namespace
+
+void Vault::setKdfDelayForTests(int ms)
+{
+    g_kdfDelayMs = ms;
 }
 
 void Vault::lock()
@@ -283,6 +310,9 @@ bool Vault::parseHeader(const QByteArray &data, Header *h)
 
 bool Vault::deriveKey(const SecureBuffer &password, const Header &h, SecureBuffer *key)
 {
+    if (const int delay = g_kdfDelayMs.load(); delay > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    }
     SecureBuffer k(kKeyBytes);
     // An empty SecureBuffer has no storage; libsodium wants a non-null pointer
     // even for length 0 (UBSan).
