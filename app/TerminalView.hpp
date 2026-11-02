@@ -78,6 +78,12 @@ public:
     bool cursorBlinking() const { return m_blinkTimer.isActive(); }
     bool cursorBlinkPhaseOn() const { return m_blinkOn; }
     int cursorBlinkInterval() const { return m_blinkTimer.interval(); }
+    // Input method (CJK, dead keys, emoji pickers): the composition in
+    // progress, drawn underlined at the cursor; committed text goes to the
+    // session like typed text. The candidate window follows the cursor cell
+    // (Qt::ImCursorRectangle).
+    QString preeditText() const { return m_preedit; }
+    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 
 public slots:
     void copySelection();   // Edit > Copy: PRIMARY (if supported) + CLIPBOARD
@@ -96,6 +102,7 @@ protected:
     void paintEvent(QPaintEvent *e) override;
     void resizeEvent(QResizeEvent *e) override;
     void keyPressEvent(QKeyEvent *e) override;
+    void inputMethodEvent(QInputMethodEvent *e) override;
     void mousePressEvent(QMouseEvent *e) override;
     void mouseDoubleClickEvent(QMouseEvent *e) override;
     void mouseMoveEvent(QMouseEvent *e) override;
@@ -121,6 +128,8 @@ private:
     QRect cursorRect() const; // viewport pixels of the cursor cell (empty if off-screen)
     void updateBlink();       // start/stop the blink timer for focus and terminal state
     void restartBlink();      // cursor solid now, next toggle a full phase later
+    QRect cursorCellRect() const; // viewport pixels of the cursor's single cell (empty if off-screen)
+    void sendText(const QString &text, bool alt);
 
     Terminal *m_term;
     QFont m_font;
@@ -133,6 +142,7 @@ private:
     int m_gridRows = 24;
     int m_gridCols = 80;
     int m_scrollOffset = 0;
+    double m_wheelLines = 0; // wheel/trackpad movement not yet scrolled (lines; + = up)
     static constexpr int kMargin = 2;
 
     MouseSettings m_mouse;
@@ -152,6 +162,8 @@ private:
     QTimer m_blinkTimer;
     bool m_blinkOn = true;
     QPoint m_lastCursorPos{-1, -1};
+    QString m_preedit;
+    int m_preeditCursor = 0; // caret inside the preedit (characters)
 };
 
 } // namespace zterminal

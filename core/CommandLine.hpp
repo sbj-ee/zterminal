@@ -8,11 +8,11 @@ namespace zterminal {
 // What the user asked zterminal (or the zt wrapper) to open.
 struct LaunchRequest {
     enum class Kind { LocalShell, SavedSession, Ssh, Serial, Command, Version, Help, ListSessions, CheckSession,
-                      Group, ListGroups, CheckGroup, Error };
+                      Group, ListGroups, CheckGroup, Restore, Error };
     Kind kind = Kind::LocalShell;
     QString sessionName; // SavedSession / CheckSession: the name
     QString groupName;   // Group / CheckGroup: the name
-    QString program;     // Ssh/Command: executable; Serial: the device
+    QString program;     // Ssh/Command: executable; Serial: the device; Restore: the restore file
     int baudRate = 9600; // Serial
     QStringList args;    // Ssh/Command: argv[1..]
     QString error;       // Error: message for stderr
@@ -33,6 +33,7 @@ struct LaunchRequest {
 //   -g|--group <name>      open a saved group (its sessions as tabs in a new window)
 //   --list-groups          print saved group names, one per line
 //   --check-group <name>   exit 0 if the group exists, else print an error
+//   --restore <file>       reopen windows/tabs saved by an update restart (internal)
 LaunchRequest parseCommandLine(const QStringList &args);
 
 QString usageText();

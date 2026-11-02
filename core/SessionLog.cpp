@@ -110,11 +110,17 @@ bool SessionLog::start(const QString &directory, const QString &sessionName, boo
     }
     m_path = path;
     m_timestamps = timestamps;
+    m_writeFailed = false;
     m_pauses.clear();
     m_filter = std::make_unique<LogTextFilter>([this](const QString &l) { writeLine(l); });
     m_filter->setColumns(m_columns);
     writeRaw(QStringLiteral("=== zterminal %1 log of \"%2\" started %3 ===\n")
                  .arg(QString::fromLatin1(kVersionString), sessionName, now.toString(QString::fromLatin1(kStamp))));
+    if (m_writeFailed) {
+        m_file.close();
+        m_filter.reset();
+        return false;
+    }
     return true;
 }
 
@@ -132,8 +138,15 @@ void SessionLog::stop()
 
 void SessionLog::writeRaw(const QString &text)
 {
-    m_file.write(text.toUtf8());
-    m_file.flush(); // a crash loses nothing already shown
+    if (m_writeFailed || !m_file.isOpen()) {
+        return;
+    }
+    const QByteArray bytes = text.toUtf8();
+    // flush(): a crash loses nothing already shown.
+    if (m_file.write(bytes) != bytes.size() || !m_file.flush()) {
+        m_writeFailed = true;
+        m_error = QStringLiteral("Writing %1 failed: %2").arg(m_path, m_file.errorString());
+    }
 }
 
 void SessionLog::writeLine(const QString &line)

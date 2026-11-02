@@ -9,12 +9,14 @@
 #include <QApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QProcess>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QTabWidget>
 #include <QTimer>
 #include <QUrl>
 
@@ -400,7 +402,7 @@ void UpdateManager::offerRestart()
     const int live = liveSessionCount(&windows);
     QString text = QStringLiteral("zterminal %1 was installed. Restart zterminal now to use it?").arg(m_release.tag);
     if (live > 0) {
-        text += QStringLiteral("\n\nWarning: %1 open in %2 will be closed. Saved sessions are reopened, but their "
+        text += QStringLiteral("\n\nWarning: %1 open in %2 will be closed. Every window and tab is reopened, but "
                                "connections start over.")
                     .arg(live == 1 ? QStringLiteral("1 live session is") : QStringLiteral("%1 live sessions are").arg(live),
                          windows == 1 ? QStringLiteral("1 window") : QStringLiteral("%1 windows").arg(windows));
@@ -422,20 +424,67 @@ void UpdateManager::offerRestart()
     box->open();
 }
 
+QList<RestoreWindow> UpdateManager::restorePlan()
+{
+    QList<RestoreWindow> plan;
+    for (QWidget *w : QApplication::topLevelWidgets()) {
+        auto *mw = qobject_cast<MainWindow *>(w);
+        if (!mw || mw->tabCount() == 0) {
+            continue;
+        }
+        RestoreWindow rw;
+        for (int i = 0; i < mw->tabCount(); ++i) {
+            const QStringList args = mw->sessionAt(i) ? mw->sessionAt(i)->originalArgs() : QStringList{};
+            if (!isRestorableTab(args)) {
+                continue;
+            }
+            if (i == mw->tabs()->currentIndex()) {
+                rw.current = int(rw.tabs.size());
+            }
+            rw.tabs << args;
+        }
+        if (!rw.tabs.isEmpty()) {
+            plan << rw;
+        }
+    }
+    return plan;
+}
+
+MainWindow *UpdateManager::openRestored(const QList<RestoreWindow> &windows)
+{
+    MainWindow *first = nullptr;
+    for (const RestoreWindow &rw : windows) {
+        if (rw.tabs.isEmpty()) {
+            continue;
+        }
+        auto *w = new MainWindow(parseCommandLine(rw.tabs.front()), rw.tabs.front());
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        w->show();
+        w->startSession();
+        for (int i = 1; i < rw.tabs.size(); ++i) {
+            w->addTab(parseCommandLine(rw.tabs.at(i)), rw.tabs.at(i), /*start=*/true, /*activate=*/false);
+        }
+        w->tabs()->setCurrentIndex(qBound(0, rw.current, w->tabCount() - 1));
+        if (!first) {
+            first = w;
+        }
+    }
+    return first;
+}
+
 void UpdateManager::restart()
 {
     if (m_restartHandler) {
         m_restartHandler();
         return;
     }
-    // One new process per window, reopening what its current tab was started with.
-    bool any = false;
-    for (QWidget *w : QApplication::topLevelWidgets()) {
-        if (auto *mw = qobject_cast<MainWindow *>(w); mw && mw->currentSession()) {
-            any |= QProcess::startDetached(kInstalledBinary, mw->currentSession()->originalArgs());
+    // One new process reopening every window with all of its tabs.
+    const QList<RestoreWindow> plan = restorePlan();
+    const QString file = plan.isEmpty() ? QString() : writeRestoreFile(plan);
+    if (file.isEmpty() || !QProcess::startDetached(kInstalledBinary, {QStringLiteral("--restore"), file})) {
+        if (!file.isEmpty()) {
+            QFile::remove(file);
         }
-    }
-    if (!any) {
         QProcess::startDetached(kInstalledBinary, {});
     }
     QCoreApplication::exit(0);
