@@ -8,6 +8,11 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.7.1 — unreleased
+
+### Fixed
+- Creating, unlocking and changing the master password of the vault no longer freeze the window for the ~0.5–1 s Argon2 derivation: the work runs on a scratch `Vault` in a worker thread while the UI keeps painting (the dialog is disabled meanwhile), and the shared vault adopts the result on the UI thread (`Vault::adopt`).
+
 ## 1.7.0 — unreleased
 
 ### Added

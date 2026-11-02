@@ -13,6 +13,12 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QEventLoop>
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <thread>
 
 namespace zterminal {
 
@@ -65,7 +71,7 @@ QString tildePath(const QString &p)
     return s;
 }
 
-// RAII busy cursor around the (Argon2-bound, briefly blocking) vault calls.
+// RAII busy cursor while a vault job (Argon2, on a worker thread) runs.
 // It is a no-op where busyCursorEnabled() is false (macOS): Qt's Cocoa plugin
 // has no native wait cursor, so it converts a bundled cursor image with
 // QImage::toCGImage(), and Qt 6.11.0/6.11.1 hand CGImageCreate a dangling
@@ -92,6 +98,32 @@ public:
 private:
     bool m_active;
 };
+
+// Runs `job` (create/unlock/changePassword on a scratch Vault for the same
+// file) on a worker thread while the UI keeps painting; the dialog is
+// disabled meanwhile. On success the shared Vault adopts the scratch one's
+// state, on the UI thread. Returns the job's result; *error gets its message.
+bool runVaultJob(QDialog *dialog, Vault &vault, std::function<bool(Vault &)> job, QString *error)
+{
+    WaitCursor wc;
+    dialog->setEnabled(false);
+    auto scratch = std::make_shared<Vault>(vault.path());
+    auto ok = std::make_shared<std::atomic<bool>>(false);
+    QEventLoop loop;
+    std::thread worker([scratch, ok, job = std::move(job), &loop]() {
+        ok->store(job(*scratch));
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    worker.join();
+    dialog->setEnabled(true);
+    if (!ok->load()) {
+        *error = scratch->lastError();
+        return false;
+    }
+    vault.adopt(*scratch);
+    return true;
+}
 
 } // namespace
 
@@ -152,14 +184,12 @@ QString UnlockVaultDialog::errorText() const
 
 bool UnlockVaultDialog::tryUnlock()
 {
-    const SecureBuffer pw = takeSecret(m_password);
-    bool ok;
-    {
-        WaitCursor wc;
-        ok = m_vault.unlock(pw);
-    }
+    SecureBuffer pw = takeSecret(m_password);
+    QString err;
+    auto shared = std::make_shared<SecureBuffer>(std::move(pw));
+    const bool ok = runVaultJob(this, m_vault, [shared](Vault &v) { return v.unlock(*shared); }, &err);
     if (!ok) {
-        showError(m_error, m_vault.lastError());
+        showError(m_error, err);
         m_password->setFocus();
         return false;
     }
@@ -245,15 +275,13 @@ bool CreateVaultDialog::tryCreate()
         showError(m_error, QStringLiteral("Enter the password twice (at least %1 characters) and tick the box.").arg(kMinLength));
         return false;
     }
-    const SecureBuffer pw = takeSecret(m_password);
+    SecureBuffer pw = takeSecret(m_password);
     m_confirm->clear();
-    bool ok;
-    {
-        WaitCursor wc;
-        ok = m_vault.create(pw);
-    }
+    QString err;
+    auto shared = std::make_shared<SecureBuffer>(std::move(pw));
+    const bool ok = runVaultJob(this, m_vault, [shared](Vault &v) { return v.create(*shared); }, &err);
     if (!ok) {
-        showError(m_error, m_vault.lastError());
+        showError(m_error, err);
         return false;
     }
     accept();
@@ -316,16 +344,16 @@ bool ChangeMasterPasswordDialog::tryChange()
                                .arg(CreateVaultDialog::kMinLength));
         return false;
     }
-    const SecureBuffer oldPw = takeSecret(m_current);
-    const SecureBuffer newPw = takeSecret(m_password);
+    SecureBuffer oldPw = takeSecret(m_current);
+    SecureBuffer newPw = takeSecret(m_password);
     m_confirm->clear();
-    bool ok;
-    {
-        WaitCursor wc;
-        ok = m_vault.changePassword(oldPw, newPw);
-    }
+    QString err;
+    auto oldShared = std::make_shared<SecureBuffer>(std::move(oldPw));
+    auto newShared = std::make_shared<SecureBuffer>(std::move(newPw));
+    const bool ok = runVaultJob(
+        this, m_vault, [oldShared, newShared](Vault &v) { return v.changePassword(*oldShared, *newShared); }, &err);
     if (!ok) {
-        showError(m_error, m_vault.lastError());
+        showError(m_error, err);
         return false;
     }
     accept();
