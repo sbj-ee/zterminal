@@ -8,6 +8,53 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.7.1 — unreleased
+
+### Fixed
+- Creating, unlocking and changing the master password of the vault no longer freeze the window for the ~0.5–1 s Argon2 derivation: the work runs on a scratch `Vault` in a worker thread while the UI keeps painting (the dialog is disabled meanwhile), and the shared vault adopts the result on the UI thread (`Vault::adopt`).
+
+## 1.7.0 — unreleased
+
+### Added
+- Input method support (IBus, Fcitx, macOS input sources): `inputMethodEvent` sends committed text to the session as UTF-8, the preedit (composition) is drawn underlined at the cursor with its caret, and `inputMethodQuery` reports the cursor cell (after the composition) so the candidate window follows the cursor; it is updated whenever the cursor moves.
+
+## 1.6.12 — unreleased
+
+### Fixed
+- Restarting after an update now reopens every window with all of its tabs (and the tab that was current), not just each window's current tab. The old process writes a private (0600) restore file that the new one reads once and deletes (`zterminal --restore FILE`, internal); only local-shell, saved-session, ssh, serial and command tabs are restored.
+
+## 1.6.11 — unreleased
+
+### Fixed
+
+- Process hardening: zterminal sets only its own soft core-dump limit to 0 and
+  leaves the hard limit alone; shells and programs started in a tab get the
+  original limit back, so `ulimit -c unlimited` works in them again. zterminal
+  itself still writes no core dumps (and stays non-dumpable on Linux).
+
+## 1.6.10 — unreleased
+
+### Fixed
+
+- Bell: at most one beep per 250 ms per tab, so a program printing BEL in a
+  loop no longer floods the desktop's sound system.
+- Serial errors shown in the session banner are HTML-escaped (the banner is
+  rich text).
+- Vault: a write (create, set/remove a secret, change password) is refused with
+  an error when the vault's lock file can't be opened or locked, instead of
+  going ahead without the lock.
+- Session logs: a failed write (disk full, file size limit) stops logging and
+  says why in the session banner instead of being silently ignored.
+
+## 1.6.9 — unreleased
+
+### Fixed
+
+- Scrolling: small trackpad movements add up instead of being dropped (each
+  delta under one wheel notch used to be ignored). Pixel deltas are used when
+  the platform sends them (one cell height = one line); a mouse notch still
+  scrolls 3 lines.
+
 ## 1.6.8 — unreleased
 
 ### Fixed

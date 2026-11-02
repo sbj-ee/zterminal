@@ -37,6 +37,9 @@ public:
     bool isActive() const { return m_file.isOpen(); }
     QString path() const { return m_path; }
     QString errorString() const { return m_error; }
+    // A write to the log file failed (disk full, file removed on a network
+    // mount...): errorString() says why, and nothing more is written.
+    bool writeFailed() const { return m_writeFailed; }
 
     void feed(const QByteArray &output);
     void setColumns(int columns);
@@ -62,6 +65,7 @@ private:
     QString m_path;
     QString m_error;
     bool m_timestamps = false;
+    bool m_writeFailed = false;
     int m_columns = 0;
     QStringList m_pauses;
     Clock m_clock;

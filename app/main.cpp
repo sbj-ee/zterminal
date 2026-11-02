@@ -116,6 +116,24 @@ int main(int argc, char *argv[])
         return QApplication::exec();
     }
 
+    if (request.kind == zterminal::LaunchRequest::Kind::Restore) {
+        // After an update: every window and tab the old process had.
+        QString err;
+        const auto plan = zterminal::takeRestoreFile(request.program, &err);
+        zterminal::MainWindow *rw = plan ? zterminal::UpdateManager::openRestored(*plan) : nullptr;
+        if (!plan) {
+            std::fprintf(stderr, "zterminal: %s\n", err.toLocal8Bit().constData());
+        }
+        if (rw) {
+            zterminal::UpdateManager::instance().scheduleStartupCheck(rw);
+            return QApplication::exec();
+        }
+        zterminal::MainWindow w({}, {}); // nothing to restore: a plain local shell
+        w.show();
+        w.startSession();
+        return QApplication::exec();
+    }
+
     zterminal::MainWindow w(request, args);
     w.show();
     w.startSession();

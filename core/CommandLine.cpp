@@ -47,6 +47,7 @@ QString LaunchRequest::displayName() const
     case Kind::Group:
     case Kind::ListGroups:
     case Kind::CheckGroup:
+    case Kind::Restore:
     case Kind::Error:
         break;
     }
@@ -96,6 +97,16 @@ LaunchRequest parseCommandLine(const QStringList &args)
         }
         r.kind = first == QLatin1String("--check-group") ? LaunchRequest::Kind::CheckGroup : LaunchRequest::Kind::Group;
         r.groupName = args.at(1);
+        return r;
+    }
+    if (first == QLatin1String("--restore")) {
+        if (args.size() != 2) {
+            r.kind = LaunchRequest::Kind::Error;
+            r.error = QStringLiteral("--restore needs exactly one file");
+            return r;
+        }
+        r.kind = LaunchRequest::Kind::Restore;
+        r.program = args.at(1);
         return r;
     }
     if (first == QLatin1String("-e") || first == QLatin1String("--command")) {

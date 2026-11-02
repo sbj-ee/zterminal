@@ -10,6 +10,7 @@ add_library(zterminal_core STATIC
   MouseSettings.cpp MouseSettings.hpp
   WindowTitle.cpp WindowTitle.hpp
   CommandLine.cpp CommandLine.hpp
+  RestoreFile.cpp RestoreFile.hpp
   Session.cpp Session.hpp
   SessionStore.cpp SessionStore.hpp
   SessionExport.cpp SessionExport.hpp

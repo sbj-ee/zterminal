@@ -12,11 +12,13 @@
 #include <QClipboard>
 #include <QFocusEvent>
 #include <QImage>
+#include <QInputMethodEvent>
 #include <QMenuBar>
 #include <QMouseEvent>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTest>
+#include <QWheelEvent>
 
 // Settings go to $XDG_CONFIG_HOME (set per test by CMake), never the real ~/.config.
 
@@ -215,6 +217,38 @@ private slots:
         QTest::keyClick(&f.view, Qt::Key_F1);
         QTest::keyClick(&f.view, Qt::Key_X, Qt::AltModifier);
         QCOMPARE(f.out, QByteArray("a\x03\x1b\r\t\x1b[A\x1bOP\x1bx"));
+    }
+
+    static void wheel(Fixture &f, QPoint pixel, QPoint angle)
+    {
+        const QPointF pos(f.at(2, 2));
+        QWheelEvent ev(pos, f.view.viewport()->mapToGlobal(pos), pixel, angle, Qt::NoButton, Qt::NoModifier,
+                       Qt::ScrollUpdate, false);
+        QApplication::sendEvent(f.view.viewport(), &ev);
+    }
+
+    void smallWheelDeltasAccumulate()
+    {
+        Fixture f;
+        for (int i = 0; i < 60; ++i) {
+            f.term.feed(QStringLiteral("line %1\r\n").arg(i).toUtf8());
+        }
+        // Trackpad without pixel deltas: 15 units at a time (1/8 notch).
+        for (int i = 0; i < 7; ++i) {
+            wheel(f, {}, {0, 15});
+        }
+        QCOMPARE(f.view.scrollOffset(), 2); // 105 units = 2.6 lines
+        wheel(f, {}, {0, 15});
+        QCOMPARE(f.view.scrollOffset(), 3); // one full notch = 3 lines
+        // Pixel deltas: one line per cell height, remainders kept.
+        const int h = f.view.cellSize().height();
+        wheel(f, {0, h / 2}, {0, 1});
+        QCOMPARE(f.view.scrollOffset(), 3);
+        wheel(f, {0, h - h / 2}, {0, 1});
+        QCOMPARE(f.view.scrollOffset(), 4);
+        // A full mouse notch still scrolls 3 lines; down goes back.
+        wheel(f, {}, {0, -120});
+        QCOMPARE(f.view.scrollOffset(), 1);
     }
 
     void shiftPageUpScrollsHistoryLocally()
@@ -447,6 +481,45 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(w.terminal()->lineText(0).contains(QStringLiteral("TRUECOLOR")), 10000);
         QCOMPARE(w.terminal()->cell(0, 0).fg, qRgb(255, 100, 0));
         QTRY_VERIFY_WITH_TIMEOUT(!w.pty()->isRunning(), 10000);
+    }
+
+    void inputMethodPreeditAndCommit()
+    {
+        Fixture f;
+        QVERIFY(f.view.testAttribute(Qt::WA_InputMethodEnabled));
+        QVERIFY(f.view.inputMethodQuery(Qt::ImEnabled).toBool());
+        f.term.feed("ab");
+        // Preedit: shown, nothing sent yet.
+        QInputMethodEvent pre(QStringLiteral("ni"), {});
+        QApplication::sendEvent(&f.view, &pre);
+        QCOMPARE(f.view.preeditText(), QStringLiteral("ni"));
+        QVERIFY(f.out.isEmpty());
+        f.view.grab(); // paints the composition without crashing
+        // The candidate window goes after the composition, on the cursor row.
+        const QRect r = f.view.inputMethodQuery(Qt::ImCursorRectangle).toRect();
+        const QSize c = f.view.cellSize();
+        const QPoint cellTopLeft = f.view.viewport()->mapTo(&f.view, QPoint(2 + 2 * c.width(), 2));
+        QCOMPARE(r.top(), cellTopLeft.y());
+        QVERIFY2(r.left() > cellTopLeft.x(), qPrintable(QStringLiteral("%1 vs %2").arg(r.left()).arg(cellTopLeft.x())));
+        QCOMPARE(r.height(), c.height());
+        QCOMPARE(f.view.inputMethodQuery(Qt::ImFont).value<QFont>(), f.view.terminalFont());
+        // Commit: sent as UTF-8, preedit cleared.
+        QInputMethodEvent commit;
+        commit.setCommitString(QStringLiteral("你"));
+        QApplication::sendEvent(&f.view, &commit);
+        QCOMPARE(f.out, QStringLiteral("你").toUtf8());
+        QVERIFY(f.view.preeditText().isEmpty());
+    }
+
+    void inputMethodCursorFollowsTerminal()
+    {
+        Fixture f;
+        const QRect r0 = f.view.inputMethodQuery(Qt::ImCursorRectangle).toRect();
+        f.term.feed("\r\n\r\n   ");
+        const QRect r1 = f.view.inputMethodQuery(Qt::ImCursorRectangle).toRect();
+        const QSize c = f.view.cellSize();
+        QCOMPARE(r1.top() - r0.top(), 2 * c.height());
+        QCOMPARE(r1.left() - r0.left(), 3 * c.width());
     }
 };
 

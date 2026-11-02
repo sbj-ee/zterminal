@@ -9,6 +9,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <csignal>
+#include <sys/resource.h>
 #include <sys/stat.h>
 
 using namespace zterminal;
@@ -126,6 +128,31 @@ private slots:
         QCOMPARE(SessionLog::sanitizeName(QString(300, QLatin1Char('a'))).size(), 64);
         QCOMPARE(SessionLog::fileNameFor(QStringLiteral("SG250 console"), kWhen), QStringLiteral("SG250_console-20261003-204412.log"));
         QCOMPARE(SessionLog::defaultDirectory(), QDir::homePath() + QStringLiteral("/zterminal-logs"));
+    }
+
+    void writeFailureIsReported()
+    {
+        // A file-size limit makes write() fail with EFBIG, like a full disk.
+        SessionLog log;
+        log.setClockForTests([] { return kWhen; });
+        QVERIFY(log.start(tmp.filePath(QStringLiteral("full")), QStringLiteral("big"), false));
+        QVERIFY(!log.writeFailed());
+        rlimit old {};
+        QCOMPARE(::getrlimit(RLIMIT_FSIZE, &old), 0);
+        auto *oldHandler = std::signal(SIGXFSZ, SIG_IGN);
+        rlimit small = old;
+        small.rlim_cur = 64 * 1024;
+        QCOMPARE(::setrlimit(RLIMIT_FSIZE, &small), 0);
+        const QByteArray line = QByteArray(200, 'x') + "\r\n";
+        for (int i = 0; i < 1000 && !log.writeFailed(); ++i) {
+            log.feed(line);
+        }
+        ::setrlimit(RLIMIT_FSIZE, &old);
+        std::signal(SIGXFSZ, oldHandler);
+        QVERIFY(log.writeFailed());
+        QVERIFY2(log.errorString().contains(QStringLiteral("failed")), qPrintable(log.errorString()));
+        log.stop();
+        QVERIFY(!log.isActive());
     }
 
     void pathAndPermissions()
