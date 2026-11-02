@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Update.hpp"
+#include "RestoreFile.hpp"
 #include "UpdateChecker.hpp"
 
 #include <QObject>
@@ -17,6 +18,7 @@ class QWidget;
 
 namespace zterminal {
 
+class MainWindow;
 class UpdateDialog;
 
 // One per process: Help > Check for Updates, the automatic check shortly
@@ -66,6 +68,11 @@ public:
                                         QString *error);
     // Total live sessions in every open zterminal window of this process.
     static int liveSessionCount(int *windows = nullptr);
+    // Every MainWindow with every tab's launch arguments, for the restart.
+    static QList<RestoreWindow> restorePlan();
+    // Opens the planned windows (started, current tab selected); returns the
+    // first one, or nullptr if there was nothing to open.
+    static MainWindow *openRestored(const QList<RestoreWindow> &windows);
 
 signals:
     void stageChanged(zterminal::UpdateManager::Stage stage);

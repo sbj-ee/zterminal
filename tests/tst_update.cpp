@@ -22,6 +22,7 @@
 #include <QMessageBox>
 #include <QNetworkProxy>
 #include <QProgressDialog>
+#include <QTabWidget>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTcpServer>
@@ -1007,6 +1008,37 @@ private slots:
         QCOMPARE(m.stage(), UpdateManager::Stage::Idle);
         QVERIFY(!findTop<QMessageBox>("updateMessage"));
         w.closeTab(0, true);
+    }
+
+    void restartRestoresAllTabs()
+    {
+        const QStringList a{QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("exec cat")};
+        const QStringList b{QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
+                            QStringLiteral("exec cat; :")};
+        const QStringList c{QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
+                            QStringLiteral("exec cat; : 2")};
+        const QList<RestoreWindow> in{{{a, b, c}, 2}, {{b}, 0}};
+        MainWindow *first = UpdateManager::openRestored(in);
+        QVERIFY(first);
+        QCOMPARE(first->tabCount(), 3);
+        QCOMPARE(first->tabs()->currentIndex(), 2);
+        const QList<RestoreWindow> plan = UpdateManager::restorePlan();
+        QCOMPARE(plan.size(), 2);
+        int matched = 0;
+        for (const RestoreWindow &w : plan) {
+            for (const RestoreWindow &e : in) {
+                if (w.tabs == e.tabs && w.current == e.current) {
+                    ++matched;
+                }
+            }
+        }
+        QCOMPARE(matched, 2); // every window, every tab, the current tab
+        for (QWidget *w : QApplication::topLevelWidgets()) {
+            if (qobject_cast<MainWindow *>(w)) {
+                w->deleteLater(); // no close prompt for the live tabs
+            }
+        }
+        QTRY_VERIFY(UpdateManager::restorePlan().isEmpty());
     }
 };
 

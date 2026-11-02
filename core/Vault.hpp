@@ -66,6 +66,13 @@ public:
     void lock();
     // New salt (and current production KDF params), re-encrypt, atomic write.
     bool changePassword(const SecureBuffer &oldPassword, const SecureBuffer &newPassword);
+    // Take over another Vault's unlocked state (key, header, secrets) for the
+    // same file; `other` is left locked. The dialogs run create/unlock/
+    // changePassword (seconds of Argon2) on a scratch Vault in a worker thread,
+    // so the UI thread never blocks and the shared Vault is only touched on it.
+    void adopt(Vault &other);
+    // Test hook: every key derivation also sleeps this long (0 = off).
+    static void setKdfDelayForTests(int ms);
 
     // Re-read the file with the in-memory key (picks up writes by other
     // windows). Fails (and locks) if the password was changed elsewhere.

@@ -5,6 +5,8 @@
 // Own executable: the hardening can't be undone for the rest of the process.
 #include "AskpassServer.hpp"
 #include "ProcessHardening.hpp"
+
+#include <algorithm>
 #include "Pty.hpp"
 #include "SecureBuffer.hpp"
 
@@ -25,9 +27,21 @@ using namespace zterminal;
 class TstHardening : public QObject
 {
     Q_OBJECT
+    rlim_t m_hardBefore = 0;
+    rlim_t m_softBefore = 0;
 private slots:
     void initTestCase()
     {
+        // Start with a non-zero soft core limit (if the hard limit allows one),
+        // so the child test below can tell "restored" from "inherited 0".
+        rlimit rl{};
+        QCOMPARE(::getrlimit(RLIMIT_CORE, &rl), 0);
+        if (rl.rlim_max != 0) {
+            rl.rlim_cur = rl.rlim_max == RLIM_INFINITY ? rlim_t(1024 * 1024) : std::min(rl.rlim_max, rlim_t(1024 * 1024));
+            QCOMPARE(::setrlimit(RLIMIT_CORE, &rl), 0);
+        }
+        m_hardBefore = rl.rlim_max;
+        m_softBefore = rl.rlim_cur;
         QString why;
         QVERIFY2(applyProcessHardening(&why), qPrintable(why));
     }
@@ -37,9 +51,21 @@ private slots:
         rlimit rl{};
         QCOMPARE(::getrlimit(RLIMIT_CORE, &rl), 0);
         QCOMPARE(rl.rlim_cur, rlim_t(0));
-        QCOMPARE(rl.rlim_max, rlim_t(0)); // hard limit too: can't be raised again
-        const rlimit raise{RLIM_INFINITY, RLIM_INFINITY};
-        QVERIFY(::setrlimit(RLIMIT_CORE, &raise) != 0);
+        QCOMPARE(rl.rlim_max, m_hardBefore); // the hard limit is left for children
+    }
+
+    void ptyChildGetsOriginalCoreLimit()
+    {
+        if (m_softBefore == 0) {
+            QSKIP("hard core limit is 0 here; nothing to restore");
+        }
+        Pty pty;
+        QByteArray got;
+        connect(&pty, &Pty::dataReceived, this, [&got](const QByteArray &b) { got += b; });
+        QSignalSpy finished(&pty, &Pty::finished);
+        QVERIFY(pty.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("echo core=$(ulimit -c)")}, 24, 80));
+        QVERIFY(finished.wait(5000) || !finished.isEmpty());
+        QVERIFY2(got.contains("core=") && !got.contains("core=0\r") && !got.contains("core=0\n"), got.constData());
     }
 
     void notDumpable()

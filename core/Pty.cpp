@@ -1,5 +1,7 @@
 #include "Pty.hpp"
 
+#include "ProcessHardening.hpp"
+
 #include <algorithm>
 
 #include <QFileInfo>
@@ -210,6 +212,7 @@ bool Pty::start(const QString &program, const QStringList &args, int rows, int c
         ::signal(SIGINT, SIG_DFL);
         ::signal(SIGQUIT, SIG_DFL);
         ::signal(SIGCHLD, SIG_DFL);
+        restoreChildResourceLimits(); // the user's shell gets its own core limit back
         // GUI apps on macOS often inherit cwd=/ from LaunchServices; Terminal.app
         // always starts in the user's home. Do the same for every PTY child.
         if (!home.isEmpty()) {

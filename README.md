@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.10** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.7.1** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.10 — <session>`), in Help → About and by
+the window title (`zterminal 1.7.1 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -48,6 +48,9 @@ SSH itself.
   and blink via terminal sequences (DECSCUSR / libvterm cursor props).
 - **Scrollback:** 100,000 lines per tab by default (or Unlimited in Preferences),
   zlib-compressed; wheel, scroll bar, and Shift+PgUp/PgDn/Home/End.
+- **Input methods:** IBus/Fcitx/macOS input sources (CJK, emoji, dead keys):
+  the composition is drawn underlined at the cursor, the candidate window
+  follows the cursor, and committed text is sent as UTF-8.
 - **Mouse (PuTTY/X11 style):** left-drag selects (release copies to PRIMARY and
   CLIPBOARD); double-click word / triple-click line; right-click pastes CLIPBOARD;
   Ctrl+right-click opens the menu; middle-click is configurable. Hold **Shift** to
@@ -85,7 +88,7 @@ SSH itself.
   package matches it.
   - **Linux:** downloads `SHA256SUMS` + `.minisig`, then
     `zterminal_<ver>_amd64.deb`; runs `/usr/bin/pkexec /usr/bin/apt install`
-    on a re-verified private copy, offers restart.
+    on a re-verified private copy, offers restart; the restart reopens every window with all of its tabs.
   - **macOS:** same checks for `zterminal-<ver>-Darwin.dmg`, then opens the
     disk image for a drag-to-Applications install (no automated replace).
   - **Upgrading from 1.0.x:** 1.0.x only checks SHA-256, so install the first
@@ -346,10 +349,11 @@ password prompt that comes from the session's own target, as resolved by
 - Anything else (passphrases, host-key questions) is never answered from the
   vault. When a password prompt is refused, a note on the terminal says so.
 
-**Process hardening (release builds).** zterminal disables core dumps (soft
-and hard limit 0) and, on Linux, marks itself non-dumpable, so other processes
+**Process hardening (release builds).** zterminal disables its own core dumps
+(soft limit 0) and, on Linux, marks itself non-dumpable, so other processes
 of your user can't attach a debugger or read its memory through `/proc`, and a
-crash doesn't write secrets to disk. Debug builds skip this.
+crash doesn't write secrets to disk. Shells and programs it starts get your
+original core-dump limit back. Debug builds skip this.
 
 **Limits of memory hygiene.** The vault key and decrypted passwords live in
 locked, guarded libsodium memory, and zterminal zeroes its own temporary

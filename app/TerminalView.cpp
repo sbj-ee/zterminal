@@ -7,6 +7,8 @@
 #include <QResizeEvent>
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QInputMethod>
+#include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -161,6 +163,9 @@ TerminalView::TerminalView(Terminal *term, QWidget *parent)
         if (m_term->cursorPos() != m_lastCursorPos) {
             m_lastCursorPos = m_term->cursorPos();
             restartBlink();
+            if (hasFocus()) {
+                QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+            }
         }
         updateBlink();
     });
@@ -372,6 +377,12 @@ QRect TerminalView::cursorRect() const
     return {kMargin + cur.x() * m_cellW, kMargin + row * m_cellH, 2 * m_cellW, m_cellH};
 }
 
+QRect TerminalView::cursorCellRect() const
+{
+    const QRect r = cursorRect();
+    return r.isEmpty() ? r : QRect(r.topLeft(), QSize(m_cellW, m_cellH));
+}
+
 void TerminalView::updateBlink()
 {
     const bool blink = m_focused && m_term->cursorBlink() && m_term->cursorVisible()
@@ -497,6 +508,23 @@ void TerminalView::paintEvent(QPaintEvent *e)
             p.fillRect(x, y, 2, m_cellH, QColor(scheme.cursor));
         }
     }
+
+    // Input method composition: drawn over the cursor cell onwards, underlined.
+    if (!m_preedit.isEmpty()) {
+        const QRect cell = cursorCellRect();
+        if (!cell.isEmpty()) {
+            const QFontMetrics fm(m_font);
+            const int w = std::min(fm.horizontalAdvance(m_preedit), viewport()->width() - cell.left());
+            const QRect r(cell.left(), cell.top(), std::max(w, m_cellW), m_cellH);
+            p.fillRect(r, QColor(scheme.background));
+            p.setFont(m_font);
+            p.setPen(QColor(scheme.foreground));
+            p.drawText(QPoint(r.left(), r.top() + m_ascent), m_preedit);
+            p.drawLine(r.left(), r.bottom(), r.right(), r.bottom());
+            const int cx = r.left() + fm.horizontalAdvance(m_preedit.left(m_preeditCursor));
+            p.fillRect(cx, r.top(), 1, m_cellH, QColor(scheme.cursor));
+        }
+    }
 }
 
 bool TerminalView::event(QEvent *e)
@@ -593,14 +621,72 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
 
     const QString text = e->text();
     if (!text.isEmpty()) {
-        const VTermModifier charMod = (mods & Qt::AltModifier) ? VTERM_MOD_ALT : VTERM_MOD_NONE;
-        for (const char32_t cp : text.toUcs4()) {
-            if (cp < 0x20 || cp == 0x7f) {
-                m_term->sendBytes(QByteArray(1, static_cast<char>(cp)));
-            } else {
-                m_term->sendChar(cp, charMod);
-            }
+        sendText(text, mods & Qt::AltModifier);
+    }
+}
+
+void TerminalView::sendText(const QString &text, bool alt)
+{
+    const VTermModifier charMod = alt ? VTERM_MOD_ALT : VTERM_MOD_NONE;
+    for (const char32_t cp : text.toUcs4()) {
+        if (cp < 0x20 || cp == 0x7f) {
+            m_term->sendBytes(QByteArray(1, static_cast<char>(cp)));
+        } else {
+            m_term->sendChar(cp, charMod);
         }
+    }
+}
+
+void TerminalView::inputMethodEvent(QInputMethodEvent *e)
+{
+    const QRect before = cursorRect();
+    if (!e->commitString().isEmpty()) {
+        scrollToBottom();
+        sendText(e->commitString(), false);
+    }
+    m_preedit = e->preeditString();
+    m_preeditCursor = int(m_preedit.size());
+    for (const QInputMethodEvent::Attribute &a : e->attributes()) {
+        if (a.type == QInputMethodEvent::Cursor) {
+            m_preeditCursor = std::clamp(a.start, 0, int(m_preedit.size()));
+        }
+    }
+    // The preedit may run past the cursor cell: repaint the rest of the row.
+    if (!before.isEmpty()) {
+        viewport()->update(QRect(0, before.top(), viewport()->width(), before.height()));
+    }
+    e->accept();
+}
+
+QVariant TerminalView::inputMethodQuery(Qt::InputMethodQuery query) const
+{
+    switch (query) {
+    case Qt::ImEnabled:
+        return true;
+    case Qt::ImCursorRectangle:
+    case Qt::ImAnchorRectangle: {
+        QRect r = cursorCellRect();
+        if (r.isEmpty()) {
+            r = QRect(kMargin, kMargin, m_cellW, m_cellH);
+        }
+        // Just after the composed text, so the candidate list doesn't cover it.
+        r.translate(QFontMetrics(m_font).horizontalAdvance(m_preedit.left(m_preeditCursor)), 0);
+        return QRect(viewport()->mapTo(this, r.topLeft()), r.size());
+    }
+    case Qt::ImFont:
+        return m_font;
+    case Qt::ImHints:
+        return int(Qt::ImhNoPredictiveText | Qt::ImhNoAutoUppercase | Qt::ImhMultiLine);
+    case Qt::ImCursorPosition:
+    case Qt::ImAnchorPosition:
+        return int(m_preeditCursor);
+    case Qt::ImSurroundingText:
+    case Qt::ImCurrentSelection:
+        return QString();
+    case Qt::ImMaximumTextLength:
+        return QVariant();
+    default:
+        return QAbstractScrollArea::inputMethodQuery(query);
     }
 }
 
