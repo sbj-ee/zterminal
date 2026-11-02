@@ -183,6 +183,12 @@ SessionWidget::SessionWidget(const LaunchRequest &request, const QStringList &or
     connect(m_pty, &Pty::dataReceived, m_term, &Terminal::feed);
     connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) { logOutput(d, true); });
     connect(m_pty, &Pty::finished, this, &SessionWidget::onSessionFinished);
+    connect(m_pty, &Pty::writeRefused, this, [this](qsizetype bytes) {
+        showBanner(QStringLiteral("%1 bytes of input were dropped: the program isn't reading its input "
+                                  "and %2 MiB are already waiting.")
+                       .arg(bytes)
+                       .arg(Pty::kMaxPendingWrite / (1024 * 1024)));
+    });
     connect(m_pty, &Pty::dataReceived, this, [this](const QByteArray &d) {
         m_ptyTail += d;
         if (m_ptyTail.size() > 4096) {
