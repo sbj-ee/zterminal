@@ -56,13 +56,21 @@ private slots:
         // A child that never reads its input.
         QVERIFY(pty.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("exec sleep 30")}, 24, 80));
         QSignalSpy refused(&pty, &Pty::writeRefused);
+        // One write larger than the cap is refused outright, on every platform.
+        QVERIFY(!pty.write(QByteArray(Pty::kMaxPendingWrite + 1, 'x')));
+        QCOMPARE(refused.size(), 1);
+#if defined(Q_OS_LINUX)
+        // Linux keeps the unread input queue small, so writes pile up in
+        // m_pendingWrite until the cap. (macOS's tty silently discards
+        // overflowing input instead, so nothing queues there.)
         const QByteArray mib(1024 * 1024, 'x');
         bool sawRefusal = false;
         for (int i = 0; i < 12 && !sawRefusal; ++i) {
             sawRefusal = !pty.write(mib);
         }
         QVERIFY(sawRefusal);
-        QCOMPARE(refused.size(), 1);
+        QCOMPARE(refused.size(), 2);
+#endif
         QVERIFY(pty.pendingWriteBytes() <= Pty::kMaxPendingWrite);
         pty.terminate();
         QVERIFY(!pty.isRunning());
