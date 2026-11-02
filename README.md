@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.6.12** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.7.0** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.6.12 — <session>`), in Help → About and by
+the window title (`zterminal 1.7.0 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md).
 
@@ -48,6 +48,9 @@ SSH itself.
   and blink via terminal sequences (DECSCUSR / libvterm cursor props).
 - **Scrollback:** 100,000 lines per tab by default (or Unlimited in Preferences),
   zlib-compressed; wheel, scroll bar, and Shift+PgUp/PgDn/Home/End.
+- **Input methods:** IBus/Fcitx/macOS input sources (CJK, emoji, dead keys):
+  the composition is drawn underlined at the cursor, the candidate window
+  follows the cursor, and committed text is sent as UTF-8.
 - **Mouse (PuTTY/X11 style):** left-drag selects (release copies to PRIMARY and
   CLIPBOARD); double-click word / triple-click line; right-click pastes CLIPBOARD;
   Ctrl+right-click opens the menu; middle-click is configurable. Hold **Shift** to
