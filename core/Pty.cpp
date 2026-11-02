@@ -1,5 +1,7 @@
 #include "Pty.hpp"
 
+#include <algorithm>
+
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QSocketNotifier>
@@ -246,7 +248,8 @@ void Pty::onReadable()
     char buf[16384];
     bool eof = false;
     while (chunk.size() < kMaxReadPerPass) {
-        const ssize_t n = ::read(m_master, buf, sizeof buf);
+        const size_t want = std::min(sizeof buf, static_cast<size_t>(kMaxReadPerPass - chunk.size()));
+        const ssize_t n = ::read(m_master, buf, want);
         if (n > 0) {
             chunk.append(buf, static_cast<qsizetype>(n));
             continue;
