@@ -300,6 +300,53 @@ private slots:
         QVERIFY(!QApplication::overrideCursor());
     }
 
+    void unlockKeepsUiResponsive()
+    {
+        freshVault();
+        vm().lock();
+        UnlockVaultDialog d(vm().vault(), QString());
+        child<QLineEdit>(&d, "masterPassword")->setText(QString::fromUtf8(kMaster));
+        int ticks = 0;
+        QTimer tick;
+        connect(&tick, &QTimer::timeout, this, [&ticks, &d]() {
+            ++ticks;
+            QVERIFY(!d.isEnabled()); // no second submit while deriving
+        });
+        tick.start(10);
+        Vault::setKdfDelayForTests(400); // Argon2 stand-in: slow, off the UI thread
+        const bool ok = d.tryUnlock();
+        Vault::setKdfDelayForTests(0);
+        tick.stop();
+        QVERIFY(ok);
+        QVERIFY(vm().isUnlocked());
+        QVERIFY(d.isEnabled());
+        QVERIFY2(ticks >= 10, qPrintable(QString::number(ticks))); // timers kept firing
+        QVERIFY(!QApplication::overrideCursor());
+    }
+
+    void changePasswordOffUiThread()
+    {
+        freshVault();
+        Vault::setKdfDelayForTests(200);
+        ChangeMasterPasswordDialog d(vm().vault());
+        int ticks = 0;
+        QTimer tick;
+        connect(&tick, &QTimer::timeout, this, [&ticks]() { ++ticks; });
+        tick.start(10);
+        QVERIFY(vm().vault().setSecret(QStringLiteral("k"), sb("v")));
+        child<QLineEdit>(&d, "currentPassword")->setText(QString::fromUtf8(kMaster));
+        child<QLineEdit>(&d, "newPassword")->setText(QStringLiteral("new master 2"));
+        child<QLineEdit>(&d, "confirmPassword")->setText(QStringLiteral("new master 2"));
+        const bool ok = d.tryChange();
+        Vault::setKdfDelayForTests(0);
+        QVERIFY2(ok, qPrintable(d.errorText()));
+        QVERIFY2(ticks >= 10, qPrintable(QString::number(ticks)));
+        QVERIFY(vm().isUnlocked()); // the shared vault adopted the new key + secrets
+        QCOMPARE(str(vm().vault().secret(QStringLiteral("k"))), QStringLiteral("v"));
+        vm().lock();
+        QVERIFY(vm().vault().unlock(sb("new master 2")));
+    }
+
     void busyCursorOffOnMac()
     {
 #ifdef Q_OS_MACOS
