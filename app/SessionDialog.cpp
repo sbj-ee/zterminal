@@ -370,6 +370,9 @@ SessionDialog::SessionDialog(const SessionStore &store, const SessionConfig &ini
     connect(m_keepCount, &QSpinBox::valueChanged, this, &SessionDialog::updatePreview);
 
     setConfig(initial);
+    if (m_store.contains(initial.name)) {
+        m_loadedName = initial.name;
+    }
     refreshList(initial.name);
     resize(sizeHint().expandedTo(QSize(760, 0)));
 }
@@ -539,6 +542,7 @@ bool SessionDialog::loadSelected()
         return false;
     }
     setConfig(*s);
+    m_loadedName = s->name;
     if (!s->approved) {
         setError(QStringLiteral("Imported session, not approved yet: check every setting, then press Save to approve it."));
     }
@@ -564,11 +568,27 @@ bool SessionDialog::saveCurrent()
             return false;
         }
     }
+    // Selecting a row only copies its name: without this question, Save would
+    // replace that session with settings that were never loaded from it.
+    if (c.name != m_loadedName && m_store.contains(c.name)) {
+        QMessageBox box(QMessageBox::Warning, QStringLiteral("Save Session"),
+                        QStringLiteral("Replace the saved session \"%1\"?").arg(c.name.toHtmlEscaped()),
+                        QMessageBox::Yes | QMessageBox::No, this);
+        box.setObjectName(QStringLiteral("replaceSession"));
+        box.setInformativeText(QStringLiteral("The settings shown here were not loaded from it. "
+                                              "Press Load first to edit that session instead."));
+        box.setDefaultButton(QMessageBox::No);
+        if (box.exec() != QMessageBox::Yes) {
+            setError(QStringLiteral("Not saved: \"%1\" was left as it is.").arg(c.name));
+            return false;
+        }
+    }
     QString err;
     if (!m_store.save(c, &err)) {
         setError(err);
         return false;
     }
+    m_loadedName = c.name;
     setError({});
     refreshList(c.name);
     return storeSecrets(c);
@@ -640,6 +660,20 @@ bool SessionDialog::deleteSelected()
             return false;
         }
         prune = ret == QMessageBox::Yes;
+    } else {
+        // (The groups question above has a Cancel, so it is the confirmation there.)
+        const bool hasSecret = old && (old->useStoredPassword || !old->loginUser.isEmpty());
+        QMessageBox box(QMessageBox::Warning, QStringLiteral("Delete Session"),
+                        QStringLiteral("Delete the saved session \"%1\"?").arg(name.toHtmlEscaped()),
+                        QMessageBox::Yes | QMessageBox::Cancel, this);
+        box.setObjectName(QStringLiteral("deleteSession"));
+        box.setInformativeText(hasSecret ? QStringLiteral("Its stored password is deleted from the vault too. This can't be undone.")
+                                         : QStringLiteral("This can't be undone."));
+        box.button(QMessageBox::Yes)->setText(QStringLiteral("&Delete"));
+        box.setDefaultButton(QMessageBox::Cancel);
+        if (box.exec() != QMessageBox::Yes) {
+            return false;
+        }
     }
     if (!m_store.remove(name)) {
         setError(QStringLiteral("Can't delete \"%1\".").arg(name));
@@ -658,6 +692,9 @@ bool SessionDialog::deleteSelected()
     }
     if (prune) {
         groups.removeSessionRef(name);
+    }
+    if (m_loadedName == name) {
+        m_loadedName.clear();
     }
     setError({});
     refreshList();
@@ -810,6 +847,39 @@ bool SessionDialog::openSession()
         if (const SshCommand cmd = buildSshCommand(c); !cmd.ok()) {
             setError(cmd.error);
             return false;
+        }
+    }
+    // A tab only opens *as* the saved session when the form matches the saved
+    // file. Otherwise it is a one-off built from the connection fields alone,
+    // which silently loses everything else; ask instead of guessing.
+    if (!c.name.isEmpty()) {
+        const std::optional<SessionConfig> stored = m_store.load(c.name);
+        if (!stored || *stored != c) {
+            QMessageBox box(QMessageBox::Question, QStringLiteral("Open Session"),
+                            stored ? QStringLiteral("\"%1\" has changes that are not saved.").arg(c.name.toHtmlEscaped())
+                                   : QStringLiteral("\"%1\" is not saved yet.").arg(c.name.toHtmlEscaped()),
+                            QMessageBox::NoButton, this);
+            box.setObjectName(QStringLiteral("unsavedOpen"));
+            box.setInformativeText(
+                c.type == SessionConfig::Type::Serial
+                    ? QStringLiteral("Opened without saving, it is a one-off serial console: device and baud rate only "
+                                     "(8N1, no flow control), with no pacing, stored login, logging or appearance settings.")
+                    : QStringLiteral("Opened without saving, it is a one-off session: the stored password, automatic "
+                                     "logging, auto-reconnect and appearance settings are not used."));
+            QPushButton *saveOpen = box.addButton(QStringLiteral("&Save and Open"), QMessageBox::AcceptRole);
+            QPushButton *justOpen = box.addButton(QStringLiteral("Open &Without Saving"), QMessageBox::DestructiveRole);
+            box.addButton(QMessageBox::Cancel);
+            saveOpen->setObjectName(QStringLiteral("saveAndOpen"));
+            justOpen->setObjectName(QStringLiteral("openWithoutSaving"));
+            box.setDefaultButton(saveOpen);
+            box.exec();
+            if (box.clickedButton() == saveOpen) {
+                if (!saveCurrent()) {
+                    return false; // the reason is already shown
+                }
+            } else if (box.clickedButton() != justOpen) {
+                return false; // Cancel or Escape: back to the dialog
+            }
         }
     }
     setError({});

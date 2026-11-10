@@ -8,6 +8,13 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.7.3 — 2026-11-10
+
+### Fixed
+- Sessions dialog: **Save** asks before it replaces a saved session other than the one the form was loaded from. Selecting a row only copies its name into the form, so Save used to overwrite that session with whatever settings were on screen, without a question (File → Save Session already asked).
+- Sessions dialog: **Delete** always asks first, and says when the session's stored password goes with it. It used to ask only when the session was in a group.
+- Sessions dialog: **Open** on a named session whose settings differ from the saved file (or that isn't saved yet) asks *Save and Open* / *Open Without Saving* / *Cancel*. It used to open a one-off session without saying so: no stored password, automatic logging, auto-reconnect or appearance settings, and for serial only the device and baud rate.
+
 ## 1.7.2 — 2026-11-02
 
 First release since 1.6.5; it ships everything in 1.6.6–1.7.1. The `v1.7.1` tag exists but its release build stopped at the version check (undated changelog heading), so nothing was published for it.

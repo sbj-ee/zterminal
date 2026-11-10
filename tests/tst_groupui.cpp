@@ -744,12 +744,15 @@ private slots:
             QCOMPARE(groups.load(QStringLiteral("other"))->members, QStringList{QStringLiteral("x")});
         }
         {
-            // A session no group uses is deleted without a question.
+            // A session no group uses gets the plain confirmation (no groups question).
             SessionDialog dlg(store, SessionConfig{});
             auto *list = child<QListWidget>(&dlg, "sessionList");
             list->setCurrentItem(list->findItems(QStringLiteral("x"), Qt::MatchExactly).first());
             QVERIFY(groups.removeSessionRef(QStringLiteral("x")).size() == 2); // lab and other
+            QString text;
+            answerBox(QMessageBox::Yes, &text);
             QVERIFY(dlg.deleteSelected());
+            QVERIFY2(text.contains(QStringLiteral("Delete the saved session \"x\"")), qPrintable(text));
             QVERIFY(!store.contains(QStringLiteral("x")));
         }
     }

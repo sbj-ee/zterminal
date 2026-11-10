@@ -13,7 +13,9 @@
 #include "TerminalView.hpp"
 #include "WindowTitle.hpp"
 
+#include <QAbstractButton>
 #include <QAction>
+#include <QCheckBox>
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
@@ -70,6 +72,32 @@ void whenModal(const std::function<bool(QWidget *)> &fn)
         }
     });
     timer->start();
+}
+
+// Answer the next QMessageBox named `name` by clicking the button `button`
+// (a child object name, or a standard button's text); records what it said.
+void answerBox(const QString &name, const QString &button, QString *text = nullptr, int *seen = nullptr)
+{
+    whenModal([=](QWidget *m) {
+        auto *box = qobject_cast<QMessageBox *>(m);
+        if (!box || box->objectName() != name) {
+            return false;
+        }
+        if (text) {
+            *text = box->text() + QLatin1Char('\n') + box->informativeText();
+        }
+        if (seen) {
+            ++*seen;
+        }
+        for (QAbstractButton *b : box->buttons()) {
+            if (b->objectName() == button || b->text().remove(QLatin1Char('&')) == button) {
+                b->click();
+                return true;
+            }
+        }
+        box->reject();
+        return true;
+    });
 }
 
 // A fake `ssh` first on PATH for the lifetime of the object (tabs started
@@ -154,6 +182,7 @@ private slots:
 
         // Delete
         list->setCurrentRow(0);
+        answerBox(QStringLiteral("deleteSession"), QStringLiteral("Delete"));
         child<QPushButton>(&d, "delete")->click();
         QCOMPARE(store.names(), QStringList{QStringLiteral("edge-rtr")});
         QCOMPARE(list->count(), 1);
@@ -428,6 +457,139 @@ private slots:
         QVERIFY(d.openSession());
     }
 
+    // Selecting a row copies only its name into the form. Save must not
+    // replace that session with settings that were never loaded from it
+    // without asking.
+    void saveAsksBeforeReplacingAnotherSession()
+    {
+        QVERIFY(store.save(ssh(QStringLiteral("alpha"), QStringLiteral("a.example"))));
+        QVERIFY(store.save(ssh(QStringLiteral("beta"), QStringLiteral("b.example"))));
+        SessionDialog d(store, SessionConfig{});
+        auto *list = child<QListWidget>(&d, "sessionList");
+        list->setCurrentItem(list->findItems(QStringLiteral("beta"), Qt::MatchExactly).first());
+        QCOMPARE(child<QLineEdit>(&d, "name")->text(), QStringLiteral("beta")); // name only: the form is still blank
+
+        QString asked;
+        int boxes = 0;
+        answerBox(QStringLiteral("replaceSession"), QStringLiteral("No"), &asked, &boxes);
+        QVERIFY(!d.saveCurrent());
+        QCOMPARE(boxes, 1);
+        QVERIFY2(asked.contains(QStringLiteral("Replace the saved session \"beta\"")), qPrintable(asked));
+        QVERIFY(d.errorText().contains(QStringLiteral("Not saved")));
+        QCOMPARE(store.load(QStringLiteral("beta"))->host, QStringLiteral("b.example"));
+        QCOMPARE(store.load(QStringLiteral("beta"))->type, SessionConfig::Type::Ssh);
+
+        // Loaded and edited: that is the session being edited, no question.
+        QVERIFY(d.loadSelected());
+        child<QLineEdit>(&d, "host")->setText(QStringLiteral("b2.example"));
+        QVERIFY(d.saveCurrent());
+        QCOMPARE(store.load(QStringLiteral("beta"))->host, QStringLiteral("b2.example"));
+
+        // Retyping the name to another saved session asks again; Yes replaces it.
+        child<QLineEdit>(&d, "name")->setText(QStringLiteral("alpha"));
+        boxes = 0;
+        answerBox(QStringLiteral("replaceSession"), QStringLiteral("Yes"), nullptr, &boxes);
+        QVERIFY(d.saveCurrent());
+        QCOMPARE(boxes, 1);
+        QCOMPARE(store.load(QStringLiteral("alpha"))->host, QStringLiteral("b2.example"));
+        // ... and it is now the session being edited.
+        child<QLineEdit>(&d, "host")->setText(QStringLiteral("a3.example"));
+        QVERIFY(d.saveCurrent());
+        QCOMPARE(store.load(QStringLiteral("alpha"))->host, QStringLiteral("a3.example"));
+
+        // A dialog opened on a saved session edits it without a question.
+        SessionDialog onAlpha(store, *store.load(QStringLiteral("alpha")));
+        child<QSpinBox>(&onAlpha, "port")->setValue(2200);
+        QVERIFY(onAlpha.saveCurrent());
+        QCOMPARE(store.load(QStringLiteral("alpha"))->port, 2200);
+    }
+
+    void deleteAlwaysAsks()
+    {
+        QVERIFY(store.save(ssh(QStringLiteral("keep"), QStringLiteral("k.example"))));
+        SessionDialog d(store, SessionConfig{});
+        child<QListWidget>(&d, "sessionList")->setCurrentRow(0);
+        QString asked;
+        answerBox(QStringLiteral("deleteSession"), QStringLiteral("Cancel"), &asked);
+        QVERIFY(!d.deleteSelected());
+        QVERIFY2(asked.contains(QStringLiteral("Delete the saved session \"keep\"")), qPrintable(asked));
+        QVERIFY2(!asked.contains(QStringLiteral("password")), qPrintable(asked)); // none stored for it
+        QVERIFY(store.contains(QStringLiteral("keep")));
+        answerBox(QStringLiteral("deleteSession"), QStringLiteral("Delete"));
+        QVERIFY(d.deleteSelected());
+        QVERIFY(!store.contains(QStringLiteral("keep")));
+    }
+
+    // Open with a form that differs from the saved file would open a one-off
+    // session (for serial: device and baud only). It asks first.
+    void openAsksAboutUnsavedChanges()
+    {
+        QVERIFY(store.save(ssh(QStringLiteral("gw"), QStringLiteral("gw.example"))));
+        const SessionConfig saved = *store.load(QStringLiteral("gw"));
+        {
+            // Unchanged: opens straight away.
+            SessionDialog d(store, saved);
+            QVERIFY(d.openSession());
+            QCOMPARE(d.result(), int(QDialog::Accepted));
+        }
+        {
+            // Cancel: back in the dialog, nothing written.
+            SessionDialog d(store, saved);
+            child<QCheckBox>(&d, "autoLog")->setChecked(true);
+            QString asked;
+            answerBox(QStringLiteral("unsavedOpen"), QStringLiteral("Cancel"), &asked);
+            QVERIFY(!d.openSession());
+            QCOMPARE(d.result(), int(QDialog::Rejected));
+            QVERIFY2(asked.contains(QStringLiteral("\"gw\" has changes that are not saved")), qPrintable(asked));
+            QVERIFY(!store.load(QStringLiteral("gw"))->autoLog);
+        }
+        {
+            // Open Without Saving: accepted with the edited settings, file untouched.
+            SessionDialog d(store, saved);
+            child<QCheckBox>(&d, "autoLog")->setChecked(true);
+            answerBox(QStringLiteral("unsavedOpen"), QStringLiteral("openWithoutSaving"));
+            QVERIFY(d.openSession());
+            QCOMPARE(d.result(), int(QDialog::Accepted));
+            QVERIFY(!store.load(QStringLiteral("gw"))->autoLog);
+        }
+        {
+            // Save and Open: the file now matches, so the tab opens as the saved session.
+            SessionDialog d(store, saved);
+            child<QCheckBox>(&d, "autoLog")->setChecked(true);
+            answerBox(QStringLiteral("unsavedOpen"), QStringLiteral("saveAndOpen"));
+            QVERIFY(d.openSession());
+            QCOMPARE(d.result(), int(QDialog::Accepted));
+            QVERIFY(store.load(QStringLiteral("gw"))->autoLog);
+            QVERIFY(d.config() == *store.load(QStringLiteral("gw")));
+        }
+        {
+            // A named session that was never saved asks too; an unnamed form does not.
+            SessionDialog d(store, SessionConfig{});
+            QVERIFY(d.openSession());
+            SessionDialog named(store, SessionConfig{});
+            child<QLineEdit>(&named, "name")->setText(QStringLiteral("scratch"));
+            QString asked;
+            answerBox(QStringLiteral("unsavedOpen"), QStringLiteral("saveAndOpen"), &asked);
+            QVERIFY(named.openSession());
+            QVERIFY2(asked.contains(QStringLiteral("is not saved yet")), qPrintable(asked));
+            QVERIFY(store.contains(QStringLiteral("scratch")));
+        }
+        {
+            // Serial: the question says what a one-off console keeps.
+            SessionConfig ser;
+            ser.name = QStringLiteral("console");
+            ser.type = SessionConfig::Type::Serial;
+            ser.serialDevice = QStringLiteral("/dev/ttyUSB0");
+            QVERIFY(store.save(ser));
+            SessionDialog d(store, ser);
+            child<QSpinBox>(&d, "charDelayMs")->setValue(5);
+            QString asked;
+            answerBox(QStringLiteral("unsavedOpen"), QStringLiteral("Cancel"), &asked);
+            QVERIFY(!d.openSession());
+            QVERIFY2(asked.contains(QStringLiteral("device and baud rate only")), qPrintable(asked));
+        }
+    }
+
     void deleteWhileLockedForgetsSecretAtNextUnlock()
     {
         Vault::setKdfOverrideForTests(1, 8192);
@@ -446,7 +608,10 @@ private slots:
         SessionDialog d(store, SessionConfig{});
         auto *list = child<QListWidget>(&d, "sessionList");
         list->setCurrentRow(0);
+        QString asked;
+        answerBox(QStringLiteral("deleteSession"), QStringLiteral("Delete"), &asked);
         QVERIFY(d.deleteSelected());
+        QVERIFY2(asked.contains(QStringLiteral("stored password")), qPrintable(asked));
         QVERIFY(!store.contains(s.name));
         QVERIFY(!vaultbind::pendingDeletions(vm.vault()).isEmpty());
 
