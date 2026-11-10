@@ -31,6 +31,9 @@ public:
 
     // Button actions (public for tests). Each returns false and shows the reason
     // in the dialog on failure.
+    // Save asks before replacing a saved session other than the one the form
+    // was loaded from; Delete always asks; Open asks what to do with a named
+    // session whose settings differ from the saved file (or aren't saved yet).
     bool loadSelected();
     bool saveCurrent();
     bool deleteSelected();
@@ -56,6 +59,9 @@ private:
     bool storeSecrets(const SessionConfig &c);
 
     SessionStore m_store;
+    // The saved session the form's settings came from (Load, Save, or the
+    // session the dialog was opened on); empty for a new, unsaved form.
+    QString m_loadedName;
     QLineEdit *m_name = nullptr;
     QListWidget *m_list = nullptr;
     QPushButton *m_load = nullptr;
