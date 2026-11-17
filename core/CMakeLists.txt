@@ -4,6 +4,7 @@ add_library(zterminal_core STATIC
   Pty.cpp Pty.hpp
   ProcessHardening.cpp ProcessHardening.hpp
   Terminal.cpp Terminal.hpp
+  Contrast.cpp Contrast.hpp
   Selection.cpp Selection.hpp
   BrandThemes.h ColorScheme.cpp ColorScheme.hpp
   ThemeFile.cpp ThemeFile.h

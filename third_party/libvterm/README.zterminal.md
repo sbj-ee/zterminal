@@ -3,13 +3,13 @@
 - Upstream: https://www.leonerd.org.uk/code/libvterm/ (Paul Evans), MIT License (see `LICENSE`).
 - Version: **0.3.3**, from `libvterm-0.3.3.tar.gz`
   (sha256 `09156f43dd2128bd347cbeebe50d9a571d32c64e0cf18d211197946aff7226e0`).
-- Imported unmodified except for the thirteen local patches listed below: `include/`, `src/` (including the pre-generated `src/encoding/*.inc`
+- Imported unmodified except for the fourteen local patches listed below: `include/`, `src/` (including the pre-generated `src/encoding/*.inc`
   and `src/fullwidth.inc`), and `LICENSE`. Upstream's `Makefile`, `bin/` and `t/` were not imported.
 - Built as a static library by `third_party/libvterm/CMakeLists.txt` (zterminal's own file).
 
 ## Local patches
 
-Thirteen small fixes, found by fuzzing (`fuzz/fuzz_terminal`) with
+Thirteen small fixes (1–13), found by fuzzing (`fuzz/fuzz_terminal`) with
 ASan/UBSan. All are reachable from program output (the first two followed by a
 window resize), so a remote host could crash zterminal or make it read out of
 bounds. Each is marked `zterminal patch` in the source:
@@ -67,6 +67,16 @@ bounds. Each is marked `zterminal patch` in the source:
     double-width or double-height line (`ESC # 3..6`) on a 1-column screen had
     width `1 / 2 = 0`, so clamping the cursor put it at column -1 and erase
     and insert walked off the screen. The row width is now at least 1.
+
+14. **Faint / dim (SGR 2)** (feature, not a fuzz finding; `vterm.h`,
+    `vterm_internal.h`, `pen.c`, `screen.c`, `vterm.c`): upstream ignores
+    SGR 2, so faint text drew at full intensity. The pen and
+    `VTermScreenCellAttrs` gain a `dim` bit (`VTERM_ATTR_DIM`,
+    `VTERM_ATTR_DIM_MASK`, appended after the existing attributes): SGR 2 sets
+    it, SGR 22 (normal intensity) and SGR 0 clear it, DECSC/DECRC save and
+    restore it and DECRQSS reports it. zterminal draws it (`core/Contrast.hpp`).
+    Covered by `tst_terminal::dimBlendsTowardBackground` and the other `dim*`
+    tests and by `tst_scrollback::dimSurvivesScrollback`.
 
 Re-apply them (or check that upstream fixed them) when updating. Covered by
 `tst_terminal::resizeAfterOutputDoesNotAbort`, `wideCharInOneColumn`,

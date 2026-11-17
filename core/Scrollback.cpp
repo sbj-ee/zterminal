@@ -61,7 +61,7 @@ VTermColor unpackColor(uint32_t v)
 uint32_t packAttrs(const VTermScreenCellAttrs &a)
 {
     return a.bold | (a.underline << 1) | (a.italic << 3) | (a.blink << 4) | (a.reverse << 5) | (a.conceal << 6)
-        | (a.strike << 7) | (a.font << 8) | (a.dwl << 12) | (a.dhl << 13) | (a.small << 15) | (a.baseline << 16);
+        | (a.strike << 7) | (a.font << 8) | (a.dwl << 12) | (a.dhl << 13) | (a.small << 15) | (a.baseline << 16) | (a.dim << 18);
 }
 
 VTermScreenCellAttrs unpackAttrs(uint32_t v)
@@ -80,6 +80,7 @@ VTermScreenCellAttrs unpackAttrs(uint32_t v)
     a.dhl = (v >> 13) & 3;
     a.small = (v >> 15) & 1;
     a.baseline = (v >> 16) & 3;
+    a.dim = (v >> 18) & 1;
     return a;
 }
 

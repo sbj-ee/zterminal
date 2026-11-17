@@ -1,5 +1,7 @@
 #include "Terminal.hpp"
 
+#include "Contrast.hpp"
+
 #include <algorithm>
 #include <cstring>
 
@@ -322,13 +324,29 @@ Cell Terminal::convert(const VTermScreenCell &c) const
     out.bg = resolve(c.bg, false);
     out.defaultBg = VTERM_COLOR_IS_DEFAULT_BG(&c.bg);
     out.bold = c.attrs.bold;
+    out.dim = c.attrs.dim;
     out.italic = c.attrs.italic;
     out.underline = c.attrs.underline != VTERM_UNDERLINE_OFF;
     out.strike = c.attrs.strike;
     out.conceal = c.attrs.conceal;
+    // A 16/256-palette foreground that is near-invisible on the theme's own
+    // background (e.g. a theme's ANSI black #262626 on #000000, which programs
+    // such as Claude Code use for "subtle" text when they fall back to ANSI
+    // colours) is raised to a readable minimum. Explicit fg/bg pairs and
+    // truecolor are the program's choice and stay as sent.
+    const bool paletteFg = !VTERM_COLOR_IS_DEFAULT_FG(&c.fg) && VTERM_COLOR_IS_INDEXED(&c.fg);
+    if (paletteFg && out.defaultBg
+        && contrast::contrastRatio(out.fg, out.bg) < contrast::kIndistinguishableContrast) {
+        out.fg = contrast::ensureContrast(out.fg, out.bg, contrast::kMinReadableContrast);
+    }
     if (c.attrs.reverse) {
         std::swap(out.fg, out.bg);
         out.defaultBg = false;
+    }
+    // Faint dims what is drawn: the (possibly reversed) foreground, toward
+    // the cell's actual background, with a contrast floor (Contrast.hpp).
+    if (out.dim) {
+        out.fg = contrast::dim(out.fg, out.bg);
     }
     return out;
 }

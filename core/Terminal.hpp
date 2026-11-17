@@ -18,8 +18,9 @@ extern "C" {
 
 namespace zterminal {
 
-// One rendered cell, colours already resolved through the active scheme and
-// reverse video applied.
+// One rendered cell, colours already resolved through the active scheme,
+// reverse video applied, and faint (SGR 2) / near-invisible palette
+// foregrounds adjusted for contrast (see Contrast.hpp).
 struct Cell {
     QString text;       // empty for a blank cell
     int width = 1;      // 1, 2 (wide char), or 0 (right half of a wide char)
@@ -27,6 +28,7 @@ struct Cell {
     QRgb bg = 0;
     bool defaultBg = true; // background is the scheme default (no fill needed)
     bool bold = false;
+    bool dim = false;   // SGR 2 (faint); fg is already the dimmed colour
     bool italic = false;
     bool underline = false;
     bool strike = false;

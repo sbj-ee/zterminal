@@ -27,6 +27,7 @@ typedef struct
   unsigned int font      : 4; /* 0 to 9 */
   unsigned int small     : 1;
   unsigned int baseline  : 2;
+  unsigned int dim       : 1; /* zterminal patch 14: SGR 2 faint/dim */
 
   /* Extra state storage that isn't strictly pen-related */
   unsigned int protected_cell : 1;
@@ -453,6 +454,9 @@ static int setpenattr(VTermAttr attr, VTermValue *val, void *user)
   case VTERM_ATTR_BASELINE:
     screen->pen.baseline = val->number;
     return 1;
+  case VTERM_ATTR_DIM: /* zterminal patch 14: SGR 2 faint/dim */
+    screen->pen.dim = val->boolean;
+    return 1;
 
   case VTERM_N_ATTRS:
     return 0;
@@ -718,6 +722,7 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
         dst->pen.font      = src->attrs.font;
         dst->pen.small     = src->attrs.small;
         dst->pen.baseline  = src->attrs.baseline;
+        dst->pen.dim       = src->attrs.dim; /* zterminal patch 14: SGR 2 faint/dim */
 
         dst->pen.fg = src->fg;
         dst->pen.bg = src->bg;
@@ -1018,6 +1023,7 @@ int vterm_screen_get_cell(const VTermScreen *screen, VTermPos pos, VTermScreenCe
   cell->attrs.font      = intcell->pen.font;
   cell->attrs.small     = intcell->pen.small;
   cell->attrs.baseline  = intcell->pen.baseline;
+  cell->attrs.dim       = intcell->pen.dim; /* zterminal patch 14: SGR 2 faint/dim */
 
   cell->attrs.dwl = intcell->pen.dwl;
   cell->attrs.dhl = intcell->pen.dhl;
@@ -1135,6 +1141,8 @@ static int attrs_differ(VTermAttrMask attrs, ScreenCell *a, ScreenCell *b)
   if((attrs & VTERM_ATTR_REVERSE_MASK)    && (a->pen.reverse != b->pen.reverse))
     return 1;
   if((attrs & VTERM_ATTR_CONCEAL_MASK)    && (a->pen.conceal != b->pen.conceal))
+    return 1;
+  if((attrs & VTERM_ATTR_DIM_MASK)        && (a->pen.dim != b->pen.dim)) /* zterminal patch 14: SGR 2 faint/dim */
     return 1;
   if((attrs & VTERM_ATTR_STRIKE_MASK)     && (a->pen.strike != b->pen.strike))
     return 1;
