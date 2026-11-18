@@ -15,7 +15,7 @@ bool sameCell(const Cell &a, const Cell &b)
 {
     return a.text == b.text && a.width == b.width && a.fg == b.fg && a.bg == b.bg && a.defaultBg == b.defaultBg
         && a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.strike == b.strike
-        && a.conceal == b.conceal;
+        && a.conceal == b.conceal && a.dim == b.dim;
 }
 
 VTermScreenCell blankCell()
@@ -81,6 +81,7 @@ private slots:
         in[7].chars[0] = 'y';
         in[7].attrs.strike = 1;
         in[7].attrs.conceal = 1;
+        in[7].attrs.dim = 1;
         // 8..11 blank, default style: not stored.
         const QByteArray enc = Scrollback::encode(in.data(), int(in.size()));
         QVERIFY(enc.size() < 120);
@@ -125,6 +126,18 @@ private slots:
         QCOMPARE(t.lineText(0), textBefore);
     }
 
+    void dimSurvivesScrollback()
+    {
+        Terminal t(3, 20);
+        t.feed("\x1b[2;31mfaint\x1b[0m plain");
+        const Cell before = t.cell(0, 0);
+        QVERIFY(before.dim);
+        t.feed("\r\n\r\n\r\n");
+        QCOMPARE(t.scrollbackLines(), 1);
+        QVERIFY(sameCell(before, t.cell(0, 0)));
+        QVERIFY(!t.cell(0, 6).dim);
+    }
+
     void chunkingAndCompression()
     {
         Terminal t(24, 80);
@@ -135,7 +148,14 @@ private slots:
         // Random access into compressed chunks, newest and oldest.
         for (int i : {0, 1, 511, 512, 513, 2000, 4000, t.scrollbackLines() - 1}) {
             QCOMPARE(t.lineText(i), QStringLiteral("line %1 bold tail").arg(i));
-            QCOMPARE(t.cell(i, 0).fg, t.colorScheme().ansi[i % 8]);
+            // What the live screen shows for the same SGR (ANSI black on the
+            // default black background is raised to a readable grey there too).
+            Terminal live(2, 10);
+            live.feed("\x1b[3" + QByteArray::number(i % 8) + "mX");
+            QCOMPARE(t.cell(i, 0).fg, live.cell(0, 0).fg);
+            if (i % 8 != 0) {
+                QCOMPARE(t.cell(i, 0).fg, t.colorScheme().ansi[i % 8]);
+            }
             QVERIFY(t.cell(i, QStringLiteral("line %1 ").arg(i).size()).bold);
         }
         // Far below VTermScreenCell storage (~40 bytes per cell = 16 MB here),

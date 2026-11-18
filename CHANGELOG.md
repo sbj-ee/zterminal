@@ -8,6 +8,14 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.7.4 — 2026-11-17
+
+### Fixed
+- Faint text (SGR 2, "dim") is now rendered. libvterm dropped SGR 2, so faint text came out at full brightness, while programs that fall back to ANSI colours for "subtle" text (Claude Code diff context lines, code inside diffs, secondary output) used ANSI black or a dark 256-colour grey that was nearly invisible on a black background (Boilermakers ANSI black `#262626` on `#000000` is 1.4:1).
+  - Faint text is the foreground blended toward the cell's actual background, keeping 66 % of the foreground, and is then held to at least a **3:1** contrast ratio (WCAG 2) against that background, moved away from it (lighter on dark themes, darker on light ones) only as far as needed. A dark 256-colour or truecolor foreground with faint stays readable; with reverse video the swapped colours are dimmed; bold + faint gives a bold, dimmed glyph; SGR 22 and SGR 0 end faint. Faint is kept in scrollback.
+  - A 16/256-palette foreground below 1.5:1 against the theme's default background (e.g. ANSI black or grey 235 on black) is raised to 3:1. Every other colour, explicit foreground/background pairs (such as text hidden on purpose) and truecolor render exactly as before.
+- Bundled libvterm: local patch 14 adds the faint attribute (`VTERM_ATTR_DIM`, `VTermScreenCellAttrs.dim`); see `third_party/libvterm/README.zterminal.md`.
+
 ## 1.7.3 — 2026-11-10
 
 ### Fixed

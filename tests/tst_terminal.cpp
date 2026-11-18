@@ -1,6 +1,7 @@
 // Emulation core: text, 16/256/truecolor SGR, attributes, scrollback, title,
 // bracketed paste, mouse modes and key encoding (libvterm through Terminal).
 #include "ColorScheme.hpp"
+#include "Contrast.hpp"
 #include "Terminal.hpp"
 #include "WindowTitle.hpp"
 
@@ -79,6 +80,219 @@ private slots:
         QCOMPARE(r.fg, t.colorScheme().background);
         QCOMPARE(r.bg, t.colorScheme().foreground);
         QVERIFY(!r.defaultBg);
+    }
+
+    // --- Faint (SGR 2) and minimum contrast (Contrast.hpp) -----------------
+
+    void contrastMath()
+    {
+        using namespace contrast;
+        const QRgb black = qRgb(0, 0, 0);
+        const QRgb white = qRgb(255, 255, 255);
+        QCOMPARE(contrastRatio(black, white), 21.0);
+        QCOMPARE(contrastRatio(white, black), 21.0);
+        QCOMPARE(contrastRatio(qRgb(90, 90, 90), qRgb(90, 90, 90)), 1.0);
+        // #262626 on black: the unreadable grey in the bug report.
+        QVERIFY(contrastRatio(qRgb(38, 38, 38), black) < 1.5);
+        QCOMPARE(blend(white, black, 0.66), qRgb(168, 168, 168));
+        QCOMPARE(blend(qRgb(200, 100, 50), qRgb(0, 0, 0), 1.0), qRgb(200, 100, 50));
+        QCOMPARE(blend(qRgb(200, 100, 50), qRgb(10, 20, 30), 0.0), qRgb(10, 20, 30));
+        // ensureContrast leaves a readable colour alone ...
+        QCOMPARE(ensureContrast(qRgb(229, 229, 229), black, 3.0), qRgb(229, 229, 229));
+        // ... and moves a dark one just far enough, away from the background.
+        const QRgb up = ensureContrast(qRgb(38, 38, 38), black, 3.0);
+        QVERIFY(contrastRatio(up, black) >= 3.0);
+        QVERIFY(contrastRatio(up, black) < 3.2);
+        QVERIFY(qRed(up) > 38);
+        const QRgb down = ensureContrast(qRgb(235, 235, 235), white, 3.0);
+        QVERIFY(contrastRatio(down, white) >= 3.0);
+        QVERIFY(contrastRatio(down, white) < 3.2);
+        QVERIFY(qRed(down) < 235);
+        // Hue is kept as far as possible (blend toward white, not grey-out).
+        const QRgb navy = ensureContrast(qRgb(0, 0, 90), black, 3.0);
+        QVERIFY(qBlue(navy) > qRed(navy));
+    }
+
+    void dimBlendsTowardBackground()
+    {
+        // xterm default: #e5e5e5 on black -> 66 % foreground, already readable.
+        Terminal t(5, 20);
+        const ColorScheme s = t.colorScheme();
+        t.feed("N\x1b[2mD\x1b[22mN\x1b[2;31mR\x1b[0mN");
+        const Cell n = t.cell(0, 0);
+        const Cell d = t.cell(0, 1);
+        QVERIFY(!n.dim);
+        QVERIFY(d.dim);
+        QCOMPARE(n.fg, s.foreground);
+        QCOMPARE(d.fg, contrast::blend(s.foreground, s.background, contrast::kDimForegroundWeight));
+        QCOMPARE(d.fg, qRgb(151, 151, 151));
+        QVERIFY(contrast::contrastRatio(d.fg, s.background) >= contrast::kDimMinContrast);
+        QVERIFY(contrast::luminance(d.fg) < contrast::luminance(n.fg)); // still visibly dimmer
+        QVERIFY(!t.cell(0, 2).dim); // SGR 22 ends faint
+        QCOMPARE(t.cell(0, 2).fg, s.foreground);
+        QVERIFY(t.cell(0, 3).dim);
+        QCOMPARE(t.cell(0, 3).fg, contrast::dim(s.ansi[1], s.background));
+        QVERIFY(!t.cell(0, 4).dim); // SGR 0 ends faint
+        QCOMPARE(t.cell(0, 4).fg, s.foreground);
+    }
+
+    void dimKeepsMinimumContrastOnBlack()
+    {
+        // Boilermakers (the reporter's theme): gold on black, ANSI black #262626.
+        Terminal t(5, 40);
+        t.setColorScheme(ColorScheme::byId(QStringLiteral("boilermakers")));
+        const ColorScheme s = t.colorScheme();
+        QCOMPARE(s.background, qRgb(0, 0, 0));
+        t.feed("\x1b[2mD\x1b[0;2;30mK\x1b[0;2;90mG");
+        for (int col = 0; col < 3; ++col) {
+            const Cell c = t.cell(0, col);
+            QVERIFY(c.dim);
+            QVERIFY2(contrast::contrastRatio(c.fg, s.background) >= contrast::kDimMinContrast,
+                     qPrintable(QStringLiteral("col %1 %2").arg(col).arg(c.fg, 6, 16)));
+        }
+        // Dim default text is the gold at two thirds, not a near-black grey.
+        QCOMPARE(t.cell(0, 0).fg, contrast::blend(s.foreground, s.background, contrast::kDimForegroundWeight));
+    }
+
+    void dimKeepsMinimumContrastOnLight()
+    {
+        ColorScheme light = ColorScheme::byId(QStringLiteral("xterm"));
+        light.foreground = qRgb(0, 0, 0);
+        light.background = qRgb(255, 255, 255);
+        light.ansi[7] = qRgb(229, 229, 229);
+        light.ansi[15] = qRgb(255, 255, 255);
+        Terminal t(5, 40);
+        t.setColorScheme(light);
+        t.feed("N\x1b[2mD\x1b[0;2;37mW\x1b[0;2;38;2;240;240;240mT\x1b[0;2;38;5;254mI");
+        QCOMPARE(t.cell(0, 0).fg, qRgb(0, 0, 0));
+        // Black text dims toward white (lighter), stays well readable.
+        const QRgb d = t.cell(0, 1).fg;
+        QCOMPARE(d, contrast::blend(light.foreground, light.background, contrast::kDimForegroundWeight));
+        QVERIFY(qRed(d) > 0);
+        // Light foregrounds on a light background are pushed darker to 3:1.
+        for (int col = 1; col < 5; ++col) {
+            const Cell c = t.cell(0, col);
+            QVERIFY(c.dim);
+            QVERIFY2(contrast::contrastRatio(c.fg, light.background) >= contrast::kDimMinContrast,
+                     qPrintable(QStringLiteral("col %1 %2").arg(col).arg(c.fg, 6, 16)));
+        }
+        QVERIFY(qRed(t.cell(0, 3).fg) < 240);
+    }
+
+    void dimWithDarkPaletteOrTruecolorForeground()
+    {
+        Terminal t(5, 40);
+        const ColorScheme s = t.colorScheme(); // xterm: black background
+        // 256-colour grey 235 (#262626), 232 (#080808), truecolor near-black,
+        // and pure black text on black, all faint.
+        t.feed("\x1b[2;38;5;235mA\x1b[0;2;38;5;232mB\x1b[0;2;38;2;30;30;30mC\x1b[0;2;38;2;0;0;0mD"
+               "\x1b[0;2;38;2;0;0;100mE");
+        for (int col = 0; col < 5; ++col) {
+            const Cell c = t.cell(0, col);
+            QVERIFY(c.dim);
+            QVERIFY2(contrast::contrastRatio(c.fg, s.background) >= contrast::kDimMinContrast,
+                     qPrintable(QStringLiteral("col %1 %2").arg(col).arg(c.fg, 6, 16)));
+            QVERIFY(contrast::contrastRatio(c.fg, s.background) < 3.2); // lifted only as far as needed
+        }
+        // Dark blue keeps its hue.
+        QVERIFY(qBlue(t.cell(0, 4).fg) > qRed(t.cell(0, 4).fg));
+        // On an explicit background the floor is measured against that background.
+        t.feed("\r\n\x1b[2;38;2;40;40;40;48;2;30;30;30mX");
+        const Cell x = t.cell(1, 0);
+        QCOMPARE(x.bg, qRgb(30, 30, 30));
+        QVERIFY(contrast::contrastRatio(x.fg, x.bg) >= contrast::kDimMinContrast);
+    }
+
+    void dimWithInverseAndBold()
+    {
+        Terminal t(5, 40);
+        const ColorScheme s = t.colorScheme();
+        t.feed("\x1b[2;7mI\x1b[0;1;2;31mB\x1b[0;1;31mb\x1b[0;7;2;38;5;235mJ");
+        // Inverse: the cell is drawn foreground-coloured, and the faint text
+        // (the old background) is dimmed toward that, readable.
+        const Cell inv = t.cell(0, 0);
+        QVERIFY(inv.dim);
+        QCOMPARE(inv.bg, s.foreground);
+        QCOMPARE(inv.fg, contrast::dim(s.background, s.foreground));
+        QVERIFY(contrast::contrastRatio(inv.fg, inv.bg) >= contrast::kDimMinContrast);
+        QVERIFY(inv.fg != s.background); // dimmed, not plain reverse
+        // Bold + faint: bold font, bright colour (bold-is-bright), then dimmed.
+        const Cell bd = t.cell(0, 1);
+        QVERIFY(bd.bold);
+        QVERIFY(bd.dim);
+        QCOMPARE(t.cell(0, 2).fg, s.ansi[9]);
+        QCOMPARE(bd.fg, contrast::dim(s.ansi[9], s.background));
+        // Inverse with a dark 256-colour foreground: that grey (raised, as
+        // it is near-invisible on black) becomes the cell background and the
+        // faint text must still read on it.
+        const Cell j = t.cell(0, 3);
+        QCOMPARE(j.bg, contrast::ensureContrast(qRgb(38, 38, 38), s.background, contrast::kMinReadableContrast));
+        QVERIFY(contrast::contrastRatio(j.fg, j.bg) >= contrast::kDimMinContrast);
+    }
+
+    void dimSavedRestoredAndReported()
+    {
+        Terminal t(5, 40);
+        // DECSC / DECRC keep faint with the rest of the pen.
+        t.feed("\x1b[2m\x1b" "7\x1b[0m\x1b" "8X");
+        QVERIFY(t.cell(0, 0).dim);
+        // DECRQSS for SGR reports it (CSI 2 m among the attributes).
+        const QByteArray reply = collect(t, [&t] { t.feed("\x1bP$qm\x1b\\"); });
+        QCOMPARE(reply, QByteArray("\x1bP1$r2m\x1b\\"));
+    }
+
+    void normalColoursUnchanged()
+    {
+        // Only faint text and near-invisible palette colours on the default
+        // background are adjusted; everything else renders exactly as sent.
+        for (const QString &id : {QStringLiteral("xterm"), QStringLiteral("boilermakers"),
+                                  QStringLiteral("solarized-dark"), QStringLiteral("putty")}) {
+            Terminal t(5, 40);
+            t.setColorScheme(ColorScheme::byId(id));
+            const ColorScheme s = t.colorScheme();
+            t.feed("N\x1b[31mR\x1b[32mG\x1b[34mB\x1b[37mW\x1b[94mL\x1b[0;38;2;30;30;30mT\x1b[0;38;5;196mX"
+                   "\x1b[0;30;40mH\x1b[0;1mD");
+            QCOMPARE(t.cell(0, 0).fg, s.foreground);
+            QCOMPARE(t.cell(0, 1).fg, s.ansi[1]);
+            QCOMPARE(t.cell(0, 2).fg, s.ansi[2]);
+            QCOMPARE(t.cell(0, 3).fg, s.ansi[4]);
+            QCOMPARE(t.cell(0, 4).fg, s.ansi[7]);
+            QCOMPARE(t.cell(0, 5).fg, s.ansi[12]);
+            QCOMPARE(t.cell(0, 6).fg, qRgb(30, 30, 30)); // truecolor is the program's choice
+            QCOMPARE(t.cell(0, 7).fg, qRgb(255, 0, 0));
+            QCOMPARE(t.cell(0, 8).fg, s.ansi[0]); // explicit fg/bg pair kept (e.g. hidden text)
+            QCOMPARE(t.cell(0, 8).bg, s.ansi[0]);
+            QCOMPARE(t.cell(0, 9).fg, s.foreground);
+            for (int col = 0; col < 10; ++col) {
+                QVERIFY(!t.cell(0, col).dim);
+            }
+        }
+        // The darkest standard colours, xterm blue #0000ee (2.2:1) and PuTTY
+        // blue #0000bb (1.7:1) on black, are left alone.
+        Terminal x(2, 10);
+        x.feed("\x1b[34mB");
+        QCOMPARE(x.cell(0, 0).fg, qRgb(0, 0, 238));
+        QVERIFY(contrast::contrastRatio(qRgb(0, 0, 187), qRgb(0, 0, 0)) >= contrast::kIndistinguishableContrast);
+    }
+
+    void nearInvisiblePaletteColourIsRaised()
+    {
+        // The reported case: a program falling back to ANSI colours draws
+        // "subtle" text in ANSI black (Boilermakers #262626) or 256-colour
+        // grey 235 on the black default background.
+        Terminal t(5, 40);
+        t.setColorScheme(ColorScheme::byId(QStringLiteral("boilermakers")));
+        const ColorScheme s = t.colorScheme();
+        t.feed("\x1b[30mK\x1b[0;38;5;235mG\x1b[0;38;5;0mZ\x1b[0;7;30mI");
+        for (int col = 0; col < 3; ++col) {
+            const QRgb fg = t.cell(0, col).fg;
+            QVERIFY2(contrast::contrastRatio(fg, s.background) >= contrast::kMinReadableContrast,
+                     qPrintable(QStringLiteral("col %1 %2").arg(col).arg(fg, 6, 16)));
+            QVERIFY(contrast::contrastRatio(fg, s.background) < 3.2);
+        }
+        // Reverse video with ANSI black: the (raised) grey fills the cell.
+        QCOMPARE(t.cell(0, 3).bg, t.cell(0, 0).fg);
+        QCOMPARE(t.cell(0, 3).fg, s.background);
     }
 
     void schemeChangeRecolorsExistingCells()
