@@ -6,12 +6,13 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.7.4** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.7.5** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.7.4 — <session>`), in Help → About and by
+the window title (`zterminal 1.7.5 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
-notes: [docs/PLAN.md](docs/PLAN.md).
+notes: [docs/PLAN.md](docs/PLAN.md). Build and release specification:
+[SPEC.md](SPEC.md).
 
 zterminal is a classic PuTTY-style terminal: a menu bar, a session dialog with
 saved sessions, one session per tab, and PuTTY/X11 mouse behaviour (select to
@@ -394,7 +395,7 @@ or tab title.
 
 ## Status and known gaps
 
-Current release: **1.7.3** (tag `v1.7.3`). 1.6.6–1.7.1 were never released
+Current release: **1.7.4** (tag `v1.7.4`). 1.6.6–1.7.1 were never released
 separately (`v1.7.1` was tagged but its release build failed) and shipped in
 1.7.2. 1.6.3 and 1.6.4 were never tagged separately and shipped in 1.6.5. 1.5.1 (documentation only) was never tagged; its
 changes shipped in 1.6.0. What zterminal deliberately does not do (yet), from the

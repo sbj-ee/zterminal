@@ -8,6 +8,12 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.7.5 — 2026-11-19
+
+### Documentation
+- `SPEC.md`: a specification of the project for repeatable configuration and builds: scope and non-goals (no split panes), architecture and modules, libvterm vendoring and its 14 local patches, toolchain and dependency versions per platform (declared and as observed in CI), configure/build/test commands, packaging, minisign signing and the release workflow with its protected `release` environment, the in-app updater, config files, CI and Dependabot, versioning rules, and a list of open questions.
+- README: "Current release" names 1.7.4; links `SPEC.md`.
+
 ## 1.7.4 — 2026-11-17
 
 ### Fixed
