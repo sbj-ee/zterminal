@@ -10,7 +10,8 @@
 
 namespace zterminal {
 
-// Encrypted password vault: ~/.config/zterminal/vault.bin.
+// Encrypted password vault: <configHome>/zterminal/vault.bin (Linux ~/.config,
+// macOS ~/Library/Preferences; see ConfigPaths.hpp).
 //
 // File format v1 (all integers little-endian):
 //   offset  size  field

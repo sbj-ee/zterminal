@@ -42,7 +42,8 @@ SSH itself.
   colours, cursor/selection colours, cursor style and blink, and optionally the
   terminal font and size, with a live preview. Save, rename, delete, apply,
   import and export. Custom themes are `*.ztheme.json` files in
-  `~/.config/zterminal/themes/` (format shared with zmail, see
+  `~/.config/zterminal/themes/` (macOS: `~/Library/Preferences/zterminal/themes/`,
+  see [Files](#files)) (format shared with zmail, see
   [docs/THEMES.md](docs/THEMES.md#theme-files-custom-themes)); zmail's themes in
   `~/.config/zmail/themes/` are listed read-only, with the ANSI colours derived.
 - **Blinking vertical-bar cursor** by default; programs can still change the shape
@@ -69,7 +70,7 @@ SSH itself.
   `passwordStored` flag for SSH, which import ignores. See
   [Importing sessions](#importing-sessions).
 - **Password vault:** optional, Argon2id + XChaCha20-Poly1305 (libsodium) in
-  `~/.config/zterminal/vault.bin`. Per SSH session, “Use stored password” answers
+  `~/.config/zterminal/vault.bin` (macOS: `~/Library/Preferences/zterminal/`). Per SSH session, “Use stored password” answers
   ssh’s first password prompt via `SSH_ASKPASS`; per serial session,
   Session → Send Stored Login. See [Password vault](#password-vault).
 - **Session logging:** Session → Start/Stop Logging (Ctrl+Shift+G) or automatic
@@ -206,7 +207,8 @@ zt --version
 
 On macOS the GUI app is `zterminal.app`; the same flags work when launching the
 binary inside the bundle. Saved sessions live in `~/.config/zterminal/sessions/`
-(one INI per session; owner-only permissions). An SSH example:
+(macOS: `~/Library/Preferences/zterminal/sessions/`; see [Files](#files)), one
+INI per session with owner-only permissions. An SSH example:
 
 ```ini
 [session]
@@ -232,7 +234,8 @@ A **group** is a named, ordered list of saved sessions that opens together as
 tabs, e.g. `lab` = `core-sw1`, `edge-sw2`, `build box`. Members are *references
 by session name*, not copies: edit a session and every group that lists it sees
 the change, and its stored vault password keeps working (the vault is keyed by
-session name too). Groups live in `~/.config/zterminal/groups/` (one INI per
+session name too). Groups live in `~/.config/zterminal/groups/` (macOS:
+`~/Library/Preferences/zterminal/groups/`) (one INI per
 group, owner-only permissions, never a password), a different directory from the
 sessions, so zterminal 1.5.0 and older simply ignore them.
 
@@ -497,8 +500,12 @@ documentation, a **minor** bump for features. A PR that bumps the version also
 adds an entry to [CHANGELOG.md](CHANGELOG.md). Tags and releases are made
 separately, only after review ([docs/RELEASING.md](docs/RELEASING.md)).
 
-Bump **only** `project(zterminal VERSION x.y.z)` in `CMakeLists.txt`.
-`src/version.hpp.in` is generated into the build tree; the window title, About,
+The version itself is defined **only** by `project(zterminal VERSION x.y.z)` in
+`CMakeLists.txt`. The same PR also updates the top `CHANGELOG.md` heading
+(`## x.y.z — YYYY-MM-DD`, dated when the PR is opened and updated if it merges
+on a later day), the version in this README's header and its title example
+(`zterminal x.y.z — <session>`); CI's **Version consistency** job
+(`scripts/check-version.sh`) fails if they disagree. `src/version.hpp.in` is generated into the build tree; the window title, About,
 `--version`, Info.plist, and the `.deb` / `.dmg` names all follow from it, and
 the test suites compare against it (`ZTERMINAL_EXPECTED_VERSION`). There is no
 separate Debian changelog or packaging file to edit: `cmake/Packaging.cmake`
@@ -510,8 +517,8 @@ separate Debian changelog or packaging file to edit: `cmake/Packaging.cmake`
   update logic (no widgets)
 - `app/` — Qt Widgets UI (`MainWindow`, `TerminalView`, Preferences, …)
 - `tests/` — Qt Test suites plus `colortest.sh`
-- `third_party/libvterm/` — bundled libvterm 0.3.3 (MIT) with thirteen local
-  fixes (see `third_party/libvterm/README.zterminal.md`)
+- `third_party/libvterm/` — bundled libvterm 0.3.3 (MIT) with fourteen local
+  patches: thirteen fixes and faint/SGR 2 (see `third_party/libvterm/README.zterminal.md`)
 - `askpass/` — `zterminal-askpass` (`SSH_ASKPASS` helper)
 - `assets/icons/` — Zorro-Z PNG set (and macOS `.icns` input)
 - `packaging/` — `zt` launcher and `.desktop` file
@@ -519,6 +526,22 @@ separate Debian changelog or packaging file to edit: `cmake/Packaging.cmake`
 - `fuzz/` — libFuzzer harnesses and seed corpus
 - `tools/` — macOS bundle check, sanitizer suppressions
 - `docs/` — design notes (`PLAN.md`), `RELEASING.md`, `HARDENING.md`, `THEMES.md`
+
+## Files
+
+| What | Linux | macOS |
+|---|---|---|
+| Preferences (`zterminal.ini`) | `~/.config/zterminal/` | `~/.config/zterminal/` |
+| Sessions, groups, vault (`vault.bin`, `vault.bin.lock`), `update-state.ini`, custom themes | `~/.config/zterminal/` | `~/Library/Preferences/zterminal/` |
+| Session logs (default) | `~/zterminal-logs/` | `~/zterminal-logs/` |
+
+If `XDG_CONFIG_HOME` is set, it replaces both `~/.config` and, on macOS,
+`~/Library/Preferences` above. The split on macOS comes from Qt. The
+preferences file goes through `QSettings` in INI format, which Qt keeps under
+`~/.config` on macOS too. Everything else uses Qt's generic config location,
+which on macOS is `~/Library/Preferences`. A
+`~/Library/Preferences/ee.sbj.zterminal.plist` is macOS's own per-app defaults
+file; zterminal doesn't use it. Details: [SPEC.md](SPEC.md#10-runtime-files-and-configuration).
 
 ## Security
 

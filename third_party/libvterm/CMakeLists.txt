@@ -1,4 +1,4 @@
-# libvterm 0.3.3 (MIT), bundled unmodified. See README.zterminal.md.
+# libvterm 0.3.3 (MIT), bundled with fourteen local patches. See README.zterminal.md.
 add_library(vterm STATIC
   src/encoding.c
   src/keyboard.c

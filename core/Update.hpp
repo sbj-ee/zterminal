@@ -110,7 +110,8 @@ QString expectedSignedComment(const QString &tag);
 QString updateSigningPublicKey();
 void setUpdateSigningPublicKeyForTests(const QString &base64); // empty: back to the built-in key
 
-// Persistent state: ~/.config/zterminal/update-state.ini (not zterminal.ini, so
+// Persistent state: <configHome>/zterminal/update-state.ini (Linux ~/.config,
+// macOS ~/Library/Preferences; see ConfigPaths.hpp) (not zterminal.ini, so
 // writing the last-check time doesn't make every window reload its settings).
 struct UpdateState {
     QDateTime lastCheck;    // last automatic check (UTC)

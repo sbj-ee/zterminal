@@ -275,6 +275,35 @@ versions float with the runner image, Ubuntu archive and Homebrew.
 | Ninja | 1.11.1 | 1.13.2 |
 | clang-tidy | 18 (`1:18.0-59~exp2`) | — |
 
+#### Toolchain drift (documented, deliberately not pinned)
+
+The toolchain is **intentionally left unpinned** (maintainer decision,
+2026-11-19). Each CI or release run takes whatever the runner image, the Ubuntu
+24.04 archive and Homebrew provide on that day. As a result:
+
+- **Qt differs by platform.** Linux builds against Ubuntu 24.04's Qt **6.4.2**
+  (the minimum the build accepts is 6.4). macOS builds against Homebrew's
+  current `qt` (**6.12.0** for 1.7.4), which changes whenever Homebrew updates
+  it. A feature or behaviour change in Qt after 6.4 can therefore show up on
+  macOS only. Code must still build and pass on 6.4.2.
+- **Xcode / AppleClang is the runner default** (`macos-15` image; Xcode 16.4 /
+  AppleClang 17 for 1.7.4). There is no `xcode-select` step.
+- **Runner images** follow the `ubuntu-24.04` and `macos-15` labels. Only
+  the labels are fixed, not image versions.
+- **macOS 14 minimum is declared, not tested.** `CMAKE_OSX_DEPLOYMENT_TARGET`
+  and `LSMinimumSystemVersion` are 14.0, but CI runs on macOS 15. Homebrew
+  pours `arm64_sequoia` (macOS 15) bottles there, and those are what
+  `macdeployqt` bundles. Nothing in CI launches the `.dmg` on macOS 14. The
+  `CMakeLists.txt` comment about "bottles built for macOS 14" describes the
+  intent, not something verified.
+- **libsodium** is 1.0.18 on Linux and Homebrew's current version (1.0.22) in
+  the macOS bundle.
+- **CMake on Linux:** apt installs 3.28.3. If the runner image also has its
+  own CMake earlier on `PATH`, that one runs; the logs don't record which.
+- To see exactly what a given release used, read its release run log:
+  runner image version, `The CXX compiler identification is …`, the apt
+  `Setting up …` lines, and Homebrew's `Pouring …` lines.
+
 ### 5.3 Runtime dependencies
 
 - **.deb:** `Depends: qt6-wayland, libqt6serialport6, libsodium23` plus what
@@ -540,16 +569,43 @@ prompt; `zterminal.app` at the root next to an `Applications` symlink.
 
 ## 10. Runtime files and configuration
 
-`<config>` is `$XDG_CONFIG_HOME` if set (on any platform), otherwise
-`QStandardPaths::GenericConfigLocation` (`core/ConfigPaths.hpp`); on Linux that
-is `~/.config`. See §14 for macOS.
+Two different roots are used, and they coincide on Linux but **not on macOS**:
+
+- **`<config>`**: `zterminal::configHome()` (`core/ConfigPaths.hpp`). It is
+  `$XDG_CONFIG_HOME` if set (on any platform), otherwise
+  `QStandardPaths::writableLocation(GenericConfigLocation)`. Sessions, groups,
+  the vault, update state and themes live under `<config>/zterminal/`.
+- **`<ini>`**: the location of the global preferences file. `main.cpp` sets
+  `QSettings::setDefaultFormat(IniFormat)` with organisation and application
+  `zterminal`, and `AppSettings` uses default-constructed `QSettings`. For
+  IniFormat in user scope Qt uses `$XDG_CONFIG_HOME`, or `$HOME/.config` when
+  that is unset. Qt does this on **macOS as well** (only XDG platforms go
+  through `QStandardPaths` there). The file is `<ini>/zterminal/zterminal.ini`.
+
+| Platform | `<config>` (no `XDG_CONFIG_HOME`) | `<ini>` (no `XDG_CONFIG_HOME`) |
+|---|---|---|
+| Linux | `~/.config` | `~/.config` |
+| macOS | `~/Library/Preferences` (Qt's `GenericConfigLocation` on macOS) | `~/.config` |
+
+Observed on a Mac running 1.7.4: `~/.config/zterminal/zterminal.ini`;
+`~/Library/Preferences/zterminal/` with `sessions/`, `update-state.ini`,
+`vault.bin` and `vault.bin.lock`; no `~/Library/Application Support/zterminal`.
+A `~/Library/Preferences/ee.sbj.zterminal.plist` may also exist. zterminal's
+code never writes it: there is no native-format `QSettings`, and IniFormat
+has been the default since the first commit. It is the app's macOS
+user-defaults domain (named after the bundle id introduced on 2026-10-05).
+Most likely AppKit / Qt's Cocoa platform plugin creates it. zterminal does not
+read it, and it can be ignored.
+
+With `XDG_CONFIG_HOME` set (the test suite sets it per test), both roots are
+that directory on both platforms.
 
 | File | Format | Notes |
 |---|---|---|
-| `<QSettings user path>/zterminal/zterminal.ini` | QSettings INI (org `zterminal`, app `zterminal`) | Global preferences: `appearance/*`, `clipboard/*`, `logging/*`, `mouse/*`, `terminal/scrollbackLines`, `updates/checkOnStartup`, `vault/autoLock*`, `view/menuBarVisible` (see `app/AppSettings.cpp`); watched with `QFileSystemWatcher` so all windows apply changes |
+| `<ini>/zterminal/zterminal.ini` | QSettings INI (org `zterminal`, app `zterminal`) | Global preferences: `appearance/*`, `clipboard/*`, `logging/*`, `mouse/*`, `terminal/scrollbackLines`, `updates/checkOnStartup`, `vault/autoLock*`, `view/menuBarVisible` (see `app/AppSettings.cpp`); watched with `QFileSystemWatcher` so all windows apply changes |
 | `<config>/zterminal/sessions/<name>.ini` | INI, owner-only | `[session]` name/type/approved/autoReconnect, `[ssh]` host/user/port/keyFile/jumpHost/extraArgs/keepalive*/authFromVault, `[serial]` device/baud/data/parity/stop/flow/delays/localEcho/loginUser/enterSends, `[appearance]` per-session scheme/font. Never a password |
 | `<config>/zterminal/groups/<name>.ini` | INI, owner-only | `[group]` name, `version=1`, `openIn`, `staggerMs` (0–5000, default 250), `focusIndex`; `[member]` array of session names |
-| `<config>/zterminal/vault.bin` | binary (§4.5) | plus `vault.bin.pending-deletions` |
+| `<config>/zterminal/vault.bin` | binary (§4.5) | plus `vault.bin.lock` (`flock` for read-modify-write across processes) and `vault.bin.pending-deletions` |
 | `<config>/zterminal/update-state.ini` | INI | last check time, skipped version |
 | `<config>/zterminal/themes/*.ztheme.json` | JSON (§4.8) | own custom themes |
 | `<config>/zmail/themes/*.ztheme.json` | JSON | zmail's themes, read-only |
@@ -604,13 +660,21 @@ See §8.2.
   disables auto-merge and leaves the PR for review. No third-party action.
 - An auto-merged Dependabot PR does not trigger a push run on `main`; run
   `gh workflow run ci.yml --ref main` by hand.
-- Dependabot PRs do not bump the version (§12, §14).
+- Dependabot PRs do not bump the version; they are exempt from the every-PR
+  bump rule (§12).
 
 ### 11.5 Repository settings (outside git, read via the API on 2026-11-19)
 
-- Branch protection on `main`: "require branches to be up to date" (strict) and
-  enforce for admins are on. **The required status-check list is empty** (see
-  §14).
+- Branch protection on `main`: "require branches to be up to date" (strict),
+  enforced for admins, and since 2026-11-19 **all six `ci.yml` jobs are
+  required status checks** (bound to the GitHub Actions app):
+  `Version consistency`, `Linux (ubuntu-24.04)`, `macOS arm64`,
+  `Sanitizers (ASan + UBSan, ubuntu-24.04)`, `clang-tidy (ubuntu-24.04)`,
+  `Fuzz (libFuzzer, 60 s per harness)`. None of them is path-filtered or
+  conditional, so they report on every PR, docs-only and Dependabot PRs
+  included. Dependabot auto-merge therefore waits for all six. A check name
+  that changes in `ci.yml` must be changed in the protection settings too, or
+  every PR will wait forever for the old name.
 - Merge methods: merge, squash and rebase allowed; auto-merge allowed; head
   branches deleted on merge.
 - Environment `release`: required reviewer `sbj-ee`; deployment policy: tags
@@ -625,20 +689,30 @@ See §8.2.
 - **Every pull request bumps the version** (rule of 2026-10-17; README "Version
   bumps", CHANGELOG preamble): **patch** for fixes *and documentation*,
   **minor** for features (SemVer). The same PR adds a `CHANGELOG.md` entry.
-  Tags and releases happen separately, only after review.
+  Tags and releases happen separately, only after review. **Exempt:**
+  Dependabot's PRs (pinned GitHub Actions updates); they never bump.
 - **Also updated by hand in the same PR** (enforced by
   `scripts/check-version.sh`): the top `## X.Y.Z …` heading in `CHANGELOG.md`,
   the README header `**X.Y.Z**`, and the README title example
   `zterminal X.Y.Z — <session>`. README `Current release: **A.B.C**` must name
   either this version or the newest *other* `v*` tag.
-- **Changelog heading:** `## X.Y.Z — YYYY-MM-DD` (em dash). A PR may carry an
-  undated/"unreleased" heading, but `check-version.sh --tag` (release) refuses
-  it; versions never released on their own are marked e.g. `(not released
-  separately; shipped in 1.7.2)`.
+- **Changelog dating convention:** the PR dates its own heading,
+  `## X.Y.Z — YYYY-MM-DD` (em dash), with the date the PR is opened. If it
+  lands on a later day, the date is updated before merge. There are no
+  "unreleased" headings: `check-version.sh --tag` refuses an undated top
+  heading, and the 1.7.1 release build failed on exactly that. The date
+  records when that version was finished. It is **not** changed again at
+  release time, because under the every-PR rule a re-dating edit would itself
+  need a new version; the GitHub Release records the publication date.
+  Versions never released on their own get a suffix such as `(not released
+  separately; shipped in 1.7.2)` when the release that ships them is
+  prepared.
 - **Checks:** `scripts/check-version.sh` (CI job *Version consistency*, every
   push/PR) and `scripts/check-version.sh --tag vX.Y.Z` plus a CMake-cache
-  comparison in both release build jobs. The scripts check *consistency*, not
-  that the version increased relative to `main` (§14).
+  comparison in both release build jobs. These check *consistency*. A check that
+  the version actually *increased* against the base branch (job *Version
+  increase*, PR-only, Dependabot exempt, not a required check) is proposed in
+  PR #69. Until that merges, the increase is a convention only.
 - Tags: `vX.Y.Z`, created only after merge.
 
 ## 13. Reproducing a release build
@@ -662,53 +736,35 @@ To rebuild a released version as closely as the repository allows:
 
 ## 14. Open questions / ambiguities
 
-1. **No required status checks on `main`.** The branch-protection API reports
-   `required_status_checks.contexts: []` / `checks: []` (strict mode on).
-   `docs/HARDENING.md` says "the five `ci.yml` jobs must pass", and
-   `dependabot-auto-merge.yml` relies on branch protection to hold the merge
-   until CI is green. As configured, an auto-merge-enabled Dependabot PR could
-   merge without waiting for CI. Should the six `ci.yml` check names (§11.1) be
-   made required?
-2. **"Five" vs six CI jobs.** `docs/HARDENING.md` predates the *Version
-   consistency* job; `ci.yml` has six.
-3. **Toolchain is unpinned.** Runner labels are pinned (`ubuntu-24.04`,
-   `macos-15`) but not image versions; apt and Homebrew packages float (macOS
-   Qt is whatever Homebrew ships — 6.12.0 at 1.7.4, while Linux is 6.4.2).
-   Xcode is the runner default (16.4 observed). Which CMake binary the Linux
-   jobs use (apt 3.28.3 vs one preinstalled on the image) is not logged. Is
-   pinning wanted (e.g. a Qt version on macOS, `xcode-select`, image version)?
-4. **macOS minimum 14.0 vs bottles.** `CMakeLists.txt` says CI "links Homebrew
-   Qt bottles built for macOS 14 (Sonoma)", but the 1.7.4 CI run poured
-   `arm64_sequoia` (macOS 15) bottles. Whether the shipped `.dmg` actually
-   runs on macOS 14 is not tested in CI.
-5. **macOS config location.** `core/ConfigPaths.hpp` comments that
-   `GenericConfigLocation` is `~/Library/Application Support` on macOS; Qt
-   documents it as `~/Library/Preferences`. README and `docs/THEMES.md` say
-   `~/.config/zterminal/…` without a platform note, and `zterminal.ini` uses
-   QSettings' IniFormat user path, which may differ from `<config>`. The real
-   macOS paths should be confirmed on a Mac and documented.
-6. **Release builds differ from CI builds.** `release.yml` configures without
+Resolved on 2026-11-19 and folded into the sections above: required status
+checks (§11.5), toolchain drift (§5.2, documented and not pinned), macOS file
+locations (§10), Dependabot exemption and enforcing the version increase
+(§12, PR #69), the changelog dating convention (§12), and the doc wording
+fixes (job count, patch count, libvterm comment, README bump wording, PLAN.md
+`ZTERMINAL_UPDATE_URL`).
+
+Still open:
+
+1. **Release builds differ from CI builds.** `release.yml` configures without
    `-DZTERMINAL_WERROR=ON`, does not repeat the must-run/no-skip test
    assertions or the `.deb` Depends checks, and does not run the macOS launch
-   smoke test; it relies on CI having passed on the merged commit.
-7. **Docs-only version bumps.** README and CHANGELOG say every PR bumps
-   (documentation = patch). `check-version.sh` only checks consistency, not
-   that the version increased vs `main`, so the rule is convention, not CI.
-   Dependabot PRs never bump. Is a "version must increase" check wanted, and
-   are Dependabot PRs exempt?
-8. **"Bump only CMakeLists.txt" vs the check.** README "Version bumps" says to
-   bump **only** `project()`; `check-version.sh` also requires the CHANGELOG
-   heading, README header and README title example to change.
-9. **libvterm wording drift.** `third_party/libvterm/CMakeLists.txt` says
-   "bundled unmodified" and README "Layout" says "thirteen local fixes"; there
-   are fourteen local patches (13 fixes + SGR 2 feature).
-10. **`ZTERMINAL_UPDATE_URL`.** `docs/PLAN.md` describes it as a general
-    override; in code it is honoured only with `ZTERMINAL_DEV_OVERRIDES`.
-11. **Changelog date at PR time.** `docs/RELEASING.md` step 1 implies PRs may
-    carry "unreleased" headings that are dated at release time, while recent
-    PRs date the heading in the PR. Which is canonical?
-12. **CMake ≥ 3.21 vs features used.** `CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE`
-    needs 3.23; with 3.21–3.22 the dmg would show a license prompt. Raise the
-    minimum on macOS?
-13. **Generator.** All docs and CI use Ninja, but nothing enforces it; other
-    generators are untested.
+   smoke test. It relies on CI having passed on the merged commit (now
+   enforced by the required checks).
+2. **CMake ≥ 3.21 vs features used.** `CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE`
+   needs 3.23; with 3.21–3.22 the dmg would show a license prompt. Raise the
+   minimum on macOS?
+3. **Generator.** All docs and CI use Ninja, but nothing enforces it; other
+   generators are untested.
+4. **`--help` text on macOS.** `usageText()` in `core/CommandLine.cpp` (a
+   user-visible string, checked by `tst_groups`) says sessions and groups live
+   in `~/.config/zterminal/…`. That is correct on Linux and wrong on macOS
+   (`~/Library/Preferences/zterminal/…`, §10). The fix is a code change and
+   needs its own PR. `packaging/zt` says the same, but `zt` is installed on
+   Linux only.
+5. **Theme sharing with zmail on macOS.** zterminal reads zmail's themes from
+   `<config>/zmail/themes`, which on macOS is
+   `~/Library/Preferences/zmail/themes`. Whether zmail on macOS writes its
+   themes there has not been checked.
+6. **`docs/PLAN.md` paths.** The historical design notes still give
+   `~/.config/zterminal/…` for every file. They are superseded by the README
+   and this spec and were left as written.

@@ -12,6 +12,9 @@ below 1.5.1 are summarized from the GitHub Releases and tags.
 
 ### Documentation
 - `SPEC.md`: a specification of the project for repeatable configuration and builds: scope and non-goals (no split panes), architecture and modules, libvterm vendoring and its 14 local patches, toolchain and dependency versions per platform (declared and as observed in CI), configure/build/test commands, packaging, minisign signing and the release workflow with its protected `release` environment, the in-app updater, config files, CI and Dependabot, versioning rules, and a list of open questions.
+- File locations on macOS documented correctly: `zterminal.ini` is in `~/.config/zterminal/`, while sessions, groups, the vault, `update-state.ini` and custom themes are in `~/Library/Preferences/zterminal/` (Qt's generic config location on macOS), not `~/Library/Application Support`. New README section "Files"; comments in `core/ConfigPaths.hpp` and the stores corrected.
+- Changelog dating convention stated in `SPEC.md` and `docs/RELEASING.md`: a PR dates its own heading, and the date isn't changed at release time.
+- Dependabot PRs are exempt from the every-PR version bump. `docs/HARDENING.md` lists the six required CI jobs (it said five). README and the libvterm `CMakeLists.txt` comment say fourteen local libvterm patches.
 - README: "Current release" names 1.7.4; links `SPEC.md`.
 
 ## 1.7.4 — 2026-11-17

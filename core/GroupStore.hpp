@@ -13,7 +13,7 @@ class SessionStore;
 
 // Saved groups: one INI file per group in
 // $XDG_CONFIG_HOME/zterminal/groups/ when set; else GenericConfigLocation
-// (Linux ~/.config/..., macOS ~/Library/Application Support/...). Mirrors
+// (Linux ~/.config/..., macOS ~/Library/Preferences/...). Mirrors
 // SessionStore: the file name is the group name percent-encoded, the real name
 // is also stored inside, files are 0600 and the directory 0700, and a group
 // name follows the session-name rules (validateSessionName).

@@ -102,7 +102,9 @@ files, `<name>.ztheme.json`, in the app's config dir:
 | zmail | `~/.config/zmail/themes/` | `~/.config/zterminal/themes/` |
 | zterminal | `~/.config/zterminal/themes/` | `~/.config/zmail/themes/` |
 
-(`$XDG_CONFIG_HOME` replaces `~/.config` when set.) Custom themes appear in the
+(`$XDG_CONFIG_HOME` replaces `~/.config` when set. On macOS, zterminal's
+themes directory is `~/Library/Preferences/zterminal/themes/` and it looks for
+zmail's in `~/Library/Preferences/zmail/themes/`; see the README's "Files".) Custom themes appear in the
 theme menus next to the built-in ones; their ids are `custom:<file stem>` and,
 for the other app's, `zterminal:<stem>` / `zmail:<stem>`. Import copies a file
 into your own themes dir; Export writes the selected theme (built-ins too).
