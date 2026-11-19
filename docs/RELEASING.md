@@ -1,6 +1,6 @@
 # Releasing zterminal
 
-1. Make sure `project(zterminal VERSION x.y.z)` in `CMakeLists.txt` has the version to release (every PR already bumps it, and adds its `CHANGELOG.md` entry; change nothing else). Replace "unreleased" in the CHANGELOG heading with the release date.
+1. Make sure `project(zterminal VERSION x.y.z)` in `CMakeLists.txt` has the version to release (every PR already bumps it and adds its dated `CHANGELOG.md` entry; change nothing else). **Changelog dates:** each PR writes its heading as `## X.Y.Z — YYYY-MM-DD` with the date it is opened, and updates it if it merges on a later day. There are no "unreleased" headings, and the date is not changed again at release time (that edit would need its own version bump); the GitHub Release records the publication date. The release workflow refuses an undated top heading (`scripts/check-version.sh --tag`).
 2. Merge to `main`, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 3. `.github/workflows/release.yml` builds and tests on Linux and macOS, packages
    the `.deb` and `.dmg`, writes `SHA256SUMS`, **signs it** with minisign

@@ -120,8 +120,9 @@ conversion of the release asset size.
   provenance.
 - Every action is pinned to a full commit SHA with the version in a comment.
   Dependabot (`.github/dependabot.yml`) proposes updates weekly.
-- `main` is protected: the five `ci.yml` jobs must pass on a branch that is up
-  to date with `main`, for administrators too. Dependabot's minor and patch
+- `main` is protected: the six `ci.yml` jobs (Version consistency, Linux,
+  macOS arm64, Sanitizers, clang-tidy, Fuzz) are required status checks and
+  must pass on a branch that is up to date with `main`, for administrators too. Dependabot's minor and patch
   updates merge themselves once that holds
   (`.github/workflows/dependabot-auto-merge.yml`, which uses no third-party
   action); a failing update stays open, and a major version bump comes as its

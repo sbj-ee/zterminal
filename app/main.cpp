@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("zterminal"));
     QApplication::setApplicationVersion(QString::fromLatin1(zterminal::kVersionString));
     QApplication::setDesktopFileName(QStringLiteral("zterminal"));
-    QSettings::setDefaultFormat(QSettings::IniFormat); // ~/.config/zterminal/zterminal.ini
+    QSettings::setDefaultFormat(QSettings::IniFormat); // ~/.config/zterminal/zterminal.ini (macOS too)
 
     const QStringList args = QApplication::arguments().mid(1);
     const zterminal::LaunchRequest request = zterminal::parseCommandLine(args);
