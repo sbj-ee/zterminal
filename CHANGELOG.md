@@ -8,6 +8,12 @@ tagged `vX.Y.Z`, published by `.github/workflows/release.yml`, and signed with
 minisign (from 1.3.0; see [docs/RELEASING.md](docs/RELEASING.md)). The entries
 below 1.5.1 are summarized from the GitHub Releases and tags.
 
+## 1.7.6 — 2026-11-19
+
+### CI
+- New job **Version increase** in `ci.yml` (`scripts/check-version-increase.sh`): a pull request fails unless its `project(zterminal VERSION …)` in `CMakeLists.txt` is greater than the base branch's, so the every-PR version bump is enforced rather than a convention. Pull requests only (pushes to `main`, manual runs and tag builds are unaffected); Dependabot's PRs are exempt.
+- README "Version bumps", `SPEC.md` §11/§12 and `docs/HARDENING.md` describe the job: pull requests only, Dependabot exempt, not a required status check.
+
 ## 1.7.5 — 2026-11-19
 
 ### Documentation

@@ -128,5 +128,10 @@ conversion of the release asset size.
   action); a failing update stays open, and a major version bump comes as its
   own PR and waits for review. A merge made that way does not start CI on
   `main`; run it by hand with `gh workflow run ci.yml --ref main`.
+- A seventh `ci.yml` job, **Version increase**
+  (`scripts/check-version-increase.sh`), runs on pull requests only and fails
+  unless the PR raises `project(zterminal VERSION …)` above the base branch's.
+  It is skipped for Dependabot's PRs, which never bump, and it is **not** a
+  required status check.
 - Releases carry signed SLSA build provenance for the .deb and .dmg:
   `gh attestation verify zterminal_<version>_amd64.deb -R sbj-ee/zterminal`.

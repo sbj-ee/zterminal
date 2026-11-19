@@ -31,6 +31,24 @@ jobs:
       - name: Check version drift
         run: scripts/check-version.sh
 
+  # Every PR bumps the version (README "Version bumps"): its CMakeLists.txt
+  # version must be greater than the base branch's. Pull requests only (not
+  # pushes to main or manual runs); Dependabot's PRs are exempt and skip it.
+  version-increase:
+    name: Version increase
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Version is greater than the base branch's
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          scripts/check-version-increase.sh "origin/${BASE_REF}"
+
   linux:
     name: Linux (ubuntu-24.04)
     runs-on: ubuntu-24.04
