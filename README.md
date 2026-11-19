@@ -6,10 +6,10 @@ A PuTTY-like terminal emulator for **Linux (amd64)** and **macOS Apple Silicon**
 built with C++20, Qt 6 Widgets, and
 [libvterm](https://www.leonerd.org.uk/code/libvterm/).
 
-**1.7.5** — local shell, SSH, and serial sessions with tabs, an encrypted password
+**1.7.6** — local shell, SSH, and serial sessions with tabs, an encrypted password
 vault, session logging, safe paste, Find, keepalive/reconnect, signed in-app
 updates, and brand colour themes with a theme editor. The version is shown in
-the window title (`zterminal 1.7.5 — <session>`), in Help → About and by
+the window title (`zterminal 1.7.6 — <session>`), in Help → About and by
 `zterminal --version`. Release history: [CHANGELOG.md](CHANGELOG.md). Design
 notes: [docs/PLAN.md](docs/PLAN.md). Build and release specification:
 [SPEC.md](SPEC.md).
@@ -477,7 +477,8 @@ packaging checks) and **macOS 15** (`macos-15` runner, arm64, `.dmg` packaging a
 checks), plus an ASan/UBSan test run, clang-tidy on `core/`, `app/` and
 `askpass/`, and 60-second libFuzzer runs of the harnesses in `fuzz/`. A nightly
 workflow fuzzes each harness for 20 minutes (`fuzz-nightly.yml`).
-Dependabot updates the pinned GitHub Actions weekly; minor and patch updates
+Pull requests must also raise the version (job **Version increase**, see
+[Version bumps](#version-bumps)). Dependabot updates the pinned GitHub Actions weekly; minor and patch updates
 merge themselves once CI passes.
 
 ### Packages
@@ -499,6 +500,14 @@ see [docs/RELEASING.md](docs/RELEASING.md).
 documentation, a **minor** bump for features. A PR that bumps the version also
 adds an entry to [CHANGELOG.md](CHANGELOG.md). Tags and releases are made
 separately, only after review ([docs/RELEASING.md](docs/RELEASING.md)).
+Dependabot's pull requests are exempt: they update only the pinned GitHub
+Actions and never bump the version.
+
+CI checks this on every pull request: the job **Version increase**
+(`scripts/check-version-increase.sh`) fails unless the PR's
+`project(zterminal VERSION …)` is greater than the base branch's. It is
+skipped for Dependabot PRs and for pushes to `main`, and it is not a required
+status check.
 
 The version itself is defined **only** by `project(zterminal VERSION x.y.z)` in
 `CMakeLists.txt`. The same PR also updates the top `CHANGELOG.md` heading

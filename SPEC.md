@@ -626,7 +626,8 @@ attest-build-provenance v4.2.2, cache/restore + cache/save v6.1.0).
 
 ### 11.1 `ci.yml` — on push to `main`, every pull request, and `workflow_dispatch`
 
-Concurrency `ci-<workflow>-<ref>`, cancel in progress. Six jobs:
+Concurrency `ci-<workflow>-<ref>`, cancel in progress. Seven jobs; the first six
+are required status checks on `main` (§11.5), *Version increase* is not:
 
 | Job (check name) | Runner | What it does |
 |---|---|---|
@@ -636,6 +637,7 @@ Concurrency `ci-<workflow>-<ref>`, cancel in progress. Six jobs:
 | `sanitizers` — **Sanitizers (ASan + UBSan, ubuntu-24.04)** | ubuntu-24.04 | RelWithDebInfo, `address,undefined`; full ctest with LSan suppressions |
 | `clang-tidy` — **clang-tidy (ubuntu-24.04)** | ubuntu-24.04 | clang build, tests off; `run-clang-tidy` on `core/`, `app/`, `askpass/`; any finding fails |
 | `fuzz` — **Fuzz (libFuzzer, 60 s per harness)** | ubuntu-24.04 | five harnesses × 60 s on a copy of `fuzz/corpus/`; uploads `fuzz-crashes` on failure |
+| `version-increase` — **Version increase** (not required) | ubuntu-24.04 | Pull requests only, skipped when the PR author is `dependabot[bot]`. `fetch-depth: 0`, fetches the base branch, `scripts/check-version-increase.sh origin/<base_ref>`: fails unless the PR's `project()` version is strictly greater (`sort -V`) than the base branch's. The base ref reaches the script through `env`. Skipped on pushes to `main` and manual runs; `release.yml` does not run it |
 
 ### 11.2 `fuzz-nightly.yml`
 
@@ -661,7 +663,8 @@ See §8.2.
 - An auto-merged Dependabot PR does not trigger a push run on `main`; run
   `gh workflow run ci.yml --ref main` by hand.
 - Dependabot PRs do not bump the version; they are exempt from the every-PR
-  bump rule (§12).
+  bump rule (§12), and *Version increase* is skipped for them. A skipped job
+  doesn't block auto-merge because it isn't a required check.
 
 ### 11.5 Repository settings (outside git, read via the API on 2026-11-19)
 
@@ -709,10 +712,11 @@ See §8.2.
   prepared.
 - **Checks:** `scripts/check-version.sh` (CI job *Version consistency*, every
   push/PR) and `scripts/check-version.sh --tag vX.Y.Z` plus a CMake-cache
-  comparison in both release build jobs. These check *consistency*. A check that
-  the version actually *increased* against the base branch (job *Version
-  increase*, PR-only, Dependabot exempt, not a required check) is proposed in
-  PR #69. Until that merges, the increase is a convention only.
+  comparison in both release build jobs. These check *consistency*. CI job
+  *Version increase* (`scripts/check-version-increase.sh`, pull requests only,
+  Dependabot PRs exempt) checks that the PR's version is strictly greater than
+  the base branch's. It is **not** a required status check: a failure is shown
+  on the PR but branch protection does not block the merge on it.
 - Tags: `vX.Y.Z`, created only after merge.
 
 ## 13. Reproducing a release build
@@ -739,7 +743,7 @@ To rebuild a released version as closely as the repository allows:
 Resolved on 2026-11-19 and folded into the sections above: required status
 checks (§11.5), toolchain drift (§5.2, documented and not pinned), macOS file
 locations (§10), Dependabot exemption and enforcing the version increase
-(§12, PR #69), the changelog dating convention (§12), and the doc wording
+(§12, job *Version increase*), the changelog dating convention (§12), and the doc wording
 fixes (job count, patch count, libvterm comment, README bump wording, PLAN.md
 `ZTERMINAL_UPDATE_URL`).
 
